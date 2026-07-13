@@ -1,0 +1,225 @@
+{
+  "name": "delta-review",
+  "displayName": "Delta Review",
+  "description": "Incremental local code review: mark files reviewed and see only the delta since your last review.",
+  "version": "0.0.1",
+  "publisher": "eric",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "views": {
+      "scm": [
+        {
+          "id": "deltaReview",
+          "name": "Delta Review"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "deltaReview.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markAllReviewed",
+        "title": "Mark All Reviewed",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unmarkAllReviewed",
+        "title": "Unmark All Reviewed",
+        "icon": "$(remove)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markFileReviewed",
+        "title": "Mark Reviewed",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unmarkFileReviewed",
+        "title": "Unmark Reviewed",
+        "icon": "$(remove)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.clearReviewState",
+        "title": "Clear Review State for Current Branch",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.openFile",
+        "title": "Open File",
+        "icon": "$(go-to-file)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.viewAsTree",
+        "title": "View as Tree",
+        "icon": "$(list-tree)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.viewAsList",
+        "title": "View as List",
+        "icon": "$(list-flat)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markFolderReviewed",
+        "title": "Mark Reviewed",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unmarkFolderReviewed",
+        "title": "Unmark Reviewed",
+        "icon": "$(remove)",
+        "category": "Delta Review"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "deltaReview.viewAsTree",
+          "when": "view == deltaReview && deltaReview.viewMode == list",
+          "group": "navigation@0"
+        },
+        {
+          "command": "deltaReview.viewAsList",
+          "when": "view == deltaReview && deltaReview.viewMode == tree",
+          "group": "navigation@0"
+        },
+        {
+          "command": "deltaReview.refresh",
+          "when": "view == deltaReview",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "deltaReview.openFile",
+          "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.openFile",
+          "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)$/",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.markFileReviewed",
+          "when": "view == deltaReview && viewItem =~ /^needsReviewFile/",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.markFileReviewed",
+          "when": "view == deltaReview && viewItem =~ /^needsReviewFile/",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.unmarkFileReviewed",
+          "when": "view == deltaReview && viewItem =~ /^reviewedFile/",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.unmarkFileReviewed",
+          "when": "view == deltaReview && viewItem =~ /^reviewedFile/",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.markFolderReviewed",
+          "when": "view == deltaReview && viewItem == needsReviewFolder",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.markFolderReviewed",
+          "when": "view == deltaReview && viewItem == needsReviewFolder",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.unmarkFolderReviewed",
+          "when": "view == deltaReview && viewItem == reviewedFolder",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.unmarkFolderReviewed",
+          "when": "view == deltaReview && viewItem == reviewedFolder",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.markAllReviewed",
+          "when": "view == deltaReview && viewItem == needsReviewGroup",
+          "group": "inline"
+        },
+        {
+          "command": "deltaReview.unmarkAllReviewed",
+          "when": "view == deltaReview && viewItem == reviewedGroup",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "deltaReview.openDiff",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.openFile",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markFolderReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unmarkFolderReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markFileReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unmarkFileReviewed",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Delta Review",
+      "properties": {
+        "deltaReview.baseBranch": {
+          "type": "string",
+          "default": "main",
+          "description": "Branch the review set is computed against (merge-base with HEAD)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "vscode:prepublish": "yarn build",
+    "package": "vsce package -o delta-review.vsix --allow-missing-repository --no-dependencies",
+    "install-ext": "yarn package && sh scripts/install-ext.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.5.0"
+  }
+}

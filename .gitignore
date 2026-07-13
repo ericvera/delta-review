@@ -1,0 +1,17 @@
+node_modules/
+out/
+*.vsix
+
+# Yarn Berry — keep releases/plugins/patches, ignore caches and state
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# VS Code extension test harness downloads
+.vscode-test/
+
+# macOS
+.DS_Store
