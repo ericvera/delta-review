@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Git, parseLsTreeOutput, splitNulTerminated } from "./git";
 import { DELETED_SENTINEL_CONTENT, readReviewState } from "./reviewState";
+import { computeTriage, Triage } from "./triage";
 
 export enum FileReviewStatus {
   NeedsReview = "needs-review",
@@ -20,6 +21,9 @@ export interface ReviewFile {
   diffBaseIsReviewedSnapshot: boolean;
   // Blob sha for the left side of the diff; undefined renders as empty (new file)
   diffBaseSha: string | undefined;
+  // "auto" when the file is mechanical (matches an auto-review glob or is
+  // linguist-generated); "normal" otherwise
+  triage: Triage;
 }
 
 export interface ReviewModel {
@@ -28,6 +32,36 @@ export interface ReviewModel {
   files: ReviewFile[];
 }
 
+// Returns the set of paths marked `linguist-generated` in .gitattributes.
+// Attribute lookup is best-effort: any failure yields an empty set rather
+// than breaking the model.
+const fetchGeneratedPaths = async (
+  git: Git,
+  paths: string[],
+): Promise<Set<string>> => {
+  if (paths.length === 0) {
+    return new Set();
+  }
+  try {
+    const output = await git.run(
+      ["check-attr", "--stdin", "-z", "linguist-generated"],
+      { stdin: paths.join("\0") },
+    );
+    // -z output is a flat NUL-separated sequence of <path, attr, value> triplets
+    const entries = splitNulTerminated(output);
+    const generated = new Set<string>();
+    for (let index = 0; index + 2 < entries.length; index += 3) {
+      const value = entries[index + 2];
+      if (value === "set" || value === "true") {
+        generated.add(entries[index]);
+      }
+    }
+    return generated;
+  } catch {
+    return new Set();
+  }
+};
+
 // Computes the review set: every file that differs between the merge base and
 // the working tree (plus untracked files), with its review status derived by
 // comparing working-tree content against the reviewed snapshot. Content that
@@ -35,6 +69,7 @@ export interface ReviewModel {
 export const computeReviewModel = async (
   git: Git,
   baseBranch: string,
+  options?: { autoReviewGlobs?: string[] },
 ): Promise<ReviewModel> => {
   const branch = (await git.run(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
 
@@ -66,6 +101,13 @@ export const computeReviewModel = async (
       ...splitNulTerminated(untrackedOutput),
     ]),
   ].sort();
+
+  const generatedPaths = await fetchGeneratedPaths(git, paths);
+  const triageByPath = computeTriage(
+    paths,
+    options?.autoReviewGlobs ?? [],
+    generatedPaths,
+  );
 
   const reviewState = await readReviewState(git, branch);
   const baseBlobs = parseLsTreeOutput(
@@ -110,6 +152,7 @@ export const computeReviewModel = async (
       existsInMergeBase: baseBlobs.has(path),
       diffBaseIsReviewedSnapshot: useSnapshotBase,
       diffBaseSha: useSnapshotBase ? reviewedSha : baseBlobs.get(path),
+      triage: triageByPath.get(path) ?? "normal",
     };
   });
 

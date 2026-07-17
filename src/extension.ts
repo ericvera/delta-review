@@ -122,12 +122,14 @@ export const activate = async (
       statusBarItem.hide();
       return;
     }
-    const baseBranch =
-      vscode.workspace
-        .getConfiguration("deltaReview")
-        .get<string>("baseBranch") ?? "main";
+    const configuration = vscode.workspace.getConfiguration("deltaReview");
+    const baseBranch = configuration.get<string>("baseBranch") ?? "main";
+    const autoReviewGlobs =
+      configuration.get<string[]>("autoReview.globs") ?? [];
     try {
-      const computed = await computeReviewModel(git, baseBranch);
+      const computed = await computeReviewModel(git, baseBranch, {
+        autoReviewGlobs,
+      });
       if (generation !== refreshGeneration) {
         return;
       }

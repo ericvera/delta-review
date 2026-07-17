@@ -205,6 +205,19 @@
           "type": "string",
           "default": "main",
           "description": "Branch the review set is computed against (merge-base with HEAD)."
+        },
+        "deltaReview.autoReview.globs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns for mechanical files to auto-review (e.g. **/*.lock, dist/**). Files marked linguist-generated in .gitattributes are always included."
+        },
+        "deltaReview.autoReview.markAutomatically": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically mark auto-review files as reviewed when they change."
         }
       }
     }
