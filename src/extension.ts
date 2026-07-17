@@ -50,8 +50,13 @@ export const activate = async (
     viewMode,
   );
 
+  // Two persistence conventions share the collapsed set: default-expanded
+  // elements (groups, folders) store their key while collapsed; default-
+  // collapsed elements (Auto subgroups) store `expanded:<key>` while expanded,
+  // so an absent key means collapsed.
   const treeProvider = new ReviewTreeProvider(
-    (key) => collapsed.has(key),
+    (key, defaultCollapsed) =>
+      defaultCollapsed ? !collapsed.has(`expanded:${key}`) : collapsed.has(key),
     () => viewMode,
   );
   const treeView = vscode.window.createTreeView("deltaReview", {
@@ -71,16 +76,26 @@ export const activate = async (
 
   context.subscriptions.push(
     treeView.onDidCollapseElement((event) => {
-      if (event.element.kind !== "file") {
-        collapsed.add(collapseKeyFor(event.element));
-        persistCollapsed();
+      if (event.element.kind === "file") {
+        return;
       }
+      if (event.element.kind === "autoGroup") {
+        collapsed.delete(`expanded:${collapseKeyFor(event.element)}`);
+      } else {
+        collapsed.add(collapseKeyFor(event.element));
+      }
+      persistCollapsed();
     }),
     treeView.onDidExpandElement((event) => {
-      if (event.element.kind !== "file") {
-        collapsed.delete(collapseKeyFor(event.element));
-        persistCollapsed();
+      if (event.element.kind === "file") {
+        return;
       }
+      if (event.element.kind === "autoGroup") {
+        collapsed.add(`expanded:${collapseKeyFor(event.element)}`);
+      } else {
+        collapsed.delete(collapseKeyFor(event.element));
+      }
+      persistCollapsed();
     }),
     vscode.commands.registerCommand("deltaReview.viewAsTree", () =>
       setViewMode("tree"),
@@ -338,6 +353,56 @@ export const activate = async (
             (file) =>
               file.status === FileReviewStatus.Reviewed &&
               file.path.startsWith(`${element.path}/`),
+          )
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await unmarkReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.markAutoReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          element?.kind !== "autoGroup"
+        ) {
+          return;
+        }
+        const paths = model.files
+          .filter(
+            (file) =>
+              file.triage === "auto" &&
+              file.status === FileReviewStatus.NeedsReview,
+          )
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await markReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.unmarkAutoReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          element?.kind !== "autoGroup"
+        ) {
+          return;
+        }
+        const paths = model.files
+          .filter(
+            (file) =>
+              file.triage === "auto" &&
+              file.status === FileReviewStatus.Reviewed,
           )
           .map((file) => file.path);
         if (paths.length === 0) {

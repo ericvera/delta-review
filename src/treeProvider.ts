@@ -2,11 +2,17 @@ import { dirname } from "node:path";
 import * as vscode from "vscode";
 import { createReviewFolderUri, createReviewItemUri } from "./decorations";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
+import { Triage } from "./triage";
 
 export type ViewMode = "list" | "tree";
 
 interface GroupElement {
   kind: "group";
+  status: FileReviewStatus;
+}
+
+interface AutoGroupElement {
+  kind: "autoGroup";
   status: FileReviewStatus;
 }
 
@@ -20,18 +26,28 @@ interface FolderElement {
 interface FileElement {
   kind: "file";
   file: ReviewFile;
+  // Set on children of an Auto subgroup: they render flat in both layouts,
+  // so the row shows the directory even in tree mode
+  inAutoGroup?: true;
 }
 
-export type ReviewTreeElement = GroupElement | FolderElement | FileElement;
+export type ReviewTreeElement =
+  GroupElement | AutoGroupElement | FolderElement | FileElement;
 
 // Stable key for persisting collapse state. Groups keep the bare status value
 // for compatibility with previously stored state.
 export const collapseKeyFor = (
-  element: GroupElement | FolderElement,
-): string =>
-  element.kind === "group"
-    ? element.status
-    : `folder:${element.status}:${element.path}`;
+  element: GroupElement | AutoGroupElement | FolderElement,
+): string => {
+  switch (element.kind) {
+    case "group":
+      return element.status;
+    case "autoGroup":
+      return `autoGroup:${element.status}`;
+    case "folder":
+      return `folder:${element.status}:${element.path}`;
+  }
+};
 
 export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeElement> {
   private model: ReviewModel | undefined;
@@ -41,7 +57,10 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
   constructor(
-    private readonly isCollapsed: (key: string) => boolean,
+    private readonly isCollapsed: (
+      key: string,
+      defaultCollapsed: boolean,
+    ) => boolean,
     private readonly getViewMode: () => ViewMode,
   ) {}
 
@@ -65,12 +84,29 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       ];
     }
     if (element.kind === "group") {
+      // Auto-triaged files render in their own subgroup, first; the regular
+      // list/tree rendering below sees only the non-auto files. With no auto
+      // files the output is identical to a build without the subgroup.
+      const children: ReviewTreeElement[] =
+        this.filesWithStatus(element.status, "auto").length > 0
+          ? [{ kind: "autoGroup", status: element.status }]
+          : [];
       if (this.getViewMode() === "list") {
-        return this.filesWithStatus(element.status).map(
-          (file): FileElement => ({ kind: "file", file }),
+        children.push(
+          ...this.filesWithStatus(element.status, "normal").map(
+            (file): FileElement => ({ kind: "file", file }),
+          ),
         );
+      } else {
+        children.push(...this.treeChildren(element.status, ""));
       }
-      return this.treeChildren(element.status, "");
+      return children;
+    }
+    if (element.kind === "autoGroup") {
+      // Auto contents are always a flat list, in both layouts
+      return this.filesWithStatus(element.status, "auto").map(
+        (file): FileElement => ({ kind: "file", file, inAutoGroup: true }),
+      );
     }
     if (element.kind === "folder") {
       return this.treeChildren(element.status, element.path);
@@ -79,7 +115,9 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
   }
 
   // Immediate children of a directory in tree mode: subfolders first, then
-  // files, each alphabetical (same ordering as the built-in CHANGES tree)
+  // files, each alphabetical (same ordering as the built-in CHANGES tree).
+  // Auto files never appear in the folder tree — they live in the flat Auto
+  // subgroup instead.
   private treeChildren(
     status: FileReviewStatus,
     parentPath: string,
@@ -87,7 +125,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     const prefix = parentPath === "" ? "" : `${parentPath}/`;
     const folderNames = new Set<string>();
     const directFiles: ReviewFile[] = [];
-    for (const file of this.filesWithStatus(status)) {
+    for (const file of this.filesWithStatus(status, "normal")) {
       if (!file.path.startsWith(prefix)) {
         continue;
       }
@@ -119,7 +157,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       // the user's last toggle has to be replayed here to stick
       const item = new vscode.TreeItem(
         label,
-        this.isCollapsed(collapseKeyFor(element))
+        this.isCollapsed(collapseKeyFor(element), false)
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.Expanded,
       );
@@ -134,12 +172,35 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       return item;
     }
 
+    if (element.kind === "autoGroup") {
+      // Collapsed by default: mechanical files are noise until the reviewer
+      // asks for them
+      const item = new vscode.TreeItem(
+        "Auto",
+        this.isCollapsed(collapseKeyFor(element), true)
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.iconPath = new vscode.ThemeIcon("gear");
+      item.description = String(
+        this.filesWithStatus(element.status, "auto").length,
+      );
+      item.id = `autoGroup:${element.status}`;
+      item.contextValue =
+        element.status === FileReviewStatus.NeedsReview
+          ? "needsReviewAutoGroup"
+          : "reviewedAutoGroup";
+      item.tooltip =
+        "Files matching deltaReview.autoReview.globs or marked linguist-generated in .gitattributes";
+      return item;
+    }
+
     if (element.kind === "folder") {
       // Private scheme keeps git's propagated "contains changes" dot off the
       // rows — folders carry no badge, like the CHANGES tree
       const item = new vscode.TreeItem(
         createReviewFolderUri(element.path),
-        this.isCollapsed(collapseKeyFor(element))
+        this.isCollapsed(collapseKeyFor(element), false)
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.Expanded,
       );
@@ -166,12 +227,13 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     item.contextValue = file.deleted ? `${statusValue}Deleted` : statusValue;
 
     // In tree mode the hierarchy already conveys the directory; deletion is
-    // conveyed by the D decoration
+    // conveyed by the D decoration. Auto-subgroup rows are flat in both
+    // layouts, so they always need the location.
     const directory = dirname(file.path);
+    const showDirectory =
+      element.inAutoGroup === true || this.getViewMode() === "list";
     item.description =
-      this.getViewMode() === "list" && directory !== "."
-        ? directory
-        : undefined;
+      showDirectory && directory !== "." ? directory : undefined;
     // Hover always leads with the full repo-relative path (the row usually
     // truncates it), with any status notes on separate lines
     const tooltip = new vscode.MarkdownString();
@@ -191,10 +253,19 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     return item;
   }
 
-  private filesWithStatus(status: FileReviewStatus): ReviewFile[] {
+  // Files with the given status, optionally narrowed to one triage class.
+  // model.files is pre-sorted by path, so results stay alphabetical.
+  private filesWithStatus(
+    status: FileReviewStatus,
+    triage?: Triage,
+  ): ReviewFile[] {
     if (this.model === undefined) {
       return [];
     }
-    return this.model.files.filter((file) => file.status === status);
+    return this.model.files.filter(
+      (file) =>
+        file.status === status &&
+        (triage === undefined || file.triage === triage),
+    );
   }
 }

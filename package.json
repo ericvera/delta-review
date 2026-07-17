@@ -89,6 +89,18 @@
         "title": "Unmark Reviewed",
         "icon": "$(remove)",
         "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markAutoReviewed",
+        "title": "Mark Reviewed",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unmarkAutoReviewed",
+        "title": "Unmark Reviewed",
+        "icon": "$(remove)",
+        "category": "Delta Review"
       }
     ],
     "menus": {
@@ -161,6 +173,26 @@
           "group": "navigation"
         },
         {
+          "command": "deltaReview.markAutoReviewed",
+          "when": "view == deltaReview && viewItem == needsReviewAutoGroup",
+          "group": "inline"
+        },
+        {
+          "command": "deltaReview.markAutoReviewed",
+          "when": "view == deltaReview && viewItem == needsReviewAutoGroup",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.unmarkAutoReviewed",
+          "when": "view == deltaReview && viewItem == reviewedAutoGroup",
+          "group": "inline"
+        },
+        {
+          "command": "deltaReview.unmarkAutoReviewed",
+          "when": "view == deltaReview && viewItem == reviewedAutoGroup",
+          "group": "navigation"
+        },
+        {
           "command": "deltaReview.markAllReviewed",
           "when": "view == deltaReview && viewItem == needsReviewGroup",
           "group": "inline"
@@ -194,6 +226,14 @@
         },
         {
           "command": "deltaReview.unmarkFileReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markAutoReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unmarkAutoReviewed",
           "when": "false"
         }
       ]
