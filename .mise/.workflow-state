@@ -3,6 +3,7 @@
   "approved": {
     "goals": "3af71eb3616c1e8f1a31fee106d05b011a899a84",
     "mock": "5b1960a839989622f496dfbf975cc069bf470780",
-    "requirements": "3079fa9c54710d51399978bb21f33cb5f65493db"
+    "requirements": "3079fa9c54710d51399978bb21f33cb5f65493db",
+    "plan": "ba75f31ed3aa2d2b991ff8ea99a5c620656d3f2b"
   }
 }
