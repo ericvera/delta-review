@@ -123,8 +123,8 @@
   <div class="scenario">
     <h2><span class="sid">1A</span>Grouped · list mode · mid-review</h2>
     <p class="desc">Main proposal. Reviewed files have left their clusters for the Reviewed
-    bucket at the bottom. "Tests" is fully reviewed: header stays with 3/3 and shows a dim
-    message row. Reviewed auto files (yarn.lock) sit in a collapsed Auto subgroup inside Reviewed.</p>
+    bucket at the bottom — one flat list, no subgrouping: reviewed auto files (yarn.lock) sit
+    right alongside. "Tests" is fully reviewed: header stays with 3/3 and shows a dim message row.</p>
     <div class="window">
       <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-tree"/></svg></div>
 
@@ -147,13 +147,13 @@
       <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1/3</span></div>
 
       <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#check"/></svg></span><span class="label">Reviewed</span><span class="desc grow">7</span></div>
-      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">auth.md</span><span class="desc grow">docs</span><span class="letter A">A</span></div>
-      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">index.ts</span><span class="desc grow">src/routes</span><span class="letter M">M</span></div>
       <div class="row i1 muted sim-hover"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">login.test.ts</span><span class="desc grow">src/auth</span><span class="actions"><svg><use href="#go-to-file"/></svg><svg><use href="#remove"/></svg></span><span class="letter A">A</span></div>
-      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">requireAuth.test.ts</span><span class="desc grow">src/middleware</span><span class="letter A">A</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.test.ts</span><span class="desc grow">src/auth</span><span class="letter A">A</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.ts</span><span class="desc grow">src/auth</span><span class="letter M">M</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">requireAuth.test.ts</span><span class="desc grow">src/middleware</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">index.ts</span><span class="desc grow">src/routes</span><span class="letter M">M</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">yarn.lock</span><span class="desc grow"></span><span class="letter M">M</span></div>
       <div class="divider"></div>
     </div>
     <p class="note">Hovered rows show inline actions: <em>Open File</em> and <code>+</code> (mark reviewed)
@@ -168,13 +168,13 @@
     <div class="window">
       <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-tree"/></svg></div>
       <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#check"/></svg></span><span class="label">Reviewed</span><span class="desc grow">7</span></div>
-      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">auth.md</span><span class="desc grow">Unclustered · docs</span><span class="letter A">A</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">index.ts</span><span class="desc grow">Auth flow · src/routes</span><span class="letter M">M</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">login.test.ts</span><span class="desc grow">Tests · src/auth</span><span class="letter A">A</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">requireAuth.test.ts</span><span class="desc grow">Tests · src/middleware</span><span class="letter A">A</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.test.ts</span><span class="desc grow">Tests · src/auth</span><span class="letter A">A</span></div>
       <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.ts</span><span class="desc grow">Auth flow · src/auth</span><span class="letter M">M</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">yarn.lock</span><span class="desc grow">Auto</span><span class="letter M">M</span></div>
       <div class="divider"></div>
     </div>
   </div>
@@ -183,8 +183,8 @@
   <div class="scenario">
     <h2><span class="sid">2</span>Grouped · tree mode</h2>
     <p class="desc">The Reviewed bucket honors the list/tree toggle: in tree mode its files
-    render as a directory tree (clusters do too, as today). The inner Auto subgroup stays flat,
-    matching the ungrouped view.</p>
+    render as one directory tree (clusters do too, as today) — no subgrouping; reviewed auto
+    files appear in the same tree.</p>
     <div class="window">
       <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-flat"/></svg></div>
 
@@ -201,7 +201,6 @@
       <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1/3</span></div>
 
       <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#check"/></svg></span><span class="label">Reviewed</span><span class="desc grow">7</span></div>
-      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1</span></div>
       <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">docs</span></div>
       <div class="row i2 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">auth.md</span><span class="desc grow"></span><span class="letter A">A</span></div>
       <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">src</span></div>
@@ -211,6 +210,7 @@
       <div class="row i3 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.ts</span><span class="desc grow"></span><span class="letter M">M</span></div>
       <div class="row i2 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">middleware</span></div>
       <div class="row i2 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">routes</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">yarn.lock</span><span class="desc grow"></span><span class="letter M">M</span></div>
       <div class="divider"></div>
     </div>
     <p class="note">Folder rows use your icon theme's folder icons in the real view; generic

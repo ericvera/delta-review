@@ -18,8 +18,6 @@ the cluster view should have a Reviewed bucket so that any reviewed item moves o
 
 - **Reviewed bucket in the grouped view** — not truly new to the user: it reuses the ungrouped view's existing Reviewed group concept (same label, same `−` unmark affordance), now present under cluster grouping.
 - **"All files reviewed." message row** — new state text inside a fully reviewed cluster; reuses the existing dim message-row pattern ("No files from this cluster are in the current change.").
-- Auto subgroup inside Reviewed mirrors the ungrouped Reviewed → Auto subgroup; no new concept.
-
 ## UI Tweaks Log
 
-- (none yet)
+- Requested: no further grouping inside the Reviewed bucket — drop the Auto subgroup. Changed: 1A/1B/2 now show reviewed auto files (yarn.lock) inline in the single flat list / tree; the Auto-subgroup rows were removed from all Reviewed buckets.
