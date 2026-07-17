@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Delta Review — Reviewed bucket in cluster view (mocks)</title>
+<style>
+  :root {
+    --bg: #131313;
+    --panel: #1e1e1e;
+    --panel-header: #1e1e1e;
+    --fg: #cccccc;
+    --dim: #8c8c8c;
+    --dimmer: #6e6e6e;
+    --hover: #2a2d2e;
+    --border: #333333;
+    --mod: #e2c08d;
+    --add: #81b88b;
+    --ren: #73c991;
+    --warn: #cca700;
+    --muted: #7f7f7f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.4 -apple-system, "Segoe UI", Ubuntu, sans-serif;
+    padding: 24px;
+  }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  p.intro { color: var(--dim); margin: 0 0 24px; max-width: 72em; }
+  .scenarios { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .scenario { width: 340px; }
+  .scenario h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+  .scenario h2 .sid {
+    display: inline-block; background: #0e639c; color: #fff; border-radius: 3px;
+    padding: 0 6px; margin-right: 6px; font-size: 11px; line-height: 18px;
+  }
+  .scenario p.desc { color: var(--dim); font-size: 12px; margin: 0 0 8px; }
+
+  .window {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 4px 14px rgba(0,0,0,.4);
+  }
+  .view-title {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px 5px;
+    font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    color: #bbbbbb;
+  }
+  .view-title .spacer { flex: 1; }
+  .view-title svg { width: 16px; height: 16px; fill: #cccccc; opacity: .85; }
+
+  .row {
+    display: flex; align-items: center;
+    height: 22px; padding-right: 8px;
+    white-space: nowrap; overflow: hidden;
+    cursor: default;
+  }
+  .row:hover { background: var(--hover); }
+  .row.sim-hover { background: var(--hover); }
+  .twisty { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .twisty svg { width: 16px; height: 16px; fill: var(--fg); }
+  .icon { width: 16px; height: 16px; flex: none; margin-right: 5px; display: flex; align-items: center; justify-content: center; }
+  .icon svg { width: 15px; height: 15px; fill: #c5c5c5; }
+  .icon.warn svg { fill: var(--warn); }
+  .icon.file svg { fill: #75beff; opacity: .85; }
+  .label { flex: none; }
+  .label.warn { color: var(--warn); }
+  .desc { color: var(--dim); font-size: 12px; margin-left: 7px; overflow: hidden; text-overflow: ellipsis; }
+  .row.muted .label, .row.muted .icon svg { color: var(--muted); fill: var(--muted); opacity: .9; }
+  .row.muted .desc { color: var(--dimmer); }
+  .grow { flex: 1; min-width: 0; }
+  .letter { flex: none; width: 16px; text-align: center; font-size: 12px; margin-left: 4px; }
+  .letter.M { color: var(--mod); } .letter.A { color: var(--add); } .letter.R { color: var(--ren); }
+  .row.muted .letter { opacity: .55; }
+  .actions { display: none; flex: none; gap: 2px; margin-left: 6px; }
+  .row.sim-hover .actions { display: flex; }
+  .actions svg { width: 16px; height: 16px; fill: #c5c5c5; padding: 1px; border-radius: 3px; }
+  .actions svg:hover { background: #37373d; }
+  .msg { color: var(--dimmer); font-style: italic; }
+  /* indent levels: header=0, child=1, grandchild=2, great=3 */
+  .i0 { padding-left: 4px; } .i1 { padding-left: 20px; } .i2 { padding-left: 36px; } .i3 { padding-left: 52px; }
+  .note { color: var(--dim); font-size: 11px; margin: 6px 2px 0; }
+  .divider { height: 10px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="chev-down" viewBox="0 0 16 16"><path d="M3.7 5.3 8 9.6l4.3-4.3.7.7-5 5-5-5z"/></symbol>
+    <symbol id="chev-right" viewBox="0 0 16 16"><path d="M5.3 3.7 9.6 8l-4.3 4.3.7.7 5-5-5-5z"/></symbol>
+    <symbol id="layers" viewBox="0 0 16 16"><path d="M8 1.5 14.5 5 8 8.5 1.5 5 8 1.5zM2.9 7.2 8 9.9l5.1-2.7 1.4.8L8 11.5 1.5 8l1.4-.8zm0 3L8 12.9l5.1-2.7 1.4.8L8 14.5 1.5 11l1.4-.8z"/></symbol>
+    <symbol id="warning" viewBox="0 0 16 16"><path d="M8 1.5 15.3 14H.7L8 1.5zm0 2L2.4 12.8h11.2L8 3.5zM7.4 6h1.2v3.8H7.4V6zm0 4.8h1.2V12H7.4v-1.2z"/></symbol>
+    <symbol id="gear" viewBox="0 0 16 16"><path d="M9.1 1.3l.4 1.8c.4.1.8.3 1.1.6l1.7-.7 1.1 1.9-1.3 1.2c.1.4.1.8 0 1.2l1.3 1.2-1.1 1.9-1.7-.7c-.3.3-.7.5-1.1.6l-.4 1.8H6.9l-.4-1.8c-.4-.1-.8-.3-1.1-.6l-1.7.7-1.1-1.9 1.3-1.2c-.1-.4-.1-.8 0-1.2L2.6 4.9l1.1-1.9 1.7.7c.3-.3.7-.5 1.1-.6l.4-1.8h2.2zM8 5.8A2.2 2.2 0 1 0 8 10.2 2.2 2.2 0 0 0 8 5.8z"/></symbol>
+    <symbol id="check" viewBox="0 0 16 16"><path d="M6.3 11.7 2.6 8l.9-.9 2.8 2.8 6.2-6.2.9.9z"/></symbol>
+    <symbol id="add" viewBox="0 0 16 16"><path d="M8.6 3v4.4H13v1.2H8.6V13H7.4V8.6H3V7.4h4.4V3z"/></symbol>
+    <symbol id="remove" viewBox="0 0 16 16"><path d="M3 7.4h10v1.2H3z"/></symbol>
+    <symbol id="go-to-file" viewBox="0 0 16 16"><path d="M4 1.5h5.5L13 5v9.5H4V13h1v.5h7v-8H9V3H5v2H4V1.5zM10 3.2V4.5h1.3L10 3.2zM1.5 8.4h6.2L5.9 6.6l.8-.8 3.2 3.2-3.2 3.2-.8-.8 1.8-1.8H1.5v-1.2z"/></symbol>
+    <symbol id="file" viewBox="0 0 16 16"><path d="M4 1.5h5.5L13 5v9.5H4V1.5zM5 2.5v11h7v-8H9V3H5zm5 .7V4.5h1.3L10 3.2z"/></symbol>
+    <symbol id="list-flat" viewBox="0 0 16 16"><path d="M2 3.5h12v1.2H2zM2 7.4h12v1.2H2zM2 11.3h12v1.2H2z"/></symbol>
+    <symbol id="list-tree" viewBox="0 0 16 16"><path d="M3 2.5h1.2V13H3zM6 4h8v1.2H6zM6 7.4h8v1.2H6zM6 10.8h8v1.2H6z"/></symbol>
+  </defs>
+</svg>
+
+<h1>Delta Review — Reviewed bucket in the cluster view</h1>
+<p class="intro">
+  Grouped (cluster) mode gains a <strong>Reviewed</strong> bucket at the bottom of the view.
+  Marking a file reviewed moves its row out of its cluster into Reviewed (unmarking or editing
+  it moves it back — everything stays derived from content). Clusters keep their
+  <code>reviewed/total</code> counts, so per-cluster progress is still visible.
+  The ungrouped view is unchanged. Rows with visible <code>+</code>/<code>−</code>/open icons
+  simulate mouse hover.
+</p>
+
+<div class="scenarios">
+
+  <!-- ─────────────────────────── Scenario 1A ─────────────────────────── -->
+  <div class="scenario">
+    <h2><span class="sid">1A</span>Grouped · list mode · mid-review</h2>
+    <p class="desc">Main proposal. Reviewed files have left their clusters for the Reviewed
+    bucket at the bottom. "Tests" is fully reviewed: header stays with 3/3 and shows a dim
+    message row. Reviewed auto files (yarn.lock) sit in a collapsed Auto subgroup inside Reviewed.</p>
+    <div class="window">
+      <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-tree"/></svg></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Auth flow</span><span class="desc grow">2/5</span></div>
+      <div class="row i1 sim-hover"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">login.ts</span><span class="desc grow">src/auth</span><span class="actions"><svg><use href="#go-to-file"/></svg><svg><use href="#add"/></svg></span><span class="letter A">A</span></div>
+      <div class="row i1"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">logout.ts</span><span class="desc grow">src/auth</span><span class="letter A">A</span></div>
+      <div class="row i1"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">requireAuth.ts</span><span class="desc grow">src/middleware</span><span class="letter A">A</span></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Settings UI</span><span class="desc grow">0/3</span></div>
+      <div class="row i1"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">accountSection.tsx</span><span class="desc grow">src/settings</span><span class="letter A">A</span></div>
+      <div class="row i1"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">panel.tsx</span><span class="desc grow">src/settings</span><span class="letter M">M</span></div>
+      <div class="row i1"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">styles.css</span><span class="desc grow">src/settings</span><span class="letter M">M</span></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Tests</span><span class="desc grow">3/3</span></div>
+      <div class="row i1"><span class="twisty"></span><span class="label msg">All files reviewed.</span></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon warn"><svg><use href="#warning"/></svg></span><span class="label warn">Unclustered</span><span class="desc grow">1/2</span></div>
+      <div class="row i1"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">README.md</span><span class="desc grow"></span><span class="letter M">M</span></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1/3</span></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#check"/></svg></span><span class="label">Reviewed</span><span class="desc grow">7</span></div>
+      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">auth.md</span><span class="desc grow">docs</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">index.ts</span><span class="desc grow">src/routes</span><span class="letter M">M</span></div>
+      <div class="row i1 muted sim-hover"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">login.test.ts</span><span class="desc grow">src/auth</span><span class="actions"><svg><use href="#go-to-file"/></svg><svg><use href="#remove"/></svg></span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">requireAuth.test.ts</span><span class="desc grow">src/middleware</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.test.ts</span><span class="desc grow">src/auth</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.ts</span><span class="desc grow">src/auth</span><span class="letter M">M</span></div>
+      <div class="divider"></div>
+    </div>
+    <p class="note">Hovered rows show inline actions: <em>Open File</em> and <code>+</code> (mark reviewed)
+    in clusters, <code>−</code> (unmark) in Reviewed. Reviewed rows keep the muted color.</p>
+  </div>
+
+  <!-- ─────────────────────────── Scenario 1B ─────────────────────────── -->
+  <div class="scenario">
+    <h2><span class="sid">1B</span>Variant: origin cluster in Reviewed rows</h2>
+    <p class="desc">Same as 1A, but each Reviewed row's description leads with the cluster it
+    came from, so "what did I review this under" stays visible. (Only the Reviewed bucket shown.)</p>
+    <div class="window">
+      <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-tree"/></svg></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#check"/></svg></span><span class="label">Reviewed</span><span class="desc grow">7</span></div>
+      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">auth.md</span><span class="desc grow">Unclustered · docs</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">index.ts</span><span class="desc grow">Auth flow · src/routes</span><span class="letter M">M</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">login.test.ts</span><span class="desc grow">Tests · src/auth</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">requireAuth.test.ts</span><span class="desc grow">Tests · src/middleware</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.test.ts</span><span class="desc grow">Tests · src/auth</span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.ts</span><span class="desc grow">Auth flow · src/auth</span><span class="letter M">M</span></div>
+      <div class="divider"></div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────── Scenario 2 ─────────────────────────── -->
+  <div class="scenario">
+    <h2><span class="sid">2</span>Grouped · tree mode</h2>
+    <p class="desc">The Reviewed bucket honors the list/tree toggle: in tree mode its files
+    render as a directory tree (clusters do too, as today). The inner Auto subgroup stays flat,
+    matching the ungrouped view.</p>
+    <div class="window">
+      <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-flat"/></svg></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Auth flow</span><span class="desc grow">2/5</span></div>
+      <div class="row i1"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">src</span></div>
+      <div class="row i2"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">auth</span></div>
+      <div class="row i3"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">login.ts</span><span class="desc grow"></span><span class="letter A">A</span></div>
+      <div class="row i3"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">logout.ts</span><span class="desc grow"></span><span class="letter A">A</span></div>
+      <div class="row i2"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">middleware</span></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Settings UI</span><span class="desc grow">0/3</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Tests</span><span class="desc grow">3/3</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon warn"><svg><use href="#warning"/></svg></span><span class="label warn">Unclustered</span><span class="desc grow">1/2</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1/3</span></div>
+
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#check"/></svg></span><span class="label">Reviewed</span><span class="desc grow">7</span></div>
+      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">1</span></div>
+      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">docs</span></div>
+      <div class="row i2 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">auth.md</span><span class="desc grow"></span><span class="letter A">A</span></div>
+      <div class="row i1 muted"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">src</span></div>
+      <div class="row i2 muted"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">auth</span></div>
+      <div class="row i3 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">login.test.ts</span><span class="desc grow"></span><span class="letter A">A</span></div>
+      <div class="row i3 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.test.ts</span><span class="desc grow"></span><span class="letter A">A</span></div>
+      <div class="row i3 muted"><span class="twisty"></span><span class="icon file"><svg><use href="#file"/></svg></span><span class="label">session.ts</span><span class="desc grow"></span><span class="letter M">M</span></div>
+      <div class="row i2 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">middleware</span></div>
+      <div class="row i2 muted"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#file"/></svg></span><span class="label">routes</span></div>
+      <div class="divider"></div>
+    </div>
+    <p class="note">Folder rows use your icon theme's folder icons in the real view; generic
+    icons shown here.</p>
+  </div>
+
+  <!-- ─────────────────────────── Scenario 3 ─────────────────────────── -->
+  <div class="scenario">
+    <h2><span class="sid">3A</span>Nothing reviewed yet — bucket visible at 0</h2>
+    <p class="desc">Fresh start. The Reviewed bucket is present with count 0, teaching where
+    rows will go (recommended — mirrors the ungrouped view's always-present Reviewed group).</p>
+    <div class="window">
+      <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-tree"/></svg></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Auth flow</span><span class="desc grow">0/5</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Settings UI</span><span class="desc grow">0/3</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Tests</span><span class="desc grow">0/3</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon warn"><svg><use href="#warning"/></svg></span><span class="label warn">Unclustered</span><span class="desc grow">0/2</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">3</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-down"/></svg></span><span class="icon"><svg><use href="#check"/></svg></span><span class="label">Reviewed</span><span class="desc grow">0</span></div>
+      <div class="divider"></div>
+    </div>
+
+    <h2 style="margin-top:16px"><span class="sid">3B</span>Variant: bucket hidden until non-empty</h2>
+    <p class="desc">Same state, but Reviewed only appears once the first file is reviewed
+    (like Unclustered/Auto hide when empty).</p>
+    <div class="window">
+      <div class="view-title">DELTA REVIEW<span class="spacer"></span><svg><use href="#list-tree"/></svg></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Auth flow</span><span class="desc grow">0/5</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Settings UI</span><span class="desc grow">0/3</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#layers"/></svg></span><span class="label">Tests</span><span class="desc grow">0/3</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon warn"><svg><use href="#warning"/></svg></span><span class="label warn">Unclustered</span><span class="desc grow">0/2</span></div>
+      <div class="row i0"><span class="twisty"><svg><use href="#chev-right"/></svg></span><span class="icon"><svg><use href="#gear"/></svg></span><span class="label">Auto</span><span class="desc grow">3</span></div>
+      <div class="divider"></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
