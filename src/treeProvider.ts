@@ -403,19 +403,34 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       element.alwaysFlat === true || this.getViewMode() === "list";
     const directoryText =
       showDirectory && directory !== "." ? directory : undefined;
+    // Moves show their origin like the built-in git view's staged renames:
+    // "<dir> ← <old>" when the directory is shown, bare "← <old>" otherwise
+    const movedText =
+      file.movedFrom !== undefined ? `← ${file.movedFrom}` : undefined;
+    const locationText =
+      movedText !== undefined
+        ? directoryText !== undefined
+          ? `${directoryText} ${movedText}`
+          : movedText
+        : directoryText;
     // Under cluster grouping, reviewed files stay visible in place; the ✓
     // (plus the muted decoration color) is what marks them as done
     const reviewedMark =
       element.grouped === true && file.status === FileReviewStatus.Reviewed;
     item.description = reviewedMark
-      ? directoryText !== undefined
-        ? `${directoryText} ✓`
+      ? locationText !== undefined
+        ? `${locationText} ✓`
         : "✓"
-      : directoryText;
+      : locationText;
     // Hover always leads with the full repo-relative path (the row usually
     // truncates it), with any status notes on separate lines
     const tooltip = new vscode.MarkdownString();
     tooltip.appendCodeblock(file.path, "text");
+    // Paragraph break so a following note (move + edit since last review)
+    // renders on its own line
+    if (file.movedFrom !== undefined) {
+      tooltip.appendMarkdown(`Moved from ${file.movedFrom}\n\n`);
+    }
     if (file.deleted) {
       tooltip.appendMarkdown("Deleted from the working tree");
     }

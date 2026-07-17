@@ -5,10 +5,16 @@ import { ReviewFile } from "./model";
 // Review view and never repaint the Explorer or other file lists
 export const REVIEW_ITEM_SCHEME = "delta-review-item";
 
-type ChangeKind = "modified" | "added" | "deleted";
+type ChangeKind = "modified" | "added" | "deleted" | "renamed";
 
 const changeKindFor = (file: ReviewFile): ChangeKind =>
-  file.deleted ? "deleted" : file.existsInMergeBase ? "modified" : "added";
+  file.deleted
+    ? "deleted"
+    : file.movedFrom !== undefined
+      ? "renamed"
+      : file.existsInMergeBase
+        ? "modified"
+        : "added";
 
 // The change kind travels in the URI query so the decoration provider can
 // answer from the URI alone
@@ -61,6 +67,11 @@ const DECORATIONS: Record<ChangeKind, vscode.FileDecoration> = {
     "D",
     "Deleted from the working tree",
     new vscode.ThemeColor("gitDecoration.deletedResourceForeground"),
+  ),
+  renamed: new vscode.FileDecoration(
+    "R",
+    "Moved since merge base",
+    new vscode.ThemeColor("gitDecoration.renamedResourceForeground"),
   ),
 };
 
