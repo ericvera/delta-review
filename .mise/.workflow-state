@@ -1,9 +1,0 @@
-{
-  "route": "full",
-  "approved": {
-    "goals": "0e6b1029281147597d8c3dc4ddfe10063f74831f",
-    "mock": "6b09f1c501f75dd77ac64daf333faaeca5402a1a",
-    "requirements": "5c3c4b6bbe7fb1ae7cd6df38da8fc8d7aa8bf5cb",
-    "plan": "63d9185fe0b5aa1a30d2674f5f54afd7a67de5dc"
-  }
-}
