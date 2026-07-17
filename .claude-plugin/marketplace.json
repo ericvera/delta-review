@@ -1,0 +1,14 @@
+{
+  "name": "delta-review",
+  "owner": {
+    "name": "Eric Vera"
+  },
+  "description": "Companion Claude Code plugin for the Delta Review VS Code extension.",
+  "plugins": [
+    {
+      "name": "cluster-review",
+      "source": "./plugin",
+      "description": "Groups the current branch's changed files into logical clusters and writes the clusters contract that Delta Review's grouped view renders."
+    }
+  ]
+}

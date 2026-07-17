@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Git, parseLsTreeOutput, splitNulTerminated } from "./git";
 import { DELETED_SENTINEL_CONTENT, readReviewState } from "./reviewState";
+import { computeTriage, Triage } from "./triage";
 
 export enum FileReviewStatus {
   NeedsReview = "needs-review",
@@ -20,6 +21,9 @@ export interface ReviewFile {
   diffBaseIsReviewedSnapshot: boolean;
   // Blob sha for the left side of the diff; undefined renders as empty (new file)
   diffBaseSha: string | undefined;
+  // "auto" when the file is mechanical (matches an auto-review glob or is
+  // linguist-generated); "normal" otherwise
+  triage: Triage;
 }
 
 export interface ReviewModel {
@@ -28,6 +32,48 @@ export interface ReviewModel {
   files: ReviewFile[];
 }
 
+// Parses `git check-attr -z` output — a flat NUL-separated sequence of
+// <path, attr, value> triplets — into the set of paths whose value is "set"
+// or "true". The value field can be empty (a `attr=` assignment in
+// .gitattributes emits `path NUL attr NUL NUL`), so empty fields must be
+// kept when splitting or every subsequent triplet shifts by one.
+export const parseCheckAttrOutput = (output: string): Set<string> => {
+  const fields = output.split("\0");
+  // Drop only the trailing empty field from the final NUL terminator
+  if (fields[fields.length - 1] === "") {
+    fields.pop();
+  }
+  const paths = new Set<string>();
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const value = fields[index + 2];
+    if (value === "set" || value === "true") {
+      paths.add(fields[index]);
+    }
+  }
+  return paths;
+};
+
+// Returns the set of paths marked `linguist-generated` in .gitattributes.
+// Attribute lookup is best-effort: any failure yields an empty set rather
+// than breaking the model.
+const fetchGeneratedPaths = async (
+  git: Git,
+  paths: string[],
+): Promise<Set<string>> => {
+  if (paths.length === 0) {
+    return new Set();
+  }
+  try {
+    const output = await git.run(
+      ["check-attr", "--stdin", "-z", "linguist-generated"],
+      { stdin: paths.join("\0") },
+    );
+    return parseCheckAttrOutput(output);
+  } catch {
+    return new Set();
+  }
+};
+
 // Computes the review set: every file that differs between the merge base and
 // the working tree (plus untracked files), with its review status derived by
 // comparing working-tree content against the reviewed snapshot. Content that
@@ -35,6 +81,7 @@ export interface ReviewModel {
 export const computeReviewModel = async (
   git: Git,
   baseBranch: string,
+  options?: { autoReviewGlobs?: string[] },
 ): Promise<ReviewModel> => {
   const branch = (await git.run(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
 
@@ -66,6 +113,13 @@ export const computeReviewModel = async (
       ...splitNulTerminated(untrackedOutput),
     ]),
   ].sort();
+
+  const generatedPaths = await fetchGeneratedPaths(git, paths);
+  const triageByPath = computeTriage(
+    paths,
+    options?.autoReviewGlobs ?? [],
+    generatedPaths,
+  );
 
   const reviewState = await readReviewState(git, branch);
   const baseBlobs = parseLsTreeOutput(
@@ -110,6 +164,7 @@ export const computeReviewModel = async (
       existsInMergeBase: baseBlobs.has(path),
       diffBaseIsReviewedSnapshot: useSnapshotBase,
       diffBaseSha: useSnapshotBase ? reviewedSha : baseBlobs.get(path),
+      triage: triageByPath.get(path) ?? "normal",
     };
   });
 

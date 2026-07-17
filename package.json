@@ -2,7 +2,7 @@
   "name": "delta-review",
   "displayName": "Delta Review",
   "description": "Incremental local code review: mark files reviewed and see only the delta since your last review.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "eric",
   "private": true,
   "engines": {
@@ -79,6 +79,18 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.groupByCluster",
+        "title": "Group by Cluster",
+        "icon": "$(group-by-ref-type)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.ungroupClusters",
+        "title": "Ungroup Clusters",
+        "icon": "$(ungroup-by-ref-type)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.markFolderReviewed",
         "title": "Mark Reviewed",
         "icon": "$(add)",
@@ -86,6 +98,30 @@
       },
       {
         "command": "deltaReview.unmarkFolderReviewed",
+        "title": "Unmark Reviewed",
+        "icon": "$(remove)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markAutoReviewed",
+        "title": "Mark Reviewed",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unmarkAutoReviewed",
+        "title": "Unmark Reviewed",
+        "icon": "$(remove)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markClusterReviewed",
+        "title": "Mark Reviewed",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unmarkClusterReviewed",
         "title": "Unmark Reviewed",
         "icon": "$(remove)",
         "category": "Delta Review"
@@ -104,9 +140,19 @@
           "group": "navigation@0"
         },
         {
+          "command": "deltaReview.groupByCluster",
+          "when": "view == deltaReview && deltaReview.clustersAvailable && !deltaReview.grouped",
+          "group": "navigation@1"
+        },
+        {
+          "command": "deltaReview.ungroupClusters",
+          "when": "view == deltaReview && deltaReview.clustersAvailable && deltaReview.grouped",
+          "group": "navigation@1"
+        },
+        {
           "command": "deltaReview.refresh",
           "when": "view == deltaReview",
-          "group": "navigation@1"
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -161,6 +207,46 @@
           "group": "navigation"
         },
         {
+          "command": "deltaReview.markAutoReviewed",
+          "when": "view == deltaReview && viewItem == needsReviewAutoGroup",
+          "group": "inline"
+        },
+        {
+          "command": "deltaReview.markAutoReviewed",
+          "when": "view == deltaReview && viewItem == needsReviewAutoGroup",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.unmarkAutoReviewed",
+          "when": "view == deltaReview && viewItem == reviewedAutoGroup",
+          "group": "inline"
+        },
+        {
+          "command": "deltaReview.unmarkAutoReviewed",
+          "when": "view == deltaReview && viewItem == reviewedAutoGroup",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.markClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterNeedsReview",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.markClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterNeedsReview",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.unmarkClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterReviewed",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.unmarkClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterReviewed",
+          "group": "navigation"
+        },
+        {
           "command": "deltaReview.markAllReviewed",
           "when": "view == deltaReview && viewItem == needsReviewGroup",
           "group": "inline"
@@ -195,6 +281,22 @@
         {
           "command": "deltaReview.unmarkFileReviewed",
           "when": "false"
+        },
+        {
+          "command": "deltaReview.markAutoReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unmarkAutoReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markClusterReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unmarkClusterReviewed",
+          "when": "false"
         }
       ]
     },
@@ -205,13 +307,26 @@
           "type": "string",
           "default": "main",
           "description": "Branch the review set is computed against (merge-base with HEAD)."
+        },
+        "deltaReview.autoReview.globs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns for mechanical files to auto-review (e.g. **/*.lock, dist/**). Files marked linguist-generated in .gitattributes are always included."
+        },
+        "deltaReview.autoReview.markAutomatically": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically mark auto-review files as reviewed when they change."
         }
       }
     }
   },
   "scripts": {
-    "build": "tsc -p .",
-    "watch": "tsc -w -p .",
+    "build": "tsc -p . && node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
     "format": "prettier --write .",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
@@ -222,12 +337,17 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.14.0",
+    "@types/picomatch": "^4.0.3",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
     "eslint": "^10.7.0",
     "prettier": "^3.9.5",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "picomatch": "^4.0.5"
   }
 }

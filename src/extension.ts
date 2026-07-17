@@ -1,5 +1,11 @@
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
+import {
+  ClusterModel,
+  clusterFilesForKey,
+  loadClustersContract,
+  resolveClusterModel,
+} from "./clusters";
 import {
   createReviewBaseContentProvider,
   createReviewBaseUri,
@@ -21,6 +27,7 @@ import {
 } from "./reviewState";
 import {
   collapseKeyFor,
+  isDefaultCollapsed,
   ReviewTreeProvider,
   ReviewTreeElement,
   ViewMode,
@@ -31,6 +38,7 @@ export const activate = async (
 ): Promise<void> => {
   let git: Git | undefined;
   let model: ReviewModel | undefined;
+  let clusterModel: ClusterModel | undefined;
 
   // Group/folder collapse state, kept across refreshes and window reloads
   const collapsedKey = "deltaReview.collapsedGroups";
@@ -50,9 +58,42 @@ export const activate = async (
     viewMode,
   );
 
+  // Cluster grouping lever (clusters on ⇄ off). The stored preference
+  // survives a vanished or invalid contract: effective grouping is
+  // `groupedPreference && clusterModel !== undefined`, so the view falls back
+  // to ungrouped without erasing the user's choice.
+  const groupedKey = "deltaReview.grouped";
+  let groupedPreference = context.workspaceState.get<boolean>(
+    groupedKey,
+    false,
+  );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "deltaReview.grouped",
+    groupedPreference,
+  );
+  // The grouping button only exists while a valid contract exists
+  const setClustersAvailable = (available: boolean): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.clustersAvailable",
+      available,
+    );
+  };
+  setClustersAvailable(false);
+
+  // Two persistence conventions share the collapsed set: default-expanded
+  // elements (groups, clusters, folders) store their key while collapsed;
+  // default-collapsed elements (Auto in either placement) store
+  // `expanded:<key>` while expanded, so an absent key means collapsed.
   const treeProvider = new ReviewTreeProvider(
-    (key) => collapsed.has(key),
+    (key, defaultCollapsed) =>
+      defaultCollapsed ? !collapsed.has(`expanded:${key}`) : collapsed.has(key),
     () => viewMode,
+    () => clusterModel,
+    // Effective grouping: the preference only takes effect while a valid
+    // contract produced a cluster model
+    () => groupedPreference && clusterModel !== undefined,
   );
   const treeView = vscode.window.createTreeView("deltaReview", {
     treeDataProvider: treeProvider,
@@ -69,24 +110,53 @@ export const activate = async (
     treeProvider.refresh();
   };
 
+  const setGrouped = (grouped: boolean): void => {
+    groupedPreference = grouped;
+    void context.workspaceState.update(groupedKey, grouped);
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.grouped",
+      grouped,
+    );
+    treeProvider.refresh();
+  };
+
   context.subscriptions.push(
     treeView.onDidCollapseElement((event) => {
-      if (event.element.kind !== "file") {
-        collapsed.add(collapseKeyFor(event.element));
-        persistCollapsed();
+      const element = event.element;
+      if (element.kind === "file" || element.kind === "message") {
+        return;
       }
+      if (isDefaultCollapsed(element)) {
+        collapsed.delete(`expanded:${collapseKeyFor(element)}`);
+      } else {
+        collapsed.add(collapseKeyFor(element));
+      }
+      persistCollapsed();
     }),
     treeView.onDidExpandElement((event) => {
-      if (event.element.kind !== "file") {
-        collapsed.delete(collapseKeyFor(event.element));
-        persistCollapsed();
+      const element = event.element;
+      if (element.kind === "file" || element.kind === "message") {
+        return;
       }
+      if (isDefaultCollapsed(element)) {
+        collapsed.add(`expanded:${collapseKeyFor(element)}`);
+      } else {
+        collapsed.delete(collapseKeyFor(element));
+      }
+      persistCollapsed();
     }),
     vscode.commands.registerCommand("deltaReview.viewAsTree", () =>
       setViewMode("tree"),
     ),
     vscode.commands.registerCommand("deltaReview.viewAsList", () =>
       setViewMode("list"),
+    ),
+    vscode.commands.registerCommand("deltaReview.groupByCluster", () =>
+      setGrouped(true),
+    ),
+    vscode.commands.registerCommand("deltaReview.ungroupClusters", () =>
+      setGrouped(false),
     ),
   );
 
@@ -115,6 +185,8 @@ export const activate = async (
     const generation = ++refreshGeneration;
     if (git === undefined) {
       model = undefined;
+      clusterModel = undefined;
+      setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
       treeView.message =
@@ -122,18 +194,68 @@ export const activate = async (
       statusBarItem.hide();
       return;
     }
-    const baseBranch =
-      vscode.workspace
-        .getConfiguration("deltaReview")
-        .get<string>("baseBranch") ?? "main";
+    const configuration = vscode.workspace.getConfiguration("deltaReview");
+    const baseBranch = configuration.get<string>("baseBranch") ?? "main";
+    const autoReviewGlobs =
+      configuration.get<string[]>("autoReview.globs") ?? [];
     try {
-      const computed = await computeReviewModel(git, baseBranch);
+      let computed = await computeReviewModel(git, baseBranch, {
+        autoReviewGlobs,
+      });
       if (generation !== refreshGeneration) {
         return;
       }
+      // Auto-marking goes through the normal snapshot path (markReviewed), so
+      // a later edit to an auto-marked file resurfaces as a needs-review delta.
+      // It runs before setModel so the tree never flashes "needs review" for
+      // files about to be auto-marked. The ref write may trigger another
+      // refresh via the repo watcher; that one finds nothing left to mark.
+      if (configuration.get<boolean>("autoReview.markAutomatically") === true) {
+        const autoPaths = computed.files
+          .filter(
+            (file) =>
+              file.triage === "auto" &&
+              file.status === FileReviewStatus.NeedsReview,
+          )
+          .map((file) => file.path);
+        if (autoPaths.length > 0) {
+          await markReviewed(git, computed.branch, autoPaths);
+          if (generation !== refreshGeneration) {
+            return;
+          }
+          computed = await computeReviewModel(git, baseBranch, {
+            autoReviewGlobs,
+          });
+          if (generation !== refreshGeneration) {
+            return;
+          }
+        }
+      }
+      // Clusters contract, reloaded on every refresh so correctness never
+      // depends on watcher delivery. Missing is normal (no warning); invalid
+      // surfaces a warning but otherwise behaves as missing. A branch switch
+      // is covered too: `computed.branch` selects the contract file.
+      const contractResult = await loadClustersContract(git, computed.branch);
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      let contractWarning: string | undefined;
+      if (contractResult.state === "ok") {
+        clusterModel = resolveClusterModel(
+          contractResult.contract,
+          computed.files,
+        );
+      } else {
+        clusterModel = undefined;
+        if (contractResult.state === "invalid") {
+          contractWarning = `⚠ Clusters contract: ${contractResult.error}`;
+        }
+      }
+      setClustersAvailable(clusterModel !== undefined);
+
       model = computed;
       treeProvider.setModel(model);
-      treeView.message = undefined;
+      treeView.message = contractWarning;
 
       const reviewedCount = model.files.filter(
         (file) => file.status === FileReviewStatus.Reviewed,
@@ -154,8 +276,11 @@ export const activate = async (
         return;
       }
       model = undefined;
+      clusterModel = undefined;
+      setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
+      // Fatal model errors win over any contract warning
       treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
     }
@@ -191,6 +316,41 @@ export const activate = async (
       watcher.onDidDelete(scheduleRefresh),
     ];
   };
+  // The clusters contract lives under the git common dir — event delivery for
+  // `.git` paths through the repo-root watcher is not guaranteed, and for a
+  // linked worktree the common dir is outside repoRoot entirely — so it gets
+  // its own directory-scoped watcher. The directory may not exist yet; events
+  // fire once it is created. The per-refresh contract re-read keeps behavior
+  // correct even if watcher events are missed.
+  const watchContractDir = async (gitInstance: Git): Promise<void> => {
+    let contractDir: string;
+    try {
+      const commonDirOutput = (
+        await gitInstance.run(["rev-parse", "--git-common-dir"])
+      ).trim();
+      contractDir = join(
+        isAbsolute(commonDirOutput)
+          ? commonDirOutput
+          : join(gitInstance.repoRoot, commonDirOutput),
+        "delta-review",
+      );
+    } catch {
+      return;
+    }
+    if (git !== gitInstance) {
+      // The active repo changed while the common dir was being resolved
+      return;
+    }
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(contractDir), "*.json"),
+    );
+    repoWatcherDisposables.push(
+      watcher,
+      watcher.onDidChange(scheduleRefresh),
+      watcher.onDidCreate(scheduleRefresh),
+      watcher.onDidDelete(scheduleRefresh),
+    );
+  };
   context.subscriptions.push(new vscode.Disposable(disposeRepoWatcher));
 
   const setActiveRepo = async (repoRoot: string | undefined): Promise<void> => {
@@ -203,6 +363,7 @@ export const activate = async (
     } else {
       git = createGit(repoRoot);
       watchRepo(repoRoot);
+      void watchContractDir(git);
     }
     await refresh();
   };
@@ -226,6 +387,19 @@ export const activate = async (
       rightUri,
       title,
     );
+  };
+
+  // The visible file set a folder row subdivides: its cluster's files when
+  // cluster-scoped (grouped view), otherwise the model's non-auto files.
+  // Folder bulk actions must cover only the folder's visible children — auto
+  // files render in the Auto bucket instead.
+  const folderScopeFiles = (element: { clusterKey?: string }): ReviewFile[] => {
+    if (element.clusterKey !== undefined) {
+      return clusterModel === undefined
+        ? []
+        : clusterFilesForKey(clusterModel, element.clusterKey);
+    }
+    return (model?.files ?? []).filter((file) => file.triage === "normal");
   };
 
   context.subscriptions.push(
@@ -306,7 +480,7 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = model.files
+        const paths = folderScopeFiles(element)
           .filter(
             (file) =>
               file.status === FileReviewStatus.NeedsReview &&
@@ -331,11 +505,105 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = model.files
+        const paths = folderScopeFiles(element)
           .filter(
             (file) =>
               file.status === FileReviewStatus.Reviewed &&
               file.path.startsWith(`${element.path}/`),
+          )
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await unmarkReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.markClusterReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined ||
+          element?.kind !== "cluster"
+        ) {
+          return;
+        }
+        const paths = clusterFilesForKey(clusterModel, element.clusterKey)
+          .filter((file) => file.status === FileReviewStatus.NeedsReview)
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await markReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.unmarkClusterReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined ||
+          element?.kind !== "cluster"
+        ) {
+          return;
+        }
+        const paths = clusterFilesForKey(clusterModel, element.clusterKey)
+          .filter((file) => file.status === FileReviewStatus.Reviewed)
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await unmarkReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.markAutoReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          element?.kind !== "autoGroup"
+        ) {
+          return;
+        }
+        const paths = model.files
+          .filter(
+            (file) =>
+              file.triage === "auto" &&
+              file.status === FileReviewStatus.NeedsReview,
+          )
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await markReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.unmarkAutoReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          element?.kind !== "autoGroup"
+        ) {
+          return;
+        }
+        const paths = model.files
+          .filter(
+            (file) =>
+              file.triage === "auto" &&
+              file.status === FileReviewStatus.Reviewed,
           )
           .map((file) => file.path);
         if (paths.length === 0) {

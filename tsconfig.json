@@ -3,10 +3,12 @@
     "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
+    "esModuleInterop": true,
     "lib": ["ES2022"],
     "outDir": "out",
     "rootDir": "src",
     "strict": true,
+    "noEmit": true,
     "sourceMap": true,
     "skipLibCheck": true
   },
