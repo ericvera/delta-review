@@ -142,11 +142,37 @@ export const activate = async (
     const autoReviewGlobs =
       configuration.get<string[]>("autoReview.globs") ?? [];
     try {
-      const computed = await computeReviewModel(git, baseBranch, {
+      let computed = await computeReviewModel(git, baseBranch, {
         autoReviewGlobs,
       });
       if (generation !== refreshGeneration) {
         return;
+      }
+      // Auto-marking goes through the normal snapshot path (markReviewed), so
+      // a later edit to an auto-marked file resurfaces as a needs-review delta.
+      // It runs before setModel so the tree never flashes "needs review" for
+      // files about to be auto-marked. The ref write may trigger another
+      // refresh via the repo watcher; that one finds nothing left to mark.
+      if (configuration.get<boolean>("autoReview.markAutomatically") === true) {
+        const autoPaths = computed.files
+          .filter(
+            (file) =>
+              file.triage === "auto" &&
+              file.status === FileReviewStatus.NeedsReview,
+          )
+          .map((file) => file.path);
+        if (autoPaths.length > 0) {
+          await markReviewed(git, computed.branch, autoPaths);
+          if (generation !== refreshGeneration) {
+            return;
+          }
+          computed = await computeReviewModel(git, baseBranch, {
+            autoReviewGlobs,
+          });
+          if (generation !== refreshGeneration) {
+            return;
+          }
+        }
       }
       model = computed;
       treeProvider.setModel(model);
