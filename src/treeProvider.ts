@@ -100,13 +100,11 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       }
     }
     return [
-      ...[...folderNames]
-        .sort()
-        .map((name): FolderElement => ({
-          kind: "folder",
-          status,
-          path: `${prefix}${name}`,
-        })),
+      ...[...folderNames].sort().map((name): FolderElement => ({
+        kind: "folder",
+        status,
+        path: `${prefix}${name}`,
+      })),
       ...directFiles.map((file): FileElement => ({ kind: "file", file })),
     ];
   }
