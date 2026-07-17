@@ -8,11 +8,24 @@ export type Triage = "auto" | "normal";
 // repo-relative with "/" separators; matching is case-sensitive.
 export const computeTriage = (
   paths: string[],
-  globs: string[],
+  globs: readonly unknown[],
   generatedPaths: ReadonlySet<string>,
 ): Map<string, Triage> => {
-  // Precompile matchers once — this runs per refresh over the whole review set
-  const matchers = globs.map((glob) => picomatch(glob, { dot: true }));
+  // Precompile matchers once — this runs per refresh over the whole review
+  // set. The globs come from a user-typed setting, so entries may be empty,
+  // non-strings, or patterns picomatch rejects (it throws on all three);
+  // skip bad entries so one never breaks classification for the whole set.
+  const matchers: ((path: string) => boolean)[] = [];
+  for (const glob of globs) {
+    if (typeof glob !== "string" || glob === "") {
+      continue;
+    }
+    try {
+      matchers.push(picomatch(glob, { dot: true }));
+    } catch {
+      // Invalid pattern (e.g. mid-edit in settings) — ignore it
+    }
+  }
   const triage = new Map<string, Triage>();
   for (const path of paths) {
     const isAuto =

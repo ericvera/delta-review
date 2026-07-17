@@ -101,4 +101,38 @@ describe("computeTriage", () => {
     const triage = computeTriage(paths, ["b"], noGenerated);
     expect([...triage.keys()]).toEqual(paths);
   });
+
+  it("ignores empty-string globs without throwing", () => {
+    // A mid-edit settings value like [""] must not blank the review model
+    const triage = computeTriage(
+      ["yarn.lock", "src/main.ts"],
+      ["", "**/*.lock"],
+      noGenerated,
+    );
+    expect(triage.get("yarn.lock")).toBe("auto");
+    expect(triage.get("src/main.ts")).toBe("normal");
+  });
+
+  it("ignores non-string glob entries without throwing", () => {
+    // Settings are user-typed JSON — entries may not be strings at runtime
+    const triage = computeTriage(
+      ["yarn.lock", "src/main.ts"],
+      [null, 42, { glob: "**" }, "**/*.lock"],
+      noGenerated,
+    );
+    expect(triage.get("yarn.lock")).toBe("auto");
+    expect(triage.get("src/main.ts")).toBe("normal");
+  });
+
+  it("skips a glob picomatch cannot compile and keeps the rest working", () => {
+    // picomatch throws on patterns longer than its 65536-char limit
+    const throwingGlob = "a".repeat(70000);
+    const triage = computeTriage(
+      ["yarn.lock", "src/main.ts"],
+      [throwingGlob, "**/*.lock"],
+      noGenerated,
+    );
+    expect(triage.get("yarn.lock")).toBe("auto");
+    expect(triage.get("src/main.ts")).toBe("normal");
+  });
 });

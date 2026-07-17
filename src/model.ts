@@ -32,6 +32,27 @@ export interface ReviewModel {
   files: ReviewFile[];
 }
 
+// Parses `git check-attr -z` output — a flat NUL-separated sequence of
+// <path, attr, value> triplets — into the set of paths whose value is "set"
+// or "true". The value field can be empty (a `attr=` assignment in
+// .gitattributes emits `path NUL attr NUL NUL`), so empty fields must be
+// kept when splitting or every subsequent triplet shifts by one.
+export const parseCheckAttrOutput = (output: string): Set<string> => {
+  const fields = output.split("\0");
+  // Drop only the trailing empty field from the final NUL terminator
+  if (fields[fields.length - 1] === "") {
+    fields.pop();
+  }
+  const paths = new Set<string>();
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const value = fields[index + 2];
+    if (value === "set" || value === "true") {
+      paths.add(fields[index]);
+    }
+  }
+  return paths;
+};
+
 // Returns the set of paths marked `linguist-generated` in .gitattributes.
 // Attribute lookup is best-effort: any failure yields an empty set rather
 // than breaking the model.
@@ -47,16 +68,7 @@ const fetchGeneratedPaths = async (
       ["check-attr", "--stdin", "-z", "linguist-generated"],
       { stdin: paths.join("\0") },
     );
-    // -z output is a flat NUL-separated sequence of <path, attr, value> triplets
-    const entries = splitNulTerminated(output);
-    const generated = new Set<string>();
-    for (let index = 0; index + 2 < entries.length; index += 3) {
-      const value = entries[index + 2];
-      if (value === "set" || value === "true") {
-        generated.add(entries[index]);
-      }
-    }
-    return generated;
+    return parseCheckAttrOutput(output);
   } catch {
     return new Set();
   }
