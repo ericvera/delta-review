@@ -34,14 +34,18 @@ You may be invoked in two situations, and the output is the same either way:
 }
 ```
 
-Rules the extension validates (a violating file is rejected and shown as a warning):
+Rules the extension's parser rejects (a violating file is rejected as a whole and shown as a warning):
 
 - `version` must be exactly the integer `1`.
-- `clusters` must be an array; each cluster must have string `label` and string `summary`.
+- `clusters` must be an array; each cluster must be an object with string `label` and string `summary`.
+- `files` and `patterns`, when present, must be arrays of strings.
 - Each cluster must have **at least one non-empty array among `files` and `patterns`** (either key may be omitted or empty as long as the other has entries).
-- `files` entries are repo-relative, `/`-separated paths (as printed by `git diff --name-only`). Never absolute paths, never `\` separators.
-- `patterns` entries are picomatch globs. Use them **only** for genuinely glob-shaped catch-alls — tests, docs, generated output (e.g. `**/*.test.ts`, `docs/**`). List everything else explicitly in `files`.
-- No commit or blob SHAs anywhere in the file. Derive everything from the current diff on every run — the contract carries no bookkeeping.
+
+Conventions you must follow anyway — the extension does not reject these, it fails silently instead:
+
+- `files` entries are repo-relative, `/`-separated paths (as printed by `git diff --name-only`). Never absolute paths, never `\` separators — a path that doesn't match the review set simply never matches, and the file lands in "Unclustered".
+- `patterns` entries are picomatch globs; a pattern that fails to compile is silently ignored. Use patterns **only** for genuinely glob-shaped catch-alls — tests, docs, generated output (e.g. `**/*.test.ts`, `docs/**`). List everything else explicitly in `files`.
+- No commit or blob SHAs anywhere in the file (unknown extra keys are ignored, not rejected). Derive everything from the current diff on every run — the contract carries no bookkeeping.
 
 If you ever need to change this schema, you must bump `version` and update the extension's parser (`src/clusters.ts` in the delta-review repo) in the same commit; the extension rejects any version other than 1.
 
@@ -53,7 +57,7 @@ How the extension resolves membership (so you can predict what renders): explici
 
 Work from the repository root: `git rev-parse --show-toplevel`, and `cd` there (later steps use repo-relative paths, and `git rev-parse --git-common-dir` can return a relative path).
 
-Read the base branch from `.vscode/settings.json` at the repo root: key `deltaReview.baseBranch`. If the file or key is absent, use `main`.
+Read the base branch from `.vscode/settings.json` at the repo root: key `deltaReview.baseBranch`. If the file or key is absent, use `main`. Note the file is JSONC (VS Code allows comments and trailing commas), so read it as text and tolerate JSONC rather than assuming strict `JSON.parse`/`jq` will succeed.
 
 Known divergence: the extension reads the _merged_ VS Code configuration, so a `deltaReview.baseBranch` set in the user's personal (user-scope) settings is invisible to this skill. If clusters seem computed against the wrong base, ask the user to set the base branch in the workspace's `.vscode/settings.json`.
 
