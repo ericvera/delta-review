@@ -61,7 +61,7 @@ Every file in the review set is classified `auto` or `normal` (`src/triage.ts`, 
 - `deltaReview.autoReview.globs` — picomatch patterns (`dot: true`, case-sensitive, repo-relative `/` paths). Empty, non-string, or uncompilable entries are skipped, never fatal.
 - Paths marked `linguist-generated` in `.gitattributes`, fetched via `git check-attr --stdin -z linguist-generated` (best-effort: any failure means "none").
 
-`auto` files render in the collapsed **Auto** subgroup (flat in both layouts, directory shown in the description) and are excluded from the normal list/tree and from folder bulk actions; group counts and Mark All still include them. With `autoReview.markAutomatically` on, `refresh()` marks needs-review auto files through the normal `markReviewed` snapshot path before the tree updates — so a later edit resurfaces as a delta, exactly like a hand-marked file.
+`auto` files render in the collapsed **Auto** subgroup (flat in both layouts, directory shown in the description) and are excluded from the normal list/tree and from folder bulk actions; group counts and Mark All still include them. With `autoReview.markAutomatically` on, `refresh()` marks needs-review auto files through the normal `markReviewed` snapshot path before the tree updates — so while the setting is on, an edited auto file is simply re-marked with a fresh snapshot on the next refresh and never resurfaces. Turn the setting off and the next edit resurfaces as a delta against the last snapshot, exactly like a hand-marked file.
 
 ### Clusters contract
 
@@ -96,12 +96,12 @@ Auto-review:
 8. Set `deltaReview.autoReview.globs` (e.g. `["**/*.lock"]`) → matching files move into a collapsed **Auto** subgroup (⚙, count, flat with directory descriptions) first under Needs Review, in both layouts. No reload needed.
 9. A file marked `linguist-generated` in `.gitattributes` lands in Auto even with empty globs.
 10. Auto header `+` marks them all; they stay inspectable under Reviewed → Auto. Folder `+` does not touch auto files; Mark All still covers everything.
-11. Flip `markAutomatically` on → next refresh self-marks auto files; edit one → it resurfaces under Needs Review → Auto with a delta diff.
+11. Flip `markAutomatically` on → next refresh self-marks auto files; edit one → it is silently re-marked with a fresh snapshot (stays under Reviewed → Auto, never resurfaces). Flip the setting off and edit it again → now it resurfaces under Needs Review → Auto with a delta diff.
 
 Clusters:
 
 12. No contract → no grouping button. Create a valid contract for the branch (run the `cluster-review` skill, or hand-write one at `.git/delta-review/clusters-<branch>.json`) → the group-by-cluster button appears without a manual refresh.
-13. Group → clusters render in contract order with `n/m` counts and summary tooltips; reviewed files stay in place, dimmed with a `✓`; **Unclustered** (warning-styled) after the clusters, only when non-empty; **Auto** last, collapsed; a cluster with no files in the change shows a message row.
+13. Group → clusters render in contract order with `n/m` counts and summary tooltips; reviewed files stay marked in place with a `✓`; **Unclustered** (warning-styled) after the clusters, only when non-empty; **Auto** last, collapsed; a cluster with no files in the change shows a message row.
 14. Tree/list toggle still works inside clusters (per-cluster folder collapse, folder actions scoped to the cluster); cluster header `+`/`−` bulk-marks exactly that bucket.
 15. Both levers persist across reload. Flipping either lever changes no review state (`git ls-tree -r refs/review/<branch>` identical before/after).
 16. Break the contract (e.g. `"version": 3`) → ⚠ message, view falls back to ungrouped, grouping preference survives a later fix. Delete the contract → button and message disappear.
