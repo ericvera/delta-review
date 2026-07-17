@@ -55,8 +55,8 @@ Files carry `M`/`A`/`D` letters and colors like the CHANGES view — computed re
 ## Manual test script
 
 1. In the dev host, open a repo with changes vs `main`. The panel lists them under Needs Review.
-2. Click a file → diff is *merge base ↔ working tree*.
+2. Click a file → diff is _merge base ↔ working tree_.
 3. Click its `+` → it moves to Reviewed; status bar count updates.
-4. Edit the file → it moves back to Needs Review, and its diff is now *last reviewed ↔ working tree* (only the new edit).
+4. Edit the file → it moves back to Needs Review, and its diff is now _last reviewed ↔ working tree_ (only the new edit).
 5. Revert the edit (undo + save) → content matches the snapshot again, file returns to Reviewed on its own.
 6. Commit / rebase — review state is unaffected (content-based).

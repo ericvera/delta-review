@@ -212,14 +212,22 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -w -p .",
+    "format": "prettier --write .",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
     "vscode:prepublish": "yarn build",
     "package": "vsce package -o delta-review.vsix --allow-missing-repository --no-dependencies",
     "install-ext": "yarn package && sh scripts/install-ext.sh"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.9.2",
-    "typescript": "^5.5.0"
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.5",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.1.10"
   }
 }
