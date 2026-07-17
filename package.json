@@ -79,6 +79,18 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.groupByCluster",
+        "title": "Group by Cluster",
+        "icon": "$(group-by-ref-type)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.ungroupClusters",
+        "title": "Ungroup Clusters",
+        "icon": "$(ungroup-by-ref-type)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.markFolderReviewed",
         "title": "Mark Reviewed",
         "icon": "$(add)",
@@ -116,9 +128,19 @@
           "group": "navigation@0"
         },
         {
+          "command": "deltaReview.groupByCluster",
+          "when": "view == deltaReview && deltaReview.clustersAvailable && !deltaReview.grouped",
+          "group": "navigation@1"
+        },
+        {
+          "command": "deltaReview.ungroupClusters",
+          "when": "view == deltaReview && deltaReview.clustersAvailable && deltaReview.grouped",
+          "group": "navigation@1"
+        },
+        {
           "command": "deltaReview.refresh",
           "when": "view == deltaReview",
-          "group": "navigation@1"
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [

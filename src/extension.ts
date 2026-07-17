@@ -1,5 +1,10 @@
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
+import {
+  ClusterModel,
+  loadClustersContract,
+  resolveClusterModel,
+} from "./clusters";
 import {
   createReviewBaseContentProvider,
   createReviewBaseUri,
@@ -31,6 +36,7 @@ export const activate = async (
 ): Promise<void> => {
   let git: Git | undefined;
   let model: ReviewModel | undefined;
+  let clusterModel: ClusterModel | undefined;
 
   // Group/folder collapse state, kept across refreshes and window reloads
   const collapsedKey = "deltaReview.collapsedGroups";
@@ -49,6 +55,30 @@ export const activate = async (
     "deltaReview.viewMode",
     viewMode,
   );
+
+  // Cluster grouping lever (clusters on ⇄ off). The stored preference
+  // survives a vanished or invalid contract: effective grouping is
+  // `groupedPreference && clusterModel !== undefined`, so the view falls back
+  // to ungrouped without erasing the user's choice.
+  const groupedKey = "deltaReview.grouped";
+  let groupedPreference = context.workspaceState.get<boolean>(
+    groupedKey,
+    false,
+  );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "deltaReview.grouped",
+    groupedPreference,
+  );
+  // The grouping button only exists while a valid contract exists
+  const setClustersAvailable = (available: boolean): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.clustersAvailable",
+      available,
+    );
+  };
+  setClustersAvailable(false);
 
   // Two persistence conventions share the collapsed set: default-expanded
   // elements (groups, folders) store their key while collapsed; default-
@@ -70,6 +100,17 @@ export const activate = async (
       "setContext",
       "deltaReview.viewMode",
       mode,
+    );
+    treeProvider.refresh();
+  };
+
+  const setGrouped = (grouped: boolean): void => {
+    groupedPreference = grouped;
+    void context.workspaceState.update(groupedKey, grouped);
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.grouped",
+      grouped,
     );
     treeProvider.refresh();
   };
@@ -103,6 +144,12 @@ export const activate = async (
     vscode.commands.registerCommand("deltaReview.viewAsList", () =>
       setViewMode("list"),
     ),
+    vscode.commands.registerCommand("deltaReview.groupByCluster", () =>
+      setGrouped(true),
+    ),
+    vscode.commands.registerCommand("deltaReview.ungroupClusters", () =>
+      setGrouped(false),
+    ),
   );
 
   const statusBarItem = vscode.window.createStatusBarItem(
@@ -130,6 +177,8 @@ export const activate = async (
     const generation = ++refreshGeneration;
     if (git === undefined) {
       model = undefined;
+      clusterModel = undefined;
+      setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
       treeView.message =
@@ -174,9 +223,31 @@ export const activate = async (
           }
         }
       }
+      // Clusters contract, reloaded on every refresh so correctness never
+      // depends on watcher delivery. Missing is normal (no warning); invalid
+      // surfaces a warning but otherwise behaves as missing. A branch switch
+      // is covered too: `computed.branch` selects the contract file.
+      const contractResult = await loadClustersContract(git, computed.branch);
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      let contractWarning: string | undefined;
+      if (contractResult.state === "ok") {
+        clusterModel = resolveClusterModel(
+          contractResult.contract,
+          computed.files,
+        );
+      } else {
+        clusterModel = undefined;
+        if (contractResult.state === "invalid") {
+          contractWarning = `⚠ Clusters contract: ${contractResult.error}`;
+        }
+      }
+      setClustersAvailable(clusterModel !== undefined);
+
       model = computed;
       treeProvider.setModel(model);
-      treeView.message = undefined;
+      treeView.message = contractWarning;
 
       const reviewedCount = model.files.filter(
         (file) => file.status === FileReviewStatus.Reviewed,
@@ -197,8 +268,11 @@ export const activate = async (
         return;
       }
       model = undefined;
+      clusterModel = undefined;
+      setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
+      // Fatal model errors win over any contract warning
       treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
     }
@@ -234,6 +308,41 @@ export const activate = async (
       watcher.onDidDelete(scheduleRefresh),
     ];
   };
+  // The clusters contract lives under the git common dir — event delivery for
+  // `.git` paths through the repo-root watcher is not guaranteed, and for a
+  // linked worktree the common dir is outside repoRoot entirely — so it gets
+  // its own directory-scoped watcher. The directory may not exist yet; events
+  // fire once it is created. The per-refresh contract re-read keeps behavior
+  // correct even if watcher events are missed.
+  const watchContractDir = async (gitInstance: Git): Promise<void> => {
+    let contractDir: string;
+    try {
+      const commonDirOutput = (
+        await gitInstance.run(["rev-parse", "--git-common-dir"])
+      ).trim();
+      contractDir = join(
+        isAbsolute(commonDirOutput)
+          ? commonDirOutput
+          : join(gitInstance.repoRoot, commonDirOutput),
+        "delta-review",
+      );
+    } catch {
+      return;
+    }
+    if (git !== gitInstance) {
+      // The active repo changed while the common dir was being resolved
+      return;
+    }
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(contractDir), "*.json"),
+    );
+    repoWatcherDisposables.push(
+      watcher,
+      watcher.onDidChange(scheduleRefresh),
+      watcher.onDidCreate(scheduleRefresh),
+      watcher.onDidDelete(scheduleRefresh),
+    );
+  };
   context.subscriptions.push(new vscode.Disposable(disposeRepoWatcher));
 
   const setActiveRepo = async (repoRoot: string | undefined): Promise<void> => {
@@ -246,6 +355,7 @@ export const activate = async (
     } else {
       git = createGit(repoRoot);
       watchRepo(repoRoot);
+      void watchContractDir(git);
     }
     await refresh();
   };
