@@ -21,5 +21,6 @@ The cluster view should have a Reviewed bucket so that any reviewed item moves o
 - The Reviewed bucket sits last in the view order: clusters → Unclustered → Auto → Reviewed.
 - The Reviewed bucket is always visible while grouping is on (like the ungrouped Reviewed group), showing its count — including `0` when nothing is reviewed yet — and starts expanded (collapse state persisted like other headers). Variant 3B in the mock shows the hide-when-empty alternative.
 - No subgrouping inside the Reviewed bucket: all reviewed files — including auto-triaged ones — render together in one flat list or one directory tree (user decision).
+- Approved mock variants: 1A (Reviewed rows show plain directory descriptions, no origin-cluster annotation) and 3A (the Reviewed bucket is always visible, showing `0` before anything is reviewed).
 - The Reviewed bucket header offers the bulk `−` (unmark all) action, same as the ungrouped Reviewed group header.
 - Grouping remains pure presentation: no lever flip or bucket move touches `refs/review/<branch>`.
