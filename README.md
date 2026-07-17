@@ -42,6 +42,15 @@ Install the companion skill in Claude Code:
 /plugin install cluster-review@delta-review
 ```
 
+To update to the latest version later:
+
+```
+/plugin marketplace update delta-review
+/plugin update cluster-review@delta-review
+```
+
+(then restart Claude Code to apply)
+
 - Ask Claude to cluster the change; it writes a per-branch contract file under `.git` describing narrative clusters (label, summary, members) — nothing touches your working tree.
 - A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last.
 - Grouping is pure presentation — toggling it never changes what's marked reviewed.
