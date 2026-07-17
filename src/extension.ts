@@ -326,6 +326,7 @@ export const activate = async (
         const paths = model.files
           .filter(
             (file) =>
+              file.triage === "normal" &&
               file.status === FileReviewStatus.NeedsReview &&
               file.path.startsWith(`${element.path}/`),
           )
@@ -351,6 +352,7 @@ export const activate = async (
         const paths = model.files
           .filter(
             (file) =>
+              file.triage === "normal" &&
               file.status === FileReviewStatus.Reviewed &&
               file.path.startsWith(`${element.path}/`),
           )
