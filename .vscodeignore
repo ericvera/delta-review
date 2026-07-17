@@ -6,7 +6,9 @@ eslint.config.mjs
 .prettierignore
 .vscode/**
 .claude/**
+.claude-plugin/**
 .mise/**
+plugin/**
 PLAN.md
 .gitignore
 yarn.lock

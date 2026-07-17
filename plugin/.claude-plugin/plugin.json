@@ -1,0 +1,8 @@
+{
+  "name": "cluster-review",
+  "description": "Groups the current branch's changed files into logical clusters and writes the clusters contract consumed by the Delta Review VS Code extension.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Eric Vera"
+  }
+}
