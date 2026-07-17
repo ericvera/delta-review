@@ -1,7 +1,12 @@
 src/**
 scripts/**
 tsconfig.json
+esbuild.mjs
+eslint.config.mjs
+.prettierignore
 .vscode/**
+.claude/**
+.mise/**
 .gitignore
 yarn.lock
 .yarn/**

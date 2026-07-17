@@ -210,8 +210,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p .",
-    "watch": "tsc -w -p .",
+    "build": "tsc -p . && node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
     "format": "prettier --write .",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
@@ -222,12 +222,17 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.14.0",
+    "@types/picomatch": "^4.0.3",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
     "eslint": "^10.7.0",
     "prettier": "^3.9.5",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "picomatch": "^4.0.5"
   }
 }

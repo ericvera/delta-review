@@ -29,4 +29,4 @@ The **Delta Review** panel lives in the Source Control sidebar:
 
 ## Development
 
-See [DEVELOPMENT.md](DEVELOPMENT.md).
+See `DEVELOPMENT.md` at the repo root.
