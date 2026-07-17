@@ -2,6 +2,7 @@ import { basename, isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
 import {
   ClusterModel,
+  clusterFilesForKey,
   loadClustersContract,
   resolveClusterModel,
 } from "./clusters";
@@ -26,6 +27,7 @@ import {
 } from "./reviewState";
 import {
   collapseKeyFor,
+  isDefaultCollapsed,
   ReviewTreeProvider,
   ReviewTreeElement,
   ViewMode,
@@ -81,13 +83,17 @@ export const activate = async (
   setClustersAvailable(false);
 
   // Two persistence conventions share the collapsed set: default-expanded
-  // elements (groups, folders) store their key while collapsed; default-
-  // collapsed elements (Auto subgroups) store `expanded:<key>` while expanded,
-  // so an absent key means collapsed.
+  // elements (groups, clusters, folders) store their key while collapsed;
+  // default-collapsed elements (Auto in either placement) store
+  // `expanded:<key>` while expanded, so an absent key means collapsed.
   const treeProvider = new ReviewTreeProvider(
     (key, defaultCollapsed) =>
       defaultCollapsed ? !collapsed.has(`expanded:${key}`) : collapsed.has(key),
     () => viewMode,
+    () => clusterModel,
+    // Effective grouping: the preference only takes effect while a valid
+    // contract produced a cluster model
+    () => groupedPreference && clusterModel !== undefined,
   );
   const treeView = vscode.window.createTreeView("deltaReview", {
     treeDataProvider: treeProvider,
@@ -117,24 +123,26 @@ export const activate = async (
 
   context.subscriptions.push(
     treeView.onDidCollapseElement((event) => {
-      if (event.element.kind === "file") {
+      const element = event.element;
+      if (element.kind === "file" || element.kind === "message") {
         return;
       }
-      if (event.element.kind === "autoGroup") {
-        collapsed.delete(`expanded:${collapseKeyFor(event.element)}`);
+      if (isDefaultCollapsed(element)) {
+        collapsed.delete(`expanded:${collapseKeyFor(element)}`);
       } else {
-        collapsed.add(collapseKeyFor(event.element));
+        collapsed.add(collapseKeyFor(element));
       }
       persistCollapsed();
     }),
     treeView.onDidExpandElement((event) => {
-      if (event.element.kind === "file") {
+      const element = event.element;
+      if (element.kind === "file" || element.kind === "message") {
         return;
       }
-      if (event.element.kind === "autoGroup") {
-        collapsed.add(`expanded:${collapseKeyFor(event.element)}`);
+      if (isDefaultCollapsed(element)) {
+        collapsed.add(`expanded:${collapseKeyFor(element)}`);
       } else {
-        collapsed.delete(collapseKeyFor(event.element));
+        collapsed.delete(collapseKeyFor(element));
       }
       persistCollapsed();
     }),
@@ -381,6 +389,19 @@ export const activate = async (
     );
   };
 
+  // The visible file set a folder row subdivides: its cluster's files when
+  // cluster-scoped (grouped view), otherwise the model's non-auto files.
+  // Folder bulk actions must cover only the folder's visible children — auto
+  // files render in the Auto bucket instead.
+  const folderScopeFiles = (element: { clusterKey?: string }): ReviewFile[] => {
+    if (element.clusterKey !== undefined) {
+      return clusterModel === undefined
+        ? []
+        : clusterFilesForKey(clusterModel, element.clusterKey);
+    }
+    return (model?.files ?? []).filter((file) => file.triage === "normal");
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand("deltaReview.refresh", () => refresh()),
 
@@ -459,10 +480,9 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = model.files
+        const paths = folderScopeFiles(element)
           .filter(
             (file) =>
-              file.triage === "normal" &&
               file.status === FileReviewStatus.NeedsReview &&
               file.path.startsWith(`${element.path}/`),
           )
@@ -485,13 +505,56 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = model.files
+        const paths = folderScopeFiles(element)
           .filter(
             (file) =>
-              file.triage === "normal" &&
               file.status === FileReviewStatus.Reviewed &&
               file.path.startsWith(`${element.path}/`),
           )
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await unmarkReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.markClusterReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined ||
+          element?.kind !== "cluster"
+        ) {
+          return;
+        }
+        const paths = clusterFilesForKey(clusterModel, element.clusterKey)
+          .filter((file) => file.status === FileReviewStatus.NeedsReview)
+          .map((file) => file.path);
+        if (paths.length === 0) {
+          return;
+        }
+        await markReviewed(git, model.branch, paths);
+        await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.unmarkClusterReviewed",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined ||
+          element?.kind !== "cluster"
+        ) {
+          return;
+        }
+        const paths = clusterFilesForKey(clusterModel, element.clusterKey)
+          .filter((file) => file.status === FileReviewStatus.Reviewed)
           .map((file) => file.path);
         if (paths.length === 0) {
           return;

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import picomatch from "picomatch";
 import type { Git } from "./git";
-import type { ReviewFile } from "./model";
+import { FileReviewStatus, type ReviewFile } from "./model";
 
 // The clusters contract: written by an external tool (e.g. a Claude Code
 // skill) to <git common dir>/delta-review/clusters-<sanitized branch>.json.
@@ -43,6 +43,70 @@ export type LoadClustersResult =
   | { state: "missing" }
   | { state: "invalid"; error: string }
   | { state: "ok"; contract: ClustersContract };
+
+// Grouped tree rows reference cluster buckets by a stable string key rather
+// than by captured file arrays, so every render re-resolves against the
+// current ClusterModel. Real clusters are index-based ("c0", "c1", …) — two
+// clusters with identical labels stay distinct — plus the two synthetic
+// buckets "unclustered" and "auto".
+
+// The bucket definition (label/summary/files) behind a real-cluster key, or
+// undefined for synthetic/unknown keys and out-of-range indices.
+export const clusterBucketForKey = (
+  model: ClusterModel,
+  clusterKey: string,
+): ClusterBucket | undefined =>
+  /^c\d+$/.test(clusterKey)
+    ? model.clusters[Number(clusterKey.slice(1))]
+    : undefined;
+
+// The files behind any cluster key; unknown keys resolve to an empty list so
+// stale elements degrade to no-ops rather than throwing.
+export const clusterFilesForKey = (
+  model: ClusterModel,
+  clusterKey: string,
+): ReviewFile[] => {
+  if (clusterKey === "unclustered") {
+    return model.unclustered;
+  }
+  if (clusterKey === "auto") {
+    return model.auto;
+  }
+  return clusterBucketForKey(model, clusterKey)?.files ?? [];
+};
+
+// Context value for a cluster-kind tree row, driving which bulk action its
+// row offers: ✓ while anything still needs review, − when all reviewed,
+// nothing when the bucket is empty.
+export type ClusterContextValue =
+  "clusterNeedsReview" | "clusterReviewed" | "clusterEmpty";
+
+export const clusterContextValue = (
+  files: readonly ReviewFile[],
+): ClusterContextValue => {
+  if (files.length === 0) {
+    return "clusterEmpty";
+  }
+  return files.some((file) => file.status === FileReviewStatus.NeedsReview)
+    ? "clusterNeedsReview"
+    : "clusterReviewed";
+};
+
+// Header count text. Clusters and Unclustered always show reviewed/total;
+// the Auto bucket (plainUntilFirstReviewed) shows a plain total until the
+// first file is reviewed, then reviewed/total from there on (including n/n).
+export const clusterCountDescription = (
+  files: readonly ReviewFile[],
+  plainUntilFirstReviewed: boolean,
+): string => {
+  const reviewed = files.filter(
+    (file) => file.status === FileReviewStatus.Reviewed,
+  ).length;
+  if (plainUntilFirstReviewed && reviewed === 0) {
+    return String(files.length);
+  }
+  return `${reviewed}/${files.length}`;
+};
 
 // Branch names can contain characters that are unsafe in filenames (notably
 // "/" in feature/x). Every char outside [A-Za-z0-9._-] becomes "-". The

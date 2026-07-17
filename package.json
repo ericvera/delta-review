@@ -113,6 +113,18 @@
         "title": "Unmark Reviewed",
         "icon": "$(remove)",
         "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markClusterReviewed",
+        "title": "Mark Reviewed",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unmarkClusterReviewed",
+        "title": "Unmark Reviewed",
+        "icon": "$(remove)",
+        "category": "Delta Review"
       }
     ],
     "menus": {
@@ -215,6 +227,26 @@
           "group": "navigation"
         },
         {
+          "command": "deltaReview.markClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterNeedsReview",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.markClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterNeedsReview",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.unmarkClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterReviewed",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.unmarkClusterReviewed",
+          "when": "view == deltaReview && viewItem == clusterReviewed",
+          "group": "navigation"
+        },
+        {
           "command": "deltaReview.markAllReviewed",
           "when": "view == deltaReview && viewItem == needsReviewGroup",
           "group": "inline"
@@ -256,6 +288,14 @@
         },
         {
           "command": "deltaReview.unmarkAutoReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markClusterReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unmarkClusterReviewed",
           "when": "false"
         }
       ]

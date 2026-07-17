@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  ClusterModel,
   ClustersContract,
+  clusterBucketForKey,
+  clusterContextValue,
+  clusterCountDescription,
+  clusterFilesForKey,
   loadClustersContract,
   parseClustersContract,
   resolveClusterModel,
@@ -21,6 +26,11 @@ const file = (path: string, triage: Triage = "normal"): ReviewFile => ({
   diffBaseIsReviewedSnapshot: false,
   diffBaseSha: undefined,
   triage,
+});
+
+const reviewedFile = (path: string, triage: Triage = "normal"): ReviewFile => ({
+  ...file(path, triage),
+  status: FileReviewStatus.Reviewed,
 });
 
 const contract = (
@@ -387,6 +397,105 @@ describe("resolveClusterModel", () => {
       [dotfile],
     );
     expect(model.clusters[0].files).toEqual([dotfile]);
+  });
+});
+
+describe("clusterFilesForKey / clusterBucketForKey", () => {
+  const model: ClusterModel = {
+    clusters: [
+      { label: "First", summary: "one", files: [file("a.ts")] },
+      { label: "Second", summary: "two", files: [file("b.ts"), file("c.ts")] },
+    ],
+    unclustered: [file("u.ts")],
+    auto: [file("yarn.lock", "auto")],
+  };
+
+  it("resolves index-based keys to their bucket's files", () => {
+    expect(clusterFilesForKey(model, "c0").map((f) => f.path)).toEqual([
+      "a.ts",
+    ]);
+    expect(clusterFilesForKey(model, "c1").map((f) => f.path)).toEqual([
+      "b.ts",
+      "c.ts",
+    ]);
+  });
+
+  it("resolves the synthetic unclustered and auto keys", () => {
+    expect(clusterFilesForKey(model, "unclustered").map((f) => f.path)).toEqual(
+      ["u.ts"],
+    );
+    expect(clusterFilesForKey(model, "auto").map((f) => f.path)).toEqual([
+      "yarn.lock",
+    ]);
+  });
+
+  it("returns empty for out-of-range and malformed keys", () => {
+    expect(clusterFilesForKey(model, "c9")).toEqual([]);
+    expect(clusterFilesForKey(model, "c-1")).toEqual([]);
+    expect(clusterFilesForKey(model, "cx")).toEqual([]);
+    expect(clusterFilesForKey(model, "")).toEqual([]);
+  });
+
+  it("returns the bucket only for real-cluster keys", () => {
+    expect(clusterBucketForKey(model, "c1")?.label).toBe("Second");
+    expect(clusterBucketForKey(model, "unclustered")).toBeUndefined();
+    expect(clusterBucketForKey(model, "auto")).toBeUndefined();
+    expect(clusterBucketForKey(model, "c9")).toBeUndefined();
+  });
+});
+
+describe("clusterContextValue", () => {
+  it("is clusterEmpty for no files", () => {
+    expect(clusterContextValue([])).toBe("clusterEmpty");
+  });
+
+  it("is clusterNeedsReview when any file still needs review", () => {
+    expect(clusterContextValue([reviewedFile("a.ts"), file("b.ts")])).toBe(
+      "clusterNeedsReview",
+    );
+    expect(clusterContextValue([file("b.ts")])).toBe("clusterNeedsReview");
+  });
+
+  it("is clusterReviewed when every file is reviewed", () => {
+    expect(
+      clusterContextValue([reviewedFile("a.ts"), reviewedFile("b.ts")]),
+    ).toBe("clusterReviewed");
+  });
+});
+
+describe("clusterCountDescription", () => {
+  it("always shows reviewed/total for clusters and Unclustered", () => {
+    expect(clusterCountDescription([file("a.ts"), file("b.ts")], false)).toBe(
+      "0/2",
+    );
+    expect(
+      clusterCountDescription([reviewedFile("a.ts"), file("b.ts")], false),
+    ).toBe("1/2");
+    expect(clusterCountDescription([], false)).toBe("0/0");
+  });
+
+  it("shows a plain total for Auto until the first file is reviewed", () => {
+    expect(
+      clusterCountDescription(
+        [file("a.lock", "auto"), file("b.lock", "auto")],
+        true,
+      ),
+    ).toBe("2");
+  });
+
+  it("switches Auto to reviewed/total from the first reviewed file on", () => {
+    expect(
+      clusterCountDescription(
+        [reviewedFile("a.lock", "auto"), file("b.lock", "auto")],
+        true,
+      ),
+    ).toBe("1/2");
+    expect(
+      clusterCountDescription(
+        [reviewedFile("a.lock", "auto"), reviewedFile("b.lock", "auto")],
+        true,
+      ),
+    ).toBe("2/2");
   });
 });
 
