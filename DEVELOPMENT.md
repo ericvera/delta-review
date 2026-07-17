@@ -52,7 +52,7 @@ Delta Review follows the repository selected in the Source Control view — the 
 
 ### File status letters
 
-Files carry `M`/`A`/`D` letters and colors like the CHANGES view — computed relative to `merge-base(baseBranch, HEAD)`, not HEAD, so committed changes still show. Untracked files are included. Renames are not detected (`--no-renames`).
+Files carry `M`/`A`/`D`/`R` letters and colors like the CHANGES view — computed relative to `merge-base(baseBranch, HEAD)`, not HEAD, so committed changes still show. Untracked files are included. Renames are detected (`--find-renames`, git's default similarity threshold): a moved file shows as a single `R` row at the new path with a `← <old path>` description, and its merge-base diff opens against the old path's blob. Rename detection only sees what git sees — a file moved with plain `mv` (unstaged) still shows as a `D` row plus an untracked `A` row until the move is staged.
 
 ### Auto triage
 
@@ -91,18 +91,26 @@ Basics (no contract, default settings):
 6. Commit / rebase — review state is unaffected (content-based).
 7. Tree/list toggle, folder `+`/`−`, collapse state surviving reload, and repo switching in Source Control all behave as before.
 
+Moves:
+
+8. `git mv` a changed-or-unchanged file to another directory (pure move) → one **R** row at the new path (`← <old path>` in the description, "Moved from" in the tooltip), no row at the old path. Its diff says the files are identical, the title reads `<name> (moved from <old path> — merge base ↔ working tree)`, and the left editor is labeled with the old path.
+9. `git mv` another file **and** edit it → still one R row; the diff shows only the edited lines, same title shape.
+10. Mark a move row reviewed (inline `+`) → it moves to Reviewed and counts as one file. Edit it again → back to Needs Review with title `… (moved from … — last reviewed ↔ working tree)` and a diff of only the post-review edit.
+11. The inline **Open File** action works on a move row (opens the new path).
+12. Move a file with plain `mv` (unstaged) → old path shows as `D` plus an untracked `A` row at the new path. `git add -A`, refresh → the two rows collapse into one R row.
+
 Auto-review:
 
-8. Set `deltaReview.autoReview.globs` (e.g. `["**/*.lock"]`) → matching files move into a collapsed **Auto** subgroup (⚙, count, flat with directory descriptions) first under Needs Review, in both layouts. No reload needed.
-9. A file marked `linguist-generated` in `.gitattributes` lands in Auto even with empty globs.
-10. Auto header `+` marks them all; they stay inspectable under Reviewed → Auto. Folder `+` does not touch auto files; Mark All still covers everything.
-11. Flip `markAutomatically` on → next refresh self-marks auto files; edit one → it is silently re-marked with a fresh snapshot (stays under Reviewed → Auto, never resurfaces). Flip the setting off and edit it again → now it resurfaces under Needs Review → Auto with a delta diff.
+13. Set `deltaReview.autoReview.globs` (e.g. `["**/*.lock"]`) → matching files move into a collapsed **Auto** subgroup (⚙, count, flat with directory descriptions) first under Needs Review, in both layouts. No reload needed.
+14. A file marked `linguist-generated` in `.gitattributes` lands in Auto even with empty globs.
+15. Auto header `+` marks them all; they stay inspectable under Reviewed → Auto. Folder `+` does not touch auto files; Mark All still covers everything.
+16. Flip `markAutomatically` on → next refresh self-marks auto files; edit one → it is silently re-marked with a fresh snapshot (stays under Reviewed → Auto, never resurfaces). Flip the setting off and edit it again → now it resurfaces under Needs Review → Auto with a delta diff.
 
 Clusters:
 
-12. No contract → no grouping button. Create a valid contract for the branch (run the `cluster-review` skill, or hand-write one at `.git/delta-review/clusters-<branch>.json`) → the group-by-cluster button appears without a manual refresh.
-13. Group → clusters render in contract order with `n/m` counts and summary tooltips; reviewed files stay marked in place with a `✓`; **Unclustered** (warning-styled) after the clusters, only when non-empty; **Auto** last, collapsed; a cluster with no files in the change shows a message row.
-14. Tree/list toggle still works inside clusters (per-cluster folder collapse, folder actions scoped to the cluster); cluster header `+`/`−` bulk-marks exactly that bucket.
-15. Both levers persist across reload. Flipping either lever changes no review state (`git ls-tree -r refs/review/<branch>` identical before/after).
-16. Break the contract (e.g. `"version": 3`) → ⚠ message, view falls back to ungrouped, grouping preference survives a later fix. Delete the contract → button and message disappear.
-17. Throughout: `git status` in the test repo stays clean — the contract lives under `.git`.
+17. No contract → no grouping button. Create a valid contract for the branch (run the `cluster-review` skill, or hand-write one at `.git/delta-review/clusters-<branch>.json`) → the group-by-cluster button appears without a manual refresh.
+18. Group → clusters render in contract order with `n/m` counts and summary tooltips; reviewed files stay marked in place with a `✓`; **Unclustered** (warning-styled) after the clusters, only when non-empty; **Auto** last, collapsed; a cluster with no files in the change shows a message row.
+19. Tree/list toggle still works inside clusters (per-cluster folder collapse, folder actions scoped to the cluster); cluster header `+`/`−` bulk-marks exactly that bucket.
+20. Both levers persist across reload. Flipping either lever changes no review state (`git ls-tree -r refs/review/<branch>` identical before/after).
+21. Break the contract (e.g. `"version": 3`) → ⚠ message, view falls back to ungrouped, grouping preference survives a later fix. Delete the contract → button and message disappear.
+22. Throughout: `git status` in the test repo stays clean — the contract lives under `.git`.

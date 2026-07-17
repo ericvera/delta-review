@@ -372,7 +372,13 @@ export const activate = async (
     if (git === undefined) {
       return;
     }
-    const leftUri = createReviewBaseUri(file.path, file.diffBaseSha);
+    // For a move diffed against the merge base, the base blob came from the
+    // old path — label the left editor with it. A reviewed snapshot was
+    // captured from the new path, so it keeps the new path.
+    const leftPath = file.diffBaseIsReviewedSnapshot
+      ? file.path
+      : (file.movedFrom ?? file.path);
+    const leftUri = createReviewBaseUri(leftPath, file.diffBaseSha);
     const rightUri = file.deleted
       ? createReviewBaseUri(file.path, undefined)
       : vscode.Uri.file(join(git.repoRoot, file.path));
@@ -380,7 +386,10 @@ export const activate = async (
       ? "last reviewed"
       : "merge base";
     const workingLabel = file.deleted ? "deleted" : "working tree";
-    const title = `${basename(file.path)} (${baseLabel} ↔ ${workingLabel})`;
+    const title =
+      file.movedFrom === undefined
+        ? `${basename(file.path)} (${baseLabel} ↔ ${workingLabel})`
+        : `${basename(file.path)} (moved from ${file.movedFrom} — ${baseLabel} ↔ ${workingLabel})`;
     await vscode.commands.executeCommand(
       "vscode.diff",
       leftUri,
