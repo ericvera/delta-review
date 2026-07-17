@@ -1,0 +1,1 @@
+Currently when a file is moved it is hard to tell that it was moved or look at the diff (if any) vs, just moved. Is there something we can do to see that it is a move and only see that it is either a move or the diff on top of the move?
