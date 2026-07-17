@@ -25,6 +25,7 @@ const file = (path: string, triage: Triage = "normal"): ReviewFile => ({
   existsInMergeBase: true,
   diffBaseIsReviewedSnapshot: false,
   diffBaseSha: undefined,
+  movedFrom: undefined,
   triage,
 });
 

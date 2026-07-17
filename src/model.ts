@@ -1,6 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Git, parseLsTreeOutput, splitNulTerminated } from "./git";
+import {
+  Git,
+  parseLsTreeOutput,
+  parseNameStatusOutput,
+  splitNulTerminated,
+} from "./git";
 import { DELETED_SENTINEL_CONTENT, readReviewState } from "./reviewState";
 import { computeTriage, Triage } from "./triage";
 
@@ -21,6 +26,9 @@ export interface ReviewFile {
   diffBaseIsReviewedSnapshot: boolean;
   // Blob sha for the left side of the diff; undefined renders as empty (new file)
   diffBaseSha: string | undefined;
+  // Old repo-relative path when git detected this file as a rename/move of it;
+  // undefined otherwise
+  movedFrom: string | undefined;
   // "auto" when the file is mechanical (matches an auto-review glob or is
   // linguist-generated); "normal" otherwise
   triage: Triage;
@@ -96,11 +104,13 @@ export const computeReviewModel = async (
 
   const trackedOutput = await git.run([
     "diff",
-    "--name-only",
-    "--no-renames",
+    "--name-status",
+    "--find-renames",
     "-z",
     mergeBase,
   ]);
+  const { paths: trackedPaths, movedFrom: movedFromByPath } =
+    parseNameStatusOutput(trackedOutput);
   const untrackedOutput = await git.run([
     "ls-files",
     "--others",
@@ -108,10 +118,7 @@ export const computeReviewModel = async (
     "-z",
   ]);
   const paths = [
-    ...new Set([
-      ...splitNulTerminated(trackedOutput),
-      ...splitNulTerminated(untrackedOutput),
-    ]),
+    ...new Set([...trackedPaths, ...splitNulTerminated(untrackedOutput)]),
   ].sort();
 
   const generatedPaths = await fetchGeneratedPaths(git, paths);
@@ -163,7 +170,10 @@ export const computeReviewModel = async (
       deleted,
       existsInMergeBase: baseBlobs.has(path),
       diffBaseIsReviewedSnapshot: useSnapshotBase,
-      diffBaseSha: useSnapshotBase ? reviewedSha : baseBlobs.get(path),
+      diffBaseSha: useSnapshotBase
+        ? reviewedSha
+        : baseBlobs.get(movedFromByPath.get(path) ?? path),
+      movedFrom: movedFromByPath.get(path),
       triage: triageByPath.get(path) ?? "normal",
     };
   });
