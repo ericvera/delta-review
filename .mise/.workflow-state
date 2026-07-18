@@ -2,6 +2,7 @@
   "route": "full",
   "approved": {
     "goals": "f7503bb5a9084354841a0b8fba7429d0632d7979",
-    "mock": "7fae278a11a4a5c65a759d337b7db4e7fe5f1835"
+    "mock": "7fae278a11a4a5c65a759d337b7db4e7fe5f1835",
+    "requirements": "99fe6d90c3f52a402120c847c416a71e165c9a27"
   }
 }
