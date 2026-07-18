@@ -77,7 +77,10 @@ Clustered review is driven by a JSON contract the extension only ever **reads** 
 - `resolveClusterModel` buckets the review set: auto-triaged files always go to `auto` (auto wins over everything); explicit `files` listings beat `patterns`, first listing cluster wins; otherwise the first cluster (contract order) whose pattern matches wins; the rest are `unclustered`. Files named by the contract but absent from the review set are simply not shown.
 - The grouping lever (`deltaReview.groupByCluster` / `ungroupClusters`, workspaceState key `deltaReview.grouped`) only shows while a valid contract exists (`deltaReview.clustersAvailable` context key). Effective grouping is `preference && clusterModel !== undefined`, so a vanished/invalid contract falls back to ungrouped without erasing the preference.
 - A dedicated watcher on `<common dir>/delta-review/*.json` schedules a refresh on contract create/change/delete; the per-refresh re-read keeps things correct even if watcher events are missed.
-- Grouping is pure presentation: tree rows resolve their files from the current `ClusterModel` at render time, and no lever flip touches `refs/review/<branch>`.
+- Grouped rendering: clusters, **Unclustered**, and **Auto** show only their needs-review files; the Unclustered/Auto headers hide entirely while nothing in them needs review. An always-present **Reviewed** bucket renders last: check icon, plain count of all reviewed files, follows the list/tree toggle, no subgrouping; its contextValue reuses `reviewedGroup`, so the header `−` is Unmark All.
+- A fully reviewed cluster keeps its header (`n/n`) with a single `All files reviewed.` row; cluster counts and header `+`/`−` still derive from the cluster's full membership.
+- Reviewed-bucket folder `−` (tree mode) unmarks every visible child — auto files included, since they render inline in the bucket rather than in an Auto subgroup. With `markAutomatically` on, an unmarked auto file returns to Reviewed on the next refresh (standard auto-review behavior, for every unmark path).
+- Grouping is pure presentation: tree rows resolve their files from the current `ClusterModel` at render time, and no lever flip touches `refs/review/<branch>`. Mark/unmark writes through the normal snapshot path, and that ref write is what moves a row between a cluster and the Reviewed bucket.
 
 ## Manual test script
 
@@ -109,8 +112,8 @@ Auto-review:
 Clusters:
 
 17. No contract → no grouping button. Create a valid contract for the branch (run the `cluster-review` skill, or hand-write one at `.git/delta-review/clusters-<branch>.json`) → the group-by-cluster button appears without a manual refresh.
-18. Group → clusters render in contract order with `n/m` counts and summary tooltips; reviewed files stay marked in place with a `✓`; **Unclustered** (warning-styled) after the clusters, only when non-empty; **Auto** last, collapsed; a cluster with no files in the change shows a message row.
-19. Tree/list toggle still works inside clusters (per-cluster folder collapse, folder actions scoped to the cluster); cluster header `+`/`−` bulk-marks exactly that bucket.
+18. Group → clusters render in contract order with `n/m` counts and summary tooltips, showing only needs-review rows; **Unclustered** (warning-styled) after the clusters and collapsed **Auto** appear only while something in them needs review; an always-present **Reviewed** bucket renders last (`0` on a fresh branch); a cluster with no files in the change shows a message row. Mark a file → it moves into the Reviewed bucket, not marked in place with a `✓`; fully review a cluster → its header stays with `n/n` over a single `All files reviewed.` row.
+19. Tree/list toggle still works inside clusters and the Reviewed bucket (per-cluster folder collapse, folder actions scoped to the cluster); cluster header `+`/`−` bulk-marks exactly that bucket. In the Reviewed bucket, folder `−` (tree mode) unmarks every visible child, auto files included — and with `markAutomatically` on, the auto file bounces back into Reviewed on the next refresh.
 20. Both levers persist across reload. Flipping either lever changes no review state (`git ls-tree -r refs/review/<branch>` identical before/after).
 21. Break the contract (e.g. `"version": 3`) → ⚠ message, view falls back to ungrouped, grouping preference survives a later fix. Delete the contract → button and message disappear.
 22. Throughout: `git status` in the test repo stays clean — the contract lives under `.git`.

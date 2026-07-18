@@ -398,11 +398,19 @@ export const activate = async (
     );
   };
 
-  // The visible file set a folder row subdivides: its cluster's files when
-  // cluster-scoped (grouped view), otherwise the model's non-auto files.
-  // Folder bulk actions must cover only the folder's visible children — auto
-  // files render in the Auto bucket instead.
-  const folderScopeFiles = (element: { clusterKey?: string }): ReviewFile[] => {
+  // The visible file set a folder row subdivides: all files when scoped to
+  // the grouped Reviewed bucket, its cluster's files when cluster-scoped
+  // (grouped view), otherwise the model's non-auto files. Folder bulk actions
+  // must cover the folder's *visible* children: auto files render inline in
+  // the Reviewed bucket (so they're covered there) but in the Auto bucket
+  // elsewhere (so they're excluded elsewhere).
+  const folderScopeFiles = (element: {
+    clusterKey?: string;
+    inReviewedBucket?: true;
+  }): ReviewFile[] => {
+    if (element.inReviewedBucket === true) {
+      return model?.files ?? [];
+    }
     if (element.clusterKey !== undefined) {
       return clusterModel === undefined
         ? []
