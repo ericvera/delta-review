@@ -2,6 +2,8 @@
 
 Mise directory: .mise/
 
+Branch convention: feat/<slug> for features, fix/<slug> for bug fixes
+
 ## Quality commands
 
 - Format: yarn format
