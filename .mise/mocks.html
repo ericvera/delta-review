@@ -40,6 +40,7 @@
   .row .lineref { color: var(--fg-dim); font-size: 11px; flex-shrink: 0; }
   .group { padding: 3px 10px; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .group .count { background: #4d4d4d; border-radius: 9px; font-size: 10px; padding: 0 6px; font-weight: 400; }
+  .group .path { color: var(--fg-dim); font-size: 11px; font-weight: 400; }
   .twist { color: var(--fg-dim); font-size: 10px; width: 10px; }
   .st { width: 14px; text-align: center; flex-shrink: 0; font-size: 11px; }
   .st.open { color: var(--blue); }
@@ -305,7 +306,7 @@
 <!-- ============================================================ -->
 <div class="scenario">
   <h2><span class="id">6A</span>Sidebar — REVIEW NOTES as a sibling section</h2>
-  <p class="desc">A separate SCM section at the same level as DELTA REVIEW: notes grouped by file, status icon per note (● open, ◐ addressed, ✓ resolved), note text as the row label, click → opens the review diff at that line. Updates live as the agent works. Title actions: clear resolved (🧹), collapse. DELTA REVIEW itself is unchanged except 💬 counts on file rows.</p>
+  <p class="desc">A separate SCM section at the same level as DELTA REVIEW: notes grouped by file, status icon per note (● open, ◐ addressed, ✓ resolved), note text as the row label, click → opens the review diff at that line. Updates live as the agent works. Title actions: clear resolved (🧹), collapse. File headers show basename + dimmed directory (full path on hover) to disambiguate same-named files. DELTA REVIEW itself is completely unchanged — note counts live only here.</p>
   <div class="window">
     <div class="titlebar">Source Control</div>
     <div class="layout" style="min-height: 0;">
@@ -314,18 +315,18 @@
           <span class="actions"><span class="icon btn" title="View as Tree">☰</span><span class="icon btn" title="Refresh">⟳</span></span>
         </div>
         <div class="group"><span class="twist">▾</span>Needs Review <span class="count">2</span></div>
-        <div class="row"><span class="name">model.ts</span><span class="path">src</span><span class="notecount">💬 3</span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">＋</span></span></div>
+        <div class="row"><span class="name">model.ts</span><span class="path">src</span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">＋</span></span></div>
         <div class="row"><span class="name">treeProvider.ts</span><span class="path">src</span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">＋</span></span></div>
         <div class="group"><span class="twist">▸</span>Reviewed <span class="count">3</span></div>
 
         <div class="viewtitle">REVIEW NOTES
           <span class="actions"><span class="icon btn" title="Clear Resolved">🧹</span><span class="icon btn" title="Collapse All">⌃</span></span>
         </div>
-        <div class="group"><span class="twist">▾</span>model.ts <span class="count">3</span></div>
+        <div class="group"><span class="twist">▾</span>model.ts <span class="path">src</span> <span class="count">3</span></div>
         <div class="row indent"><span class="st open">●</span><span class="snippet">does this need a stable tiebreaker for equal…</span><span class="spacer"></span><span class="lineref">:42</span></div>
         <div class="row indent"><span class="st addressed">◐</span><span class="snippet">why did this duplicate check go away? seems…</span><span class="spacer"></span><span class="lineref">:42 base</span></div>
         <div class="row indent"><span class="st resolved">✓</span><span class="snippet">rename this — "raw" is misleading</span><span class="spacer"></span><span class="lineref">:37</span></div>
-        <div class="group"><span class="twist">▾</span>extension.ts <span class="count">1</span></div>
+        <div class="group"><span class="twist">▾</span>extension.ts <span class="path">src</span> <span class="count">1</span></div>
         <div class="row indent"><span class="st open">●</span><span class="snippet">watcher leak? disposables never cleared on…</span><span class="spacer"></span><span class="lineref">:311</span></div>
       </div>
     </div>

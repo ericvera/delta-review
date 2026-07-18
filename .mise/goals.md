@@ -57,8 +57,10 @@ in diff editors including the extension's virtual `delta-review-base` left side.
 - **Sibling REVIEW NOTES view**: a second section in the SCM sidebar at the same level as DELTA REVIEW
   (second entry under `contributes.views.scm`): notes grouped by file, open/addressed/resolved status
   icons and counts, click a note → opens the review diff at that note's line. This is where agent
-  progress is watched. The existing tree keeps small 💬 counts on file rows. (VS Code's built-in
-  Comments panel also lists the threads automatically — free, untouched.)
+  progress is watched. File headers show basename + dimmed directory path (full path in the tooltip) to
+  disambiguate same-named files. The existing DELTA REVIEW tree is **completely unchanged** — note
+  counts live only in this section. (VS Code's built-in Comments panel also lists the threads
+  automatically — free, untouched.)
 
 ## Decisions (from clarifying Q&A)
 

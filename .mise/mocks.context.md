@@ -50,6 +50,10 @@ is it possible to do inline comments in the diff?
   an anchor is the normal content re-mapping.
 - Scenario 5's "Keep Open" button replaced with a reply box + "Reply & Reopen" (reply-to-reopen);
   added scenario 5B showing the reopened thread with alternating turns.
+- Removed 💬 counts from DELTA REVIEW file rows ("looks weird" now that REVIEW NOTES exists) — the
+  existing tree is untouched by the feature; counts live only in REVIEW NOTES.
+- REVIEW NOTES file headers gained dimmed directory paths (basename + dir, full path on hover) to
+  disambiguate same-named files.
 
 - v1 had a ⇪ "hand off notes to Claude" title button with success/nothing toasts (scenarios 6A/6B) —
   removed: no export step exists; the storage file is the contract and the trigger is a prompt.
