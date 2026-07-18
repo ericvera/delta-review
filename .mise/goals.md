@@ -9,8 +9,9 @@ in diff editors including the extension's virtual `delta-review-base` left side.
 - While reviewing a diff opened from the Delta Review panel, the reviewer can add an inline note on a
   line or range of **either side**: the right (working-tree) side anchors to file + line; the left
   (base) side anchors to the base blob — enabling notes on deleted/old code.
-- One human note per thread (editable, deletable). The agent's responses render as replies in the same
-  thread; no human-to-human discussion model.
+- A thread holds **alternating turns between the reviewer and the agent**: the reviewer's note, the
+  agent's response, an optional reviewer follow-up, and so on. One human voice, one agent — no
+  multi-user discussion model. The reviewer's turns are editable/deletable.
 - Notes persist **per branch inside `.git`** (zero footprint, like review state): they survive window
   reloads, commits/amends/rebases, and travel across worktrees; never in the working tree, never pushed.
 - **Ownership**: a note is owned by (local clone, branch) — same owning entity as review state
@@ -29,16 +30,20 @@ in diff editors including the extension's virtual `delta-review-base` left side.
   multiple notes in one file correct across agent edits, reloads, and edits made while no editor was
   open. Left-side notes anchor to the immutable base blob and never move. The agent likewise locates
   targets by `lineSnapshot` content, not raw line numbers, and responds by note id.
-- **Lifecycle**: open → addressed → resolved. The agent marks a note *addressed* with a response when it
-  acts on it; the reviewer *resolves* it to confirm (or resolves directly at any time). Resolved notes
-  drop out of the agent's work set. Rendered with VS Code's native resolved/unresolved thread states
-  plus an addressed indicator.
+- **Lifecycle**: open → addressed → resolved, with **reply-to-reopen**. The agent marks a note
+  *addressed* with a response when it acts on it; the reviewer either *resolves* it to confirm (or
+  resolves/deletes directly at any time) or **replies on the addressed thread**, which reopens the note
+  with that follow-up as the agent's new instruction — there is no bare "keep open without comment".
+  Status derives from who spoke last: last turn human → open, last turn agent → addressed, until
+  explicitly resolved. Resolved notes drop out of the agent's work set. Rendered with VS Code's native
+  resolved/unresolved thread states plus an addressed indicator.
 - **Agent interface — the storage is the contract** (no export step, no hand-off button):
   - The extension persists notes to a versioned JSON file under `<git-common-dir>/delta-review/`
     (exact filename decided in requirements; the extension already watches this directory).
   - A new companion skill **`review-notes`** (in `plugin/skills/`, alongside `cluster-review`, same
     marketplace) documents the contract for agents: where the notes file is, its schema, how to act on
-    open notes, and how to respond.
+    open notes, and how to respond. For a reopened note it instructs the agent to read the **whole
+    thread** — the newest human turn is the instruction.
   - The agent writes to a **separate responses file** it owns in the same directory (per note id:
     status + response text + an **optional `anchor`** — file, line, lineSnapshot — pointing at the new
     code that addresses the note). One writer per file — no conflicts. When an anchor is present the
@@ -67,9 +72,13 @@ in diff editors including the extension's virtual `delta-review-base` left side.
    skill; agent-owned responses file merged by id.
 7. Notes overview: dedicated sibling REVIEW NOTES SCM section (chosen over relying on the built-in
    Comments panel, which can't navigate into the review diff or show the addressed state).
+8. Sending back: **reply-to-reopen** — replying on an addressed thread reopens it with the follow-up as
+   new guidance; no bare "keep open" (chosen over a no-comment reopen, which gives the agent nothing
+   new to act on).
 
 ## Out of scope
 
-- Human reply chains / multi-user discussion (threads hold one human note + agent responses).
+- Multi-user discussion (threads are one reviewer ⇄ one agent; reviewer follow-ups are in scope,
+  additional human participants are not).
 - Syncing to GitHub PR comments or any remote service.
 - Cross-machine sync of notes.

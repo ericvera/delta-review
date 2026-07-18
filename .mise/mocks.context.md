@@ -22,6 +22,9 @@ is it possible to do inline comments in the diff?
    trigger is a plain prompt ("address my review notes").
 7. Done flow? → **Open → addressed → resolved**: agent marks addressed with a response; reviewer
    resolves to confirm (or resolves directly anytime). Resolved notes leave the agent's work set.
+   Sending back is **reply-to-reopen**: replying on an addressed thread reopens it with the follow-up
+   as the agent's new instruction (no bare "keep open"); threads hold alternating reviewer ⇄ agent
+   turns, status = who spoke last.
 8. Notes overview? → **Sibling REVIEW NOTES section** in the SCM sidebar at the same level as DELTA
    REVIEW (chosen over built-in Comments panel after trade-off comparison: the panel can't navigate
    into the review diff and only shows two states).
@@ -45,6 +48,8 @@ is it possible to do inline comments in the diff?
 - Scenario 5 clarified: an addressed response may carry an optional anchor (file/line/snapshot) to the
   new code; the thread relocates there and OUTDATED is suppressed (expected change). Fallback without
   an anchor is the normal content re-mapping.
+- Scenario 5's "Keep Open" button replaced with a reply box + "Reply & Reopen" (reply-to-reopen);
+  added scenario 5B showing the reopened thread with alternating turns.
 
 - v1 had a ⇪ "hand off notes to Claude" title button with success/nothing toasts (scenarios 6A/6B) —
   removed: no export step exists; the storage file is the contract and the trigger is a prompt.

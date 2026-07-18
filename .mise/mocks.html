@@ -246,8 +246,8 @@
 
 <!-- ============================================================ -->
 <div class="scenario">
-  <h2><span class="id">5</span>Agent responded — addressed, awaiting your confirmation</h2>
-  <p class="desc">Claude's response (from the responses file) renders as a reply in the same thread; the note flips to <b>ADDRESSED</b> live while the agent works. The response carries an optional <b>anchor</b> to the new code — here the thread has relocated to the fixed line (no OUTDATED noise; the original line stays as context). You confirm with <b>Resolve</b> — or keep it open if the response misses.</p>
+  <h2><span class="id">5A</span>Agent responded — addressed, awaiting your confirmation</h2>
+  <p class="desc">Claude's response (from the responses file) renders as a reply in the same thread; the note flips to <b>ADDRESSED</b> live while the agent works. The response carries an optional <b>anchor</b> to the new code — here the thread has relocated to the fixed line (no OUTDATED noise; the original line stays as context). You either confirm with <b>Resolve</b>, or type a reply — <b>replying reopens the note</b> with your follow-up as the agent's new instruction. There is no bare "keep open".</p>
   <div class="window">
     <div class="titlebar">model.ts (merge base ↔ working tree)</div>
     <div class="layout">
@@ -264,10 +264,38 @@
           </div>
           <div class="note"><span class="author">You</span><span class="when">today 14:32</span><br />does this need a stable tiebreaker for equal statuses?</div>
           <div class="note"><span class="author claude">Claude</span><span class="when">today 15:04</span><br />Added a path tiebreaker — equal statuses now sort by path (model.ts:42, covered in model.test.ts).</div>
+          <textarea rows="1" placeholder="Reply to reopen…"></textarea>
           <div class="cbtns">
             <button>Resolve</button>
-            <button class="secondary">Keep Open</button>
+            <button class="secondary">Reply &amp; Reopen</button>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">5B</span>Reopened — your follow-up is the new instruction</h2>
+  <p class="desc">After a reply the thread is <b>OPEN</b> again, holding the full alternating conversation. The agent's next round reads the whole thread; the newest human turn is what it acts on. Status always derives from who spoke last.</p>
+  <div class="window">
+    <div class="titlebar">model.ts (merge base ↔ working tree)</div>
+    <div class="layout">
+      <div class="editor">
+        <div class="diff">
+          <div class="side">
+            <div class="line add"><span class="num">42</span><span class="cgut"><span class="glyph">💬</span></span><span class="code">  return sortByStatusThenPath(files);</span></div>
+          </div>
+        </div>
+        <div class="cwidget">
+          <div class="chead">
+            model.ts:42 <span class="badge openb">OPEN</span>
+            <span class="cacts"><span class="icon btn" title="Delete">🗑</span><span class="icon btn" title="Resolve">✓</span><span class="icon btn" title="Collapse">⌃</span></span>
+          </div>
+          <div class="note"><span class="author">You</span><span class="when">today 14:32</span><br />does this need a stable tiebreaker for equal statuses?</div>
+          <div class="note"><span class="author claude">Claude</span><span class="when">today 15:04</span><br />Added a path tiebreaker — equal statuses now sort by path (model.ts:42, covered in model.test.ts).</div>
+          <div class="note"><span class="author">You</span><span class="when">today 15:12</span><br />not quite — the comparison should be case-insensitive so paths group predictably</div>
         </div>
       </div>
     </div>
