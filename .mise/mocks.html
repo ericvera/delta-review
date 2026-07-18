@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Delta Review — Inline review notes mocks</title>
+<style>
+  :root {
+    --bg: #1e1e1e; --panel: #252526; --border: #3c3c3c; --fg: #cccccc;
+    --fg-dim: #9d9d9d; --accent: #0e639c; --accent-hover: #1177bb;
+    --row-hover: #2a2d2e; --add-bg: rgba(60, 130, 60, 0.22); --del-bg: rgba(160, 60, 60, 0.22);
+    --gutter: #858585; --widget: #2d2d30; --input: #3c3c3c; --yellow: #cca700;
+  }
+  body { background: #111; color: var(--fg); font-family: -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; font-weight: 600; }
+  .scenario { margin: 32px 0 48px; }
+  .scenario h2 { font-size: 14px; color: #e8e8e8; }
+  .scenario h2 .id { background: var(--accent); color: #fff; border-radius: 4px; padding: 1px 7px; margin-right: 8px; font-size: 12px; }
+  .scenario p.desc { color: var(--fg-dim); font-size: 12px; margin-top: -6px; }
+  .window { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; max-width: 980px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+  .titlebar { background: #323233; padding: 6px 12px; font-size: 12px; color: var(--fg-dim); text-align: center; }
+  .layout { display: flex; min-height: 260px; }
+  /* sidebar */
+  .sidebar { width: 260px; background: var(--panel); border-right: 1px solid var(--border); font-size: 13px; flex-shrink: 0; }
+  .sidebar .viewtitle { display: flex; align-items: center; padding: 6px 10px; font-size: 11px; letter-spacing: .4px; color: var(--fg-dim); }
+  .sidebar .viewtitle .actions { margin-left: auto; display: flex; gap: 8px; }
+  .icon { font-family: "Segoe UI Symbol", monospace; font-style: normal; color: var(--fg-dim); cursor: default; }
+  .icon.btn:hover { color: #fff; }
+  .row { display: flex; align-items: center; padding: 2px 10px 2px 18px; gap: 6px; }
+  .row:hover { background: var(--row-hover); }
+  .row .name { white-space: nowrap; }
+  .row .path { color: var(--fg-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+  .row .spacer { flex: 1; }
+  .row .hoveracts { display: none; gap: 6px; }
+  .row:hover .hoveracts { display: flex; }
+  .row .notecount { color: var(--fg-dim); font-size: 11px; display: flex; gap: 3px; align-items: center; }
+  .group { padding: 3px 10px; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .group .count { background: #4d4d4d; border-radius: 9px; font-size: 10px; padding: 0 6px; font-weight: 400; }
+  .twist { color: var(--fg-dim); font-size: 10px; width: 10px; }
+  /* editor */
+  .editor { flex: 1; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; min-width: 0; }
+  .tab { background: var(--bg); border-bottom: 1px solid var(--border); padding: 6px 14px; font-family: inherit; font-size: 12px; color: var(--fg); display: inline-block; }
+  .tab .dim { color: var(--fg-dim); }
+  .diff { display: flex; }
+  .side { flex: 1; overflow: hidden; min-width: 0; }
+  .side.left { border-right: 1px solid var(--border); }
+  .line { display: flex; height: 19px; line-height: 19px; white-space: pre; }
+  .line .num { width: 34px; text-align: right; padding-right: 8px; color: var(--gutter); flex-shrink: 0; user-select: none; }
+  .line .cgut { width: 18px; flex-shrink: 0; text-align: center; color: var(--fg-dim); user-select: none; }
+  .line .cgut .plus { display: none; background: var(--accent); color: #fff; border-radius: 3px; padding: 0 4px; font-size: 11px; cursor: pointer; }
+  .line:hover .cgut .plus { display: inline-block; }
+  .line .cgut .plus.force { display: inline-block; }
+  .line .code { overflow: hidden; text-overflow: ellipsis; }
+  .line.add { background: var(--add-bg); }
+  .line.del { background: var(--del-bg); }
+  .line .glyph { color: #3794ff; cursor: pointer; }
+  /* comment widget */
+  .cwidget { border-top: 1px solid var(--accent); border-bottom: 1px solid var(--accent); background: var(--widget); margin: 2px 0 2px 52px; max-width: 420px; font-family: -apple-system, "Segoe UI", sans-serif; }
+  .cwidget .chead { display: flex; align-items: center; font-size: 11px; color: var(--fg-dim); padding: 4px 10px; border-bottom: 1px solid var(--border); gap: 8px; }
+  .cwidget .chead .cacts { margin-left: auto; display: flex; gap: 8px; }
+  .cwidget textarea { width: calc(100% - 20px); box-sizing: border-box; margin: 8px 10px 0; background: var(--input); color: var(--fg); border: 1px solid #007fd4; border-radius: 2px; font-size: 12px; padding: 6px; resize: none; font-family: inherit; }
+  .cwidget .cbtns { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 10px; }
+  .cwidget button { background: var(--accent); border: 0; color: #fff; font-size: 12px; padding: 4px 12px; border-radius: 2px; cursor: pointer; }
+  .cwidget button.secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); }
+  .cwidget .note { padding: 8px 10px; font-size: 12px; }
+  .cwidget .note .author { font-weight: 600; font-size: 12px; margin-right: 6px; }
+  .cwidget .note .when { color: var(--fg-dim); font-size: 11px; }
+  .cwidget .badge.outdated { background: var(--yellow); color: #1e1e1e; border-radius: 3px; font-size: 10px; padding: 0 5px; font-weight: 600; }
+  /* toast */
+  .toast { position: relative; margin: 10px; margin-left: auto; width: 360px; background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 10px 12px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+  .toast.error { border-left-color: #f14c4c; }
+  .toast .tsrc { color: var(--fg-dim); font-size: 11px; margin-top: 4px; }
+  .callout { color: var(--yellow); font-size: 11px; margin: 4px 0 0 52px; }
+</style>
+</head>
+<body>
+<h1>Delta Review — inline review notes in the diff (mocks)</h1>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">1</span>Commenting gutter — hover a right-side line</h2>
+  <p class="desc">In a review diff, hovering any line on the right (working tree) side shows the native <b>+</b> comment gutter. The left (base) side never offers it. No notes exist yet — this is the empty state.</p>
+  <div class="window">
+    <div class="titlebar">model.ts (merge base ↔ working tree)</div>
+    <div class="layout">
+      <div class="editor">
+        <div class="diff">
+          <div class="side left">
+            <div class="line"><span class="num">41</span><span class="code">  const files = parse(raw);</span></div>
+            <div class="line del"><span class="num">42</span><span class="code">  return files.sort();</span></div>
+            <div class="line"><span class="num">43</span><span class="code">};</span></div>
+            <div class="line"><span class="num">44</span><span class="code"></span></div>
+          </div>
+          <div class="side">
+            <div class="line"><span class="num">41</span><span class="cgut"></span><span class="code">  const files = parse(raw);</span></div>
+            <div class="line add"><span class="num">42</span><span class="cgut"><span class="plus force">+</span></span><span class="code">  return sortByStatus(files);   ⟵ hovering</span></div>
+            <div class="line"><span class="num">43</span><span class="cgut"></span><span class="code">};</span></div>
+            <div class="line"><span class="num">44</span><span class="cgut"></span><span class="code"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">2A</span>Adding a note — input widget open</h2>
+  <p class="desc">Clicking <b>+</b> opens VS Code's native comment widget inline under the line. One box, "Add Note" saves. Esc/Cancel closes without saving.</p>
+  <div class="window">
+    <div class="titlebar">model.ts (merge base ↔ working tree)</div>
+    <div class="layout">
+      <div class="editor">
+        <div class="diff">
+          <div class="side">
+            <div class="line add"><span class="num">42</span><span class="cgut"><span class="plus force">+</span></span><span class="code">  return sortByStatus(files);</span></div>
+          </div>
+        </div>
+        <div class="cwidget">
+          <div class="chead">Review note — model.ts:42</div>
+          <textarea rows="2">does this need a stable tiebreaker for equal statuses?</textarea>
+          <div class="cbtns">
+            <button>Add Note</button>
+            <button class="secondary">Cancel</button>
+          </div>
+        </div>
+        <div class="diff">
+          <div class="side">
+            <div class="line"><span class="num">43</span><span class="cgut"></span><span class="code">};</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">2B</span>Adding a note — save failed</h2>
+  <p class="desc">If persisting to <code>.git</code> fails, an error toast appears and the widget stays open with the text intact (nothing lost).</p>
+  <div class="window">
+    <div class="titlebar">model.ts (merge base ↔ working tree)</div>
+    <div class="layout">
+      <div class="editor" style="position: relative; min-height: 90px;">
+        <div class="toast error">
+          Delta Review: failed to save note (git ref update failed — see output log)
+          <div class="tsrc">Source: Delta Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">3</span>Saved note — expanded thread in the diff</h2>
+  <p class="desc">A saved note renders as a native thread under its line, with hover actions to <b>edit</b> (pencil) and <b>delete</b> (trash). One note per thread — no reply box.</p>
+  <div class="window">
+    <div class="titlebar">model.ts (merge base ↔ working tree)</div>
+    <div class="layout">
+      <div class="editor">
+        <div class="diff">
+          <div class="side">
+            <div class="line add"><span class="num">42</span><span class="cgut"><span class="glyph">💬</span></span><span class="code">  return sortByStatus(files);</span></div>
+          </div>
+        </div>
+        <div class="cwidget">
+          <div class="chead">
+            Review note — model.ts:42
+            <span class="cacts"><span class="icon btn" title="Edit">✎</span><span class="icon btn" title="Delete">🗑</span><span class="icon btn" title="Collapse">⌃</span></span>
+          </div>
+          <div class="note"><span class="author">You</span><span class="when">today 14:32</span><br />does this need a stable tiebreaker for equal statuses?</div>
+        </div>
+        <div class="diff">
+          <div class="side">
+            <div class="line"><span class="num">43</span><span class="cgut"></span><span class="code">};</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">4</span>Outdated note — the line changed after the note was written</h2>
+  <p class="desc">The note is kept and flagged <b>Outdated</b>; it re-anchors to its original line number and shows what it referred to. Deleting it is the only way to clear it (editing the text keeps the flag).</p>
+  <div class="window">
+    <div class="titlebar">model.ts (merge base ↔ working tree)</div>
+    <div class="layout">
+      <div class="editor">
+        <div class="diff">
+          <div class="side">
+            <div class="line add"><span class="num">42</span><span class="cgut"><span class="glyph">💬</span></span><span class="code">  return sortByStatusThenPath(files);</span></div>
+          </div>
+        </div>
+        <div class="cwidget">
+          <div class="chead">
+            Review note — model.ts:42 <span class="badge outdated">OUTDATED</span>
+            <span class="cacts"><span class="icon btn" title="Edit">✎</span><span class="icon btn" title="Delete">🗑</span><span class="icon btn" title="Collapse">⌃</span></span>
+          </div>
+          <div class="note"><span class="author">You</span><span class="when">today 14:32 — line was: <code>return sortByStatus(files);</code></span><br />does this need a stable tiebreaker for equal statuses?</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">5</span>Sidebar — note counts on file rows</h2>
+  <p class="desc">Files with notes show a 💬 count after the filename, in both buckets. Counts are presentation only — notes never affect reviewed state.</p>
+  <div class="window">
+    <div class="titlebar">Source Control</div>
+    <div class="layout" style="min-height: 0;">
+      <div class="sidebar" style="width: 100%; border-right: 0;">
+        <div class="viewtitle">DELTA REVIEW
+          <span class="actions"><span class="icon btn" title="Hand off notes to Claude">⇪</span><span class="icon btn" title="View as Tree">☰</span><span class="icon btn" title="Refresh">⟳</span></span>
+        </div>
+        <div class="group"><span class="twist">▾</span>Needs Review <span class="count">3</span></div>
+        <div class="row"><span class="name">model.ts</span><span class="path">src</span><span class="notecount">💬 2</span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">＋</span></span></div>
+        <div class="row"><span class="name">treeProvider.ts</span><span class="path">src</span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">＋</span></span></div>
+        <div class="row"><span class="name">extension.ts</span><span class="path">src</span><span class="notecount">💬 1</span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">＋</span></span></div>
+        <div class="group"><span class="twist">▾</span>Reviewed <span class="count">2</span></div>
+        <div class="row"><span class="name">git.ts</span><span class="path">src</span><span class="notecount">💬 1</span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">−</span></span></div>
+        <div class="row"><span class="name">README.md</span><span class="path"></span><span class="spacer"></span><span class="hoveracts"><span class="icon btn">➚</span><span class="icon btn">−</span></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">6A</span>Hand-off to Claude — success</h2>
+  <p class="desc">A new view-title button (⇪) writes all current notes for the branch to a hand-off file under <code>.git/delta-review/</code> (file, line, text, outdated flag, referenced code). The companion Claude Code skill reads it. Toast confirms and offers to copy a prompt.</p>
+  <div class="window">
+    <div class="titlebar">Source Control</div>
+    <div class="layout" style="min-height: 0;">
+      <div class="editor" style="position: relative; min-height: 90px;">
+        <div class="toast">
+          Delta Review: 4 notes handed off for branch "feat/sort-order"
+          <div class="tsrc">Ask Claude Code to "address my review notes" — <a style="color:#3794ff;" href="#">Copy prompt</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="scenario">
+  <h2><span class="id">6B</span>Hand-off to Claude — nothing to hand off</h2>
+  <p class="desc">With zero notes on the branch, the button reports it instead of writing an empty file.</p>
+  <div class="window">
+    <div class="titlebar">Source Control</div>
+    <div class="layout" style="min-height: 0;">
+      <div class="editor" style="position: relative; min-height: 90px;">
+        <div class="toast">
+          Delta Review: no notes on branch "feat/sort-order" — add notes in a review diff first
+          <div class="tsrc">Source: Delta Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
