@@ -75,6 +75,29 @@ export const clusterFilesForKey = (
   return clusterBucketForKey(model, clusterKey)?.files ?? [];
 };
 
+// Order-preserving filter of a file list down to one review status. Returns
+// a new array; the ReviewFile objects are kept by reference, so callers keep
+// the model's path-sorted order and object identity.
+export const filterByStatus = (
+  files: readonly ReviewFile[],
+  status: FileReviewStatus,
+): ReviewFile[] => files.filter((file) => file.status === status);
+
+// What a real cluster's body should render in grouped mode: its needs-review
+// rows, the dim "All files reviewed." message, or the empty-cluster message.
+export type ClusterBodyState = "no-files" | "all-reviewed" | "has-needs-review";
+
+export const clusterBodyState = (
+  files: readonly ReviewFile[],
+): ClusterBodyState => {
+  if (files.length === 0) {
+    return "no-files";
+  }
+  return files.some((file) => file.status === FileReviewStatus.NeedsReview)
+    ? "has-needs-review"
+    : "all-reviewed";
+};
+
 // Context value for a cluster-kind tree row, driving which bulk action its
 // row offers: ✓ while anything still needs review, − when all reviewed,
 // nothing when the bucket is empty.

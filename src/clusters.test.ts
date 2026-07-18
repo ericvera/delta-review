@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ClusterModel,
   ClustersContract,
+  clusterBodyState,
   clusterBucketForKey,
   clusterContextValue,
   clusterCountDescription,
   clusterFilesForKey,
+  filterByStatus,
   loadClustersContract,
   parseClustersContract,
   resolveClusterModel,
@@ -442,6 +444,59 @@ describe("clusterFilesForKey / clusterBucketForKey", () => {
     expect(clusterBucketForKey(model, "unclustered")).toBeUndefined();
     expect(clusterBucketForKey(model, "auto")).toBeUndefined();
     expect(clusterBucketForKey(model, "c9")).toBeUndefined();
+  });
+});
+
+describe("filterByStatus", () => {
+  it("returns only needs-review files, preserving order", () => {
+    const a = file("a.ts");
+    const c = file("c.ts");
+    const mixed = [a, reviewedFile("b.ts"), c, reviewedFile("d.ts")];
+    expect(filterByStatus(mixed, FileReviewStatus.NeedsReview)).toEqual([a, c]);
+  });
+
+  it("returns only reviewed files, preserving order", () => {
+    const b = reviewedFile("b.ts");
+    const d = reviewedFile("d.ts");
+    const mixed = [file("a.ts"), b, file("c.ts"), d];
+    expect(filterByStatus(mixed, FileReviewStatus.Reviewed)).toEqual([b, d]);
+  });
+
+  it("returns empty for empty input", () => {
+    expect(filterByStatus([], FileReviewStatus.NeedsReview)).toEqual([]);
+    expect(filterByStatus([], FileReviewStatus.Reviewed)).toEqual([]);
+  });
+
+  it("returns a new array keeping ReviewFile objects by reference", () => {
+    const a = file("a.ts");
+    const input = [a];
+    const result = filterByStatus(input, FileReviewStatus.NeedsReview);
+    expect(result).not.toBe(input);
+    expect(result[0]).toBe(a);
+  });
+});
+
+describe("clusterBodyState", () => {
+  it("is no-files for an empty list", () => {
+    expect(clusterBodyState([])).toBe("no-files");
+  });
+
+  it("is all-reviewed when every file is reviewed", () => {
+    expect(clusterBodyState([reviewedFile("a.ts"), reviewedFile("b.ts")])).toBe(
+      "all-reviewed",
+    );
+  });
+
+  it("is has-needs-review for a mixed list", () => {
+    expect(clusterBodyState([reviewedFile("a.ts"), file("b.ts")])).toBe(
+      "has-needs-review",
+    );
+  });
+
+  it("is has-needs-review when every file needs review", () => {
+    expect(clusterBodyState([file("a.ts"), file("b.ts")])).toBe(
+      "has-needs-review",
+    );
   });
 });
 
