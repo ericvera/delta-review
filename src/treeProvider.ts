@@ -2,10 +2,12 @@ import { dirname } from "node:path";
 import * as vscode from "vscode";
 import {
   ClusterModel,
+  clusterBodyState,
   clusterBucketForKey,
   clusterContextValue,
   clusterCountDescription,
   clusterFilesForKey,
+  filterByStatus,
 } from "./clusters";
 import {
   createReviewFolderUri,
@@ -42,13 +44,20 @@ interface MessageElement {
   text: string;
 }
 
+// The grouped view's bottom bucket collecting every reviewed file (all
+// triages, all origins)
+interface ReviewedBucketElement {
+  kind: "reviewedBucket";
+}
+
 interface FolderElement {
   kind: "folder";
   // Exactly one scope is set: the status group whose non-auto files this
-  // folder subdivides (ungrouped), or the cluster whose files it subdivides
-  // (grouped)
+  // folder subdivides (ungrouped), the cluster whose needs-review files it
+  // subdivides (grouped), or the grouped Reviewed bucket
   status?: FileReviewStatus;
   clusterKey?: string;
+  inReviewedBucket?: true;
   // Repo-relative directory path, '/'-separated (git style)
   path: string;
 }
@@ -60,9 +69,6 @@ interface FileElement {
   // Auto and Unclustered buckets): they render flat in both layouts, so the
   // row shows the directory even in tree mode
   alwaysFlat?: true;
-  // Set on rows rendered under cluster grouping, where reviewed files stay
-  // visible in place: reviewed rows append ✓ to the description
-  grouped?: true;
 }
 
 export type ReviewTreeElement =
@@ -70,17 +76,25 @@ export type ReviewTreeElement =
   | AutoGroupElement
   | ClusterElement
   | MessageElement
+  | ReviewedBucketElement
   | FolderElement
   | FileElement;
 
 type CollapsibleElement =
-  GroupElement | AutoGroupElement | ClusterElement | FolderElement;
+  | GroupElement
+  | AutoGroupElement
+  | ClusterElement
+  | ReviewedBucketElement
+  | FolderElement;
 
 // Stable key for persisting collapse state. Groups keep the bare status value
 // and unscoped folders keep `folder:<status>:<path>` for compatibility with
-// previously stored state; cluster-scoped folders use the cluster key instead
-// (the key sets never collide: statuses are "needs-review"/"reviewed",
-// cluster keys are "c<n>"/"unclustered"/"auto").
+// previously stored state; cluster-scoped folders use the cluster key and
+// reviewed-bucket folders use "reviewedBucket" instead. The namespaces never
+// collide: statuses are "needs-review"/"reviewed", cluster keys are
+// "c<n>"/"unclustered"/"auto", and the grouped bucket is "reviewedBucket" —
+// which also keeps its collapse state separate from the ungrouped Reviewed
+// group's bare "reviewed" key.
 export const collapseKeyFor = (element: CollapsibleElement): string => {
   switch (element.kind) {
     case "group":
@@ -89,8 +103,13 @@ export const collapseKeyFor = (element: CollapsibleElement): string => {
       return `autoGroup:${element.status}`;
     case "cluster":
       return `cluster:${element.clusterKey}`;
+    case "reviewedBucket":
+      return "reviewedBucket";
     case "folder":
-      return `folder:${element.clusterKey ?? element.status}:${element.path}`;
+      return `folder:${
+        element.clusterKey ??
+        (element.inReviewedBucket ? "reviewedBucket" : element.status)
+      }:${element.path}`;
   }
 };
 
@@ -137,20 +156,26 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (element === undefined) {
       const clusterModel = this.getClusterModel();
       if (this.isGrouped() && clusterModel !== undefined) {
-        // Real clusters in contract order — empty ones included, they render
-        // a message row — then Unclustered and Auto only when non-empty
+        // Real clusters in contract order — empty and fully reviewed ones
+        // included, they render a message row — then Unclustered and Auto
+        // only while they hold a needs-review file (their reviewed members
+        // live in the Reviewed bucket), then the Reviewed bucket always last
         const root: ReviewTreeElement[] = clusterModel.clusters.map(
           (_, index): ClusterElement => ({
             kind: "cluster",
             clusterKey: `c${index}`,
           }),
         );
-        if (clusterModel.unclustered.length > 0) {
-          root.push({ kind: "cluster", clusterKey: "unclustered" });
+        for (const clusterKey of ["unclustered", "auto"] as const) {
+          const needsReview = filterByStatus(
+            clusterFilesForKey(clusterModel, clusterKey),
+            FileReviewStatus.NeedsReview,
+          );
+          if (needsReview.length > 0) {
+            root.push({ kind: "cluster", clusterKey });
+          }
         }
-        if (clusterModel.auto.length > 0) {
-          root.push({ kind: "cluster", clusterKey: "auto" });
-        }
+        root.push({ kind: "reviewedBucket" });
         return root;
       }
       return [
@@ -192,10 +217,23 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (element.kind === "cluster") {
       return this.clusterChildren(element.clusterKey);
     }
+    if (element.kind === "reviewedBucket") {
+      // Every reviewed file, all triages and origins. List mode already shows
+      // the directory description, so rows stay plain (no alwaysFlat).
+      const reviewed = filterByStatus(
+        this.model.files,
+        FileReviewStatus.Reviewed,
+      );
+      if (this.getViewMode() === "list") {
+        return reviewed.map((file): FileElement => ({ kind: "file", file }));
+      }
+      return this.treeChildren(reviewed, "", { inReviewedBucket: true });
+    }
     if (element.kind === "folder") {
       return this.treeChildren(this.folderScopeFiles(element), element.path, {
         status: element.status,
         clusterKey: element.clusterKey,
+        inReviewedBucket: element.inReviewedBucket,
       });
     }
     return [];
@@ -206,43 +244,58 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (clusterModel === undefined) {
       return [];
     }
+    // Bodies render only needs-review rows — reviewed members live in the
+    // Reviewed bucket. Header counts/context values still use full membership
+    // (computed in clusterTreeItem), so a fully reviewed cluster keeps n/n.
     const files = clusterFilesForKey(clusterModel, clusterKey);
+    const needsReview = filterByStatus(files, FileReviewStatus.NeedsReview);
     // Unclustered and Auto contents are always a flat list, in both layouts
     // (their files are scattered — a tree would be all folders)
     if (clusterKey === "unclustered" || clusterKey === "auto") {
-      return files.map((file): FileElement => ({
+      return needsReview.map((file): FileElement => ({
         kind: "file",
         file,
         alwaysFlat: true,
-        grouped: true,
       }));
     }
-    if (files.length === 0) {
-      return [
-        {
-          kind: "message",
-          text: "No files from this cluster are in the current change.",
-        },
-      ];
+    switch (clusterBodyState(files)) {
+      case "no-files":
+        return [
+          {
+            kind: "message",
+            text: "No files from this cluster are in the current change.",
+          },
+        ];
+      case "all-reviewed":
+        return [{ kind: "message", text: "All files reviewed." }];
+      case "has-needs-review":
+        if (this.getViewMode() === "list") {
+          return needsReview.map((file): FileElement => ({
+            kind: "file",
+            file,
+          }));
+        }
+        return this.treeChildren(needsReview, "", { clusterKey });
     }
-    if (this.getViewMode() === "list") {
-      return files.map((file): FileElement => ({
-        kind: "file",
-        file,
-        grouped: true,
-      }));
-    }
-    return this.treeChildren(files, "", { clusterKey });
   }
 
-  // The full file list a folder subdivides: its cluster's files (grouped) or
-  // its status group's non-auto files (ungrouped)
+  // The file list a folder subdivides: its cluster's needs-review files
+  // (grouped), the model's reviewed files (Reviewed bucket), or its status
+  // group's non-auto files (ungrouped)
   private folderScopeFiles(element: FolderElement): ReviewFile[] {
     if (element.clusterKey !== undefined) {
       const clusterModel = this.getClusterModel();
       return clusterModel === undefined
         ? []
-        : clusterFilesForKey(clusterModel, element.clusterKey);
+        : filterByStatus(
+            clusterFilesForKey(clusterModel, element.clusterKey),
+            FileReviewStatus.NeedsReview,
+          );
+    }
+    if (element.inReviewedBucket === true) {
+      return this.model === undefined
+        ? []
+        : filterByStatus(this.model.files, FileReviewStatus.Reviewed);
     }
     return element.status === undefined
       ? []
@@ -256,7 +309,11 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
   private treeChildren(
     files: ReviewFile[],
     parentPath: string,
-    scope: { status?: FileReviewStatus; clusterKey?: string },
+    scope: {
+      status?: FileReviewStatus;
+      clusterKey?: string;
+      inReviewedBucket?: true;
+    },
   ): ReviewTreeElement[] {
     const prefix = parentPath === "" ? "" : `${parentPath}/`;
     const folderNames = new Set<string>();
@@ -278,13 +335,10 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
         kind: "folder",
         status: scope.status,
         clusterKey: scope.clusterKey,
+        inReviewedBucket: scope.inReviewedBucket,
         path: `${prefix}${name}`,
       })),
-      ...directFiles.map((file): FileElement =>
-        scope.clusterKey !== undefined
-          ? { kind: "file", file, grouped: true }
-          : { kind: "file", file },
-      ),
+      ...directFiles.map((file): FileElement => ({ kind: "file", file })),
     ];
   }
 
@@ -340,6 +394,27 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       return this.clusterTreeItem(element);
     }
 
+    if (element.kind === "reviewedBucket") {
+      const item = new vscode.TreeItem(
+        "Reviewed",
+        this.isCollapsed(collapseKeyFor(element), false)
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.iconPath = new vscode.ThemeIcon("check");
+      // Plain count over the whole model — auto files included
+      item.description = String(
+        this.model === undefined
+          ? 0
+          : filterByStatus(this.model.files, FileReviewStatus.Reviewed).length,
+      );
+      item.id = "reviewedBucket";
+      // Reuses the ungrouped Reviewed group's context value so its bulk
+      // unmark inline action applies unchanged
+      item.contextValue = "reviewedGroup";
+      return item;
+    }
+
     if (element.kind === "message") {
       // Plain label, no icon, no command — reads as the dim informational row
       // of the mock
@@ -358,20 +433,15 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.Expanded,
       );
-      item.id = `folder:${element.clusterKey ?? element.status}:${element.path}`;
+      // Same scope discriminator as the collapse key, so grouped, bucket,
+      // and ungrouped folders for one path stay distinct rows
+      item.id = collapseKeyFor(element);
       if (element.clusterKey !== undefined) {
-        // Cluster folders mix statuses (reviewed files stay visible in
-        // place): ✓ while anything underneath still needs review, − once
-        // everything is reviewed
-        const prefix = `${element.path}/`;
-        const hasNeedsReview = this.folderScopeFiles(element).some(
-          (file) =>
-            file.path.startsWith(prefix) &&
-            file.status === FileReviewStatus.NeedsReview,
-        );
-        item.contextValue = hasNeedsReview
-          ? "needsReviewFolder"
-          : "reviewedFolder";
+        // Cluster folders only exist while a needs-review descendant does
+        item.contextValue = "needsReviewFolder";
+      } else if (element.inReviewedBucket === true) {
+        // Every descendant is reviewed by construction
+        item.contextValue = "reviewedFolder";
       } else {
         item.contextValue =
           element.status === FileReviewStatus.NeedsReview
@@ -413,15 +483,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
           ? `${directoryText} ${movedText}`
           : movedText
         : directoryText;
-    // Under cluster grouping, reviewed files stay visible in place; the ✓
-    // (plus the muted decoration color) is what marks them as done
-    const reviewedMark =
-      element.grouped === true && file.status === FileReviewStatus.Reviewed;
-    item.description = reviewedMark
-      ? locationText !== undefined
-        ? `${locationText} ✓`
-        : "✓"
-      : locationText;
+    item.description = locationText;
     // Hover always leads with the full repo-relative path (the row usually
     // truncates it), with any status notes on separate lines
     const tooltip = new vscode.MarkdownString();
