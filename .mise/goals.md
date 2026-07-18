@@ -20,6 +20,15 @@ in diff editors including the extension's virtual `delta-review-base` left side.
   per-machine-synced: never pushed, gone if the clone is deleted.
 - When the underlying content of a noted line changes afterward, the note is **kept and marked
   outdated** (GitHub-style), not dropped or silently drifted.
+- **Anchoring is content-based, not line-based.** A right-side note stores its line number, the line's
+  text (`lineSnapshot`), and the blob sha of the file at note time (written to the git object store via
+  `hash-object -w`, like review snapshots — deduped across notes). On every refresh the extension
+  diffs the creation blob against the current file and maps each note's line through the hunks
+  independently: notes above/below edits shift correctly, notes whose anchored line was itself edited
+  or deleted become OUTDATED (pinned near the closest surviving line, snapshot shown). This keeps
+  multiple notes in one file correct across agent edits, reloads, and edits made while no editor was
+  open. Left-side notes anchor to the immutable base blob and never move. The agent likewise locates
+  targets by `lineSnapshot` content, not raw line numbers, and responds by note id.
 - **Lifecycle**: open → addressed → resolved. The agent marks a note *addressed* with a response when it
   acts on it; the reviewer *resolves* it to confirm (or resolves directly at any time). Resolved notes
   drop out of the agent's work set. Rendered with VS Code's native resolved/unresolved thread states
