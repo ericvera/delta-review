@@ -40,7 +40,11 @@ in diff editors including the extension's virtual `delta-review-base` left side.
     marketplace) documents the contract for agents: where the notes file is, its schema, how to act on
     open notes, and how to respond.
   - The agent writes to a **separate responses file** it owns in the same directory (per note id:
-    status + response text). One writer per file — no conflicts. The extension merges by note id and
+    status + response text + an **optional `anchor`** — file, line, lineSnapshot — pointing at the new
+    code that addresses the note). One writer per file — no conflicts. When an anchor is present the
+    addressed thread relocates there (even across files) and the OUTDATED flag is suppressed — the
+    change was expected; the original snapshot stays visible as context. Without an anchor, the
+    content-based re-mapping fallback applies. The extension merges by note id and
     the existing directory watcher makes agent progress appear **live**: threads grow the agent's
     reply, statuses flip to addressed as it works.
   - Trigger is a plain prompt to Claude Code ("address my review notes") — the skill description

@@ -42,6 +42,10 @@ is it possible to do inline comments in the diff?
 
 ## UI Tweaks Log
 
+- Scenario 5 clarified: an addressed response may carry an optional anchor (file/line/snapshot) to the
+  new code; the thread relocates there and OUTDATED is suppressed (expected change). Fallback without
+  an anchor is the normal content re-mapping.
+
 - v1 had a ⇪ "hand off notes to Claude" title button with success/nothing toasts (scenarios 6A/6B) —
   removed: no export step exists; the storage file is the contract and the trigger is a prompt.
 - v1 was right-side-only commenting — v2 shows the + gutter on both sides (scenario 1) and adds a
