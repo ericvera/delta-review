@@ -92,9 +92,10 @@ VS Code comment menus (all `when`-gated; see `package.json:130-259` for the proj
 
 - `thread.comments` is immutable-by-reassignment: always `thread.comments = [...]`, never mutate in
   place — edits won't render otherwise.
-- `CommentReply` handlers must read `reply.thread` to find the note id — keep a
-  `WeakMap<CommentThread, string>` or stash the id on the thread's `contextValue` suffix; the
-  Task 3.1 cache maps id→thread, also maintain the reverse.
+- `CommentReply` handlers must read `reply.thread` to find the note id — maintain a reverse
+  `Map<CommentThread, string>` alongside the Task 3.1 id→thread cache. Do NOT encode the id into
+  `contextValue`: the menus above gate with exact-equality `when` clauses
+  (`commentThread == addressedNote`), which a suffix silently breaks.
 - Icons on comment/thread menus require the command's `icon` field in `package.json` (codicons:
   `$(edit)`, `$(trash)`, `$(check)`, `$(debug-restart)`).
 - Deleting the reply-less path: do not enable `canReply` on open threads even temporarily during

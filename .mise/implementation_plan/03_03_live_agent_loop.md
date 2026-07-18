@@ -50,17 +50,23 @@ Existing machinery that makes "live" free:
    (extension owns the notes file): `side = "working"`, `file = anchor.file`, lines = anchor line,
    `snapshot = [anchor.snapshot]`, `contentBlob` = hash of the anchor file's current content
    (re-snapshot so future re-anchoring tracks the *new* line), `outdated = false`. One-shot: apply
-   only when the newest unapplied anchor differs from what's already persisted (compare a stored
-   marker, e.g. the applied response's `at`, kept as an extension-owned field on the note — add
-   `appliedAnchorAt?: string` to the Note type as an extension-internal optional field; unknown keys
-   are already tolerated by parsers).
+   only when the newest unapplied anchor differs from what's already persisted, guarded by the
+   note's `appliedAnchorAt?: string` field (the applied response's `at`). This field is a **known,
+   parsed, re-serialized optional field** in `src/notes.ts` (Task 1.1 declares it) — it must NOT be
+   an unknown key: the parser mirrors clusters.ts, which normalizes to known fields only
+   (`clusters.ts:181-216`), so an unknown key would be stripped on the first load→save cycle and
+   the guard would fail, re-applying anchors after every reload.
 3. **Status persistence** (REQ-AGENT-9): `refreshDerived` writes derived `status`
    (addressed/open flips from responses; resolved preserved — REQ-AGENT-6's resolved-wins rule is in
    `mergeThreads`).
 4. **Outdated + base progression** (REQ-ANCHOR-3/4): base-side notes get their current base blob
    from the review model's `diffBaseSha` (`src/model.ts:28`) for the note's file; working-tree edits
-   alone never touch them. Right-side notes diff against current working content. Deleted file →
-   right-side notes outdated, positions kept (REQ-ANCHOR-5).
+   alone never touch them. Both derivation AND thread attachment track the current base: derived
+   positions map `contentBlob → diffBaseSha`, and the thread's URI is
+   `createReviewBaseUri(file, diffBaseSha)` (Task 3.1's URI rule) — when mark-reviewed or a rebase
+   changes `diffBaseSha`, the render pass must dispose + recreate base-side threads at the new URI
+   so they never silently vanish. Right-side notes diff against current working content. Deleted
+   file → right-side notes outdated, positions kept (REQ-ANCHOR-5).
 5. **Rendering** (mock 4): outdated threads show `" • Outdated"` in the label and a dimmed
    `line was: <snapshot first line>` line in the first comment's MarkdownString body. Relocated
    threads re-attach at the new URI (file change ⇒ dispose + recreate the `vscode.CommentThread` —

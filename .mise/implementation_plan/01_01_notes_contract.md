@@ -47,6 +47,10 @@ contract. Copy its idioms:
      Lines 1-based. `snapshot` holds the anchored lines' text (one entry per line of the range).
      `currentStartLine`/`currentEndLine`/`outdated`/`status` are derived fields the extension
      refreshes (REQ-AGENT-9); they persist so agents reading the file get near-current hints.
+     Also declare `appliedAnchorAt?: string` (optional, extension-internal: timestamp of the last
+     response anchor applied to the note, Task 3.3's one-shot guard) — it MUST be parsed and
+     re-serialized like any known field, because the parser normalizes to known fields only and
+     would otherwise strip it on the first load→save cycle.
    - `NotesFile = { version: 1; notes: Note[] }`.
    - `ResponseAnchor = { file: string; line: number; snapshot: string }` (always working-tree).
    - `ResponseEntry = { noteId: string; status: "addressed"; response: string; at: string;
@@ -88,8 +92,9 @@ contract. Copy its idioms:
 
 - Do not import `vscode` or anything that transitively imports it (`clusters.ts` is safe — verify it
   stays `vscode`-free; it is today).
-- `JSON.parse` accepts numbers like `1.0` as `1` — use `Number.isInteger(version) && version === 1`
-  (clusters does this; copy it).
+- `JSON.parse` accepts numbers like `1.0` as `1`, and a strict `!== 1` check passes it — that is
+  the accepted behavior; copy clusters' actual check (`record.version !== 1`, `clusters.ts:195-203`)
+  rather than inventing a stricter one.
 - Keep error strings one-line and user-facing: they surface in `treeView.message`-style warnings.
 
 ## Verification checklist

@@ -76,10 +76,16 @@ VS Code Comments API (engines `^1.90`):
      `vscode.window.showErrorMessage("Delta Review: failed to save note (…)")` and do NOT dispose
      the pending thread — the typed text stays (REQ-NOTE-3/4, mock 2B).
 3. `renderThreads(threads: NoteThread[])` — reconcile a `Map<noteId, vscode.CommentThread>`:
-   - Thread URI: working side → `Uri.file(join(git.repoRoot, note.file))`; base side →
-     `createReviewBaseUri(note.file, note.contentBlob)` — threads attach to the creation blob's doc,
-     which is exactly the displayed base while unchanged; base-progression display comes via derived
-     positions (Task 2.1) and REQ-ANCHOR-4.
+   - Thread URI: working side → `Uri.file(join(git.repoRoot, note.file))`; base side → the
+     **currently displayed** base document, `createReviewBaseUri(note.file, currentDiffBaseSha)`,
+     where `currentDiffBaseSha` is the review model's `diffBaseSha` for that file (`model.ts:28`;
+     `movedFrom` handling as in `openDiff` `extension.ts:378-381`). A `CommentThread` renders only
+     on an exactly matching URI, and the sha travels in `uri.query` (`contentProvider.ts:8-16`) —
+     attaching to the creation blob would make the thread vanish the moment the base progresses
+     (mark-reviewed advances `diffBaseSha`), violating REQ-ANCHOR-4. Fall back to
+     `createReviewBaseUri(note.file, note.contentBlob)` when the file has no current base (not in
+     the review set). When the base sha changes between renders, dispose + recreate the thread at
+     the new URI (URIs are immutable on threads).
    - Range from `currentStartLine/currentEndLine` (convert to 0-based `vscode.Range`).
    - One `vscode.Comment` per turn: author "You" / "Claude", `timestamp: new Date(turn.at)`.
    - `label`: status + optional flag — `"Open"`, `"Addressed"`, `"Resolved"`, plus `" • Outdated"`
