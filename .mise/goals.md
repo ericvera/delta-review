@@ -17,6 +17,11 @@ in diff editors including the extension's virtual `delta-review-base` left side.
 - **Hand-off**: notes are both personal review notes and feedback to hand to Claude Code — there is an
   explicit hand-off mechanism that exposes all current notes (file, line, text, outdated flag) in a form
   Claude Code can act on.
+- **Ownership**: a note is owned by (local clone, branch) — same owning entity as review state
+  (`refs/review/<branch>`). Notes are keyed by branch name (not commit), anchor to file path + line +
+  a snapshot of the line content (the basis for outdated detection), and live in the git common dir so
+  every worktree of the clone sees the same notes for a branch. Not per-user, not per-machine-synced:
+  never pushed, gone if the clone is deleted.
 
 ## Decisions (from clarifying Q&A)
 
