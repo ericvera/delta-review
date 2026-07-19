@@ -348,27 +348,30 @@ export const activate = async (
           return;
         }
         lastNotesFileWarning = undefined;
-        if (notesResult.state === "ok" && notesResult.file.notes.length > 0) {
-          const responsesResult = await loadResponses(
-            gitForNotes,
-            computed.branch,
+        // The responses file is validated regardless of note count: an
+        // invalid file warns (deduped) even with no notes on disk — only a
+        // missing responses file is the silent normal state
+        const responsesResult = await loadResponses(
+          gitForNotes,
+          computed.branch,
+        );
+        if (generation !== refreshGeneration) {
+          return;
+        }
+        let responses: ResponsesFile | undefined;
+        if (responsesResult.state === "invalid") {
+          // Invalid responses file: non-fatal — warn and behave as missing
+          lastResponsesFileWarning = warnOnce(
+            lastResponsesFileWarning,
+            `Delta Review: review notes responses: ${responsesResult.error}`,
           );
-          if (generation !== refreshGeneration) {
-            return;
-          }
-          let responses: ResponsesFile | undefined;
-          if (responsesResult.state === "invalid") {
-            // Invalid responses file: non-fatal — warn and behave as missing
-            lastResponsesFileWarning = warnOnce(
-              lastResponsesFileWarning,
-              `Delta Review: review notes responses: ${responsesResult.error}`,
-            );
-          } else {
-            // Missing is the normal state (no agent has responded) — silent
-            lastResponsesFileWarning = undefined;
-            responses =
-              responsesResult.state === "ok" ? responsesResult.file : undefined;
-          }
+        } else {
+          // Missing is the normal state (no agent has responded) — silent
+          lastResponsesFileWarning = undefined;
+          responses =
+            responsesResult.state === "ok" ? responsesResult.file : undefined;
+        }
+        if (notesResult.state === "ok" && notesResult.file.notes.length > 0) {
           // Anchor resolution runs against the working tree once per refresh;
           // the same resolver drives anchor application (refreshDerived) and
           // the rendered merge, so both see identical effective anchors

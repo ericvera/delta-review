@@ -114,10 +114,30 @@ const countLines = (content: string): number => {
     : segments.length;
 };
 
+// Agent-written anchors are untrusted input: an anchor's file must be a
+// repo-relative `/`-separated path. Absolute paths, `\` separators,
+// drive-letter prefixes, and `.`/`..` segments are all rejected so an
+// anchor can never read or persist a path outside git.repoRoot — such an
+// anchor counts as dangling.
+const isRepoRelativeAnchorFile = (file: string): boolean => {
+  if (
+    file === "" ||
+    file.includes("\\") ||
+    isAbsolute(file) ||
+    /^[A-Za-z]:/.test(file)
+  ) {
+    return false;
+  }
+  return file
+    .split("/")
+    .every((segment) => segment !== "" && segment !== "." && segment !== "..");
+};
+
 // Builds the anchorResolves callback for a responses file: an anchor
-// resolves when its file exists in the working tree and its line is within
-// the file's line count. Each distinct anchored file is read once; the
-// returned callback is synchronous (mergeThreads requirement).
+// resolves when its file is a repo-relative path that exists in the working
+// tree and its line is within the file's line count. Each distinct anchored
+// file is read once; the returned callback is synchronous (mergeThreads
+// requirement).
 export const buildAnchorResolver = async (
   responses: ResponsesFile | undefined,
   readWorkingContent: (file: string) => Promise<string | undefined>,
@@ -126,6 +146,11 @@ export const buildAnchorResolver = async (
   for (const entry of responses?.responses ?? []) {
     const file = entry.anchor?.file;
     if (file === undefined || lineCounts.has(file)) {
+      continue;
+    }
+    if (!isRepoRelativeAnchorFile(file)) {
+      // Never read a non-repo-relative path — dangling by definition
+      lineCounts.set(file, undefined);
       continue;
     }
     const content = await readWorkingContent(file);
@@ -504,6 +529,11 @@ export const refreshDerived = async (
   for (const thread of threads) {
     const anchor = thread.effectiveAnchor;
     if (anchor === undefined) {
+      continue;
+    }
+    if (!isRepoRelativeAnchorFile(anchor.file)) {
+      // An injected anchorResolves may accept paths the store must never
+      // touch — a non-repo-relative anchor stays dangling here regardless
       continue;
     }
     // The applied response's `at`: mergeThreads picks effectiveAnchor from a

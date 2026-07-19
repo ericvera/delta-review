@@ -196,3 +196,19 @@
   file outdated-but-listed, corrupt responses (extension keeps working, recovers on fix),
   corrupt notes (never rewritten, no rendering, mutation refused), and a 5s mtime-stability
   window proving no refresh/write oscillation. Toast dedup wording remains eyeball-only.
+
+## 3.3 (review fixes) — responses-file warning without notes; anchor paths confined to the repo
+
+- Key changes: `src/extension.ts` — refresh's notes block now loads/validates the responses
+  file before the note-count branch, so an invalid responses file warns (deduped via
+  `lastResponsesFileWarning`, cleared on valid/missing) even when the notes file is
+  missing/empty; only a missing responses file stays silent. `src/notesStore.ts` — new
+  `isRepoRelativeAnchorFile` guard: agent-written `anchor.file` must be a repo-relative
+  `/`-separated path (rejects absolute paths, `..`/`.` segments, backslash separators,
+  drive-letter prefixes, empty segments); enforced in `buildAnchorResolver` (bad paths are
+  never read and never resolve) and again in `refreshDerived`'s anchor-application path (an
+  injected resolver cannot force an escape) — such anchors count as dangling: no relocation,
+  no side flip, response text still merges. `src/notesStore.test.ts` — two new tests
+  (traversal anchor stays dangling under an accept-all injected resolver; resolver rejects
+  traversal/absolute/backslash/drive/`.`-segment paths without reading them), 252 total.
+- Deviations from plan: none — targeted fixes for the two reviewer-confirmed defects only.

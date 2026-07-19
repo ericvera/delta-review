@@ -752,6 +752,43 @@ describe("anchor application", () => {
     expect(refreshed.notes[0].appliedAnchorAt).toBeUndefined();
   });
 
+  it("treats a traversal anchor as dangling even when an injected resolver accepts it", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        at: responseAt,
+        anchor: { file: "../outside.txt", line: 1, snapshot: "outside" },
+      },
+    ]);
+    const defaults = refreshOptions();
+    const refreshed = await refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      await loadedResponses(),
+      refreshOptions({
+        // Even a readable escape target must never be applied
+        readWorkingContent: async (file) =>
+          file === "../outside.txt"
+            ? "outside\n"
+            : defaults.readWorkingContent(file),
+        anchorResolves: () => true,
+      }),
+    );
+    expect(refreshed.notes[0]).toMatchObject({
+      side: "working",
+      file: "a.txt",
+      startLine: 2,
+      endLine: 3,
+      contentBlob: note.contentBlob,
+      // The response still merges as an agent turn — only the anchor is
+      // ignored
+      status: "addressed",
+    });
+    expect(refreshed.notes[0].appliedAnchorAt).toBeUndefined();
+  });
+
   it("ignores an anchor whose line is beyond the file's line count", async () => {
     const note = await createNote(git, "main", draft());
     await writeResponseEntries([
@@ -826,5 +863,32 @@ describe("buildAnchorResolver", () => {
     expect(resolves({ file: "trailing.txt", line: 1, snapshot: "" })).toBe(
       false,
     );
+  });
+
+  it("rejects non-repo-relative anchor paths without ever reading them", async () => {
+    const readAttempts: string[] = [];
+    const readAnything = async (file: string): Promise<string> => {
+      readAttempts.push(file);
+      return "a\nb\nc\n";
+    };
+    const badPaths = [
+      "../outside.txt",
+      "nested/../../outside.txt",
+      "/etc/passwd",
+      "..\\outside.txt",
+      "nested\\file.txt",
+      "C:\\outside.txt",
+      "C:/outside.txt",
+      "./a.txt",
+      "",
+    ];
+    const resolves = await buildAnchorResolver(
+      responsesWith(badPaths.map((file) => ({ file, line: 1 }))),
+      readAnything,
+    );
+    for (const file of badPaths) {
+      expect(resolves({ file, line: 1, snapshot: "" })).toBe(false);
+    }
+    expect(readAttempts).toEqual([]);
   });
 });
