@@ -40,6 +40,10 @@ import {
   ViewMode,
 } from "./treeProvider";
 
+// Dedupes the non-fatal notes-refresh warning across watcher-triggered
+// refreshes (same pattern the response-file warning will use)
+let lastNotesWarning: string | undefined;
+
 export const activate = async (
   context: vscode.ExtensionContext,
 ): Promise<void> => {
@@ -292,51 +296,72 @@ export const activate = async (
 
       // Review-note threads: load, refresh derived positions against the
       // current documents, and render. The store never creates a notes file
-      // here — with no notes on disk there is nothing to refresh.
-      const gitForNotes = git;
-      const notesResult = await loadNotes(gitForNotes, computed.branch);
-      if (generation !== refreshGeneration) {
-        return;
-      }
-      if (notesResult.state === "ok" && notesResult.file.notes.length > 0) {
-        const responsesResult = await loadResponses(
-          gitForNotes,
-          computed.branch,
-        );
+      // here — with no notes on disk there is nothing to refresh. Notes are
+      // a layer on top of the review model, so a notes failure (e.g. an
+      // unwritable .git/delta-review during refreshDerived's persistence)
+      // must not tear down the already-rendered tree: this block has its own
+      // catch that leaves the model, tree, status bar, and any previously
+      // rendered threads intact and only surfaces a deduped warning.
+      try {
+        const gitForNotes = git;
+        const notesResult = await loadNotes(gitForNotes, computed.branch);
         if (generation !== refreshGeneration) {
           return;
         }
-        const responses =
-          responsesResult.state === "ok" ? responsesResult.file : undefined;
-        const refreshed = await refreshDerived(
-          gitForNotes,
-          computed.branch,
-          notesResult.file,
-          responses,
-          {
-            readWorkingContent: async (path) => {
-              try {
-                return await readFile(join(gitForNotes.repoRoot, path), "utf8");
-              } catch {
-                return undefined;
-              }
+        if (notesResult.state === "ok" && notesResult.file.notes.length > 0) {
+          const responsesResult = await loadResponses(
+            gitForNotes,
+            computed.branch,
+          );
+          if (generation !== refreshGeneration) {
+            return;
+          }
+          const responses =
+            responsesResult.state === "ok" ? responsesResult.file : undefined;
+          const refreshed = await refreshDerived(
+            gitForNotes,
+            computed.branch,
+            notesResult.file,
+            responses,
+            {
+              readWorkingContent: async (path) => {
+                try {
+                  return await readFile(
+                    join(gitForNotes.repoRoot, path),
+                    "utf8",
+                  );
+                } catch {
+                  return undefined;
+                }
+              },
+              baseBlobFor: (path) => baseBlobForPath(computed, path),
+              // Response-anchor resolution lands with the agent-response
+              // flow; until then every anchor is treated as dangling
+              anchorResolves: () => false,
             },
-            baseBlobFor: (path) => baseBlobForPath(computed, path),
-            // Response-anchor resolution lands with the agent-response flow;
-            // until then every anchor is treated as dangling
-            anchorResolves: () => false,
-          },
-        );
+          );
+          if (generation !== refreshGeneration) {
+            return;
+          }
+          commentController.renderThreads(
+            mergeThreads(refreshed, responses, () => false),
+          );
+        } else if (notesResult.state !== "invalid") {
+          // Missing or empty — clear any rendered threads. An invalid file
+          // leaves the display untouched (the store refuses to overwrite it).
+          commentController.renderThreads([]);
+        }
+      } catch (notesError) {
         if (generation !== refreshGeneration) {
           return;
         }
-        commentController.renderThreads(
-          mergeThreads(refreshed, responses, () => false),
-        );
-      } else if (notesResult.state !== "invalid") {
-        // Missing or empty — clear any rendered threads. An invalid file
-        // leaves the display untouched (the store refuses to overwrite it).
-        commentController.renderThreads([]);
+        // Watcher bursts re-run refresh constantly; identical failures warn
+        // once until the message changes
+        const warning = `Delta Review: review notes refresh failed (${notesError instanceof Error ? notesError.message : String(notesError)})`;
+        if (warning !== lastNotesWarning) {
+          lastNotesWarning = warning;
+          void vscode.window.showWarningMessage(warning);
+        }
       }
     } catch (error) {
       if (generation !== refreshGeneration) {

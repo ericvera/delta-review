@@ -95,3 +95,13 @@
   anchoring, derived-position shift on refresh, pre-seeded-note rendering at activation
   (reload-window substitute), and the unwritable-store failure path (file untouched, thread
   not adopted). The visible `+` gutter hover remains eyeball-only in the F5 dev host.
+
+## Task 3.1 (review fix) — Notes-refresh failures no longer tear down the review tree
+
+- Key changes: `src/extension.ts` — the notes block in `refresh()` now has its own try/catch
+  (it previously shared the model catch, so a throwing `refreshDerived`/`loadNotes` replaced
+  the whole tree with a fatal error state). On a notes failure the model, tree, badge, status
+  bar, and previously rendered threads stay intact; a notes-scoped
+  `showWarningMessage` surfaces the error, deduped via a module-level `lastNotesWarning`
+  string (the same pattern Task 3.3 will use for response-file warnings).
+- Deviations from plan: none — review-directed fix only.
