@@ -277,15 +277,58 @@ describe("mutation helpers", () => {
 
   it("editReviewerTurn rewrites text and preserves the timestamp", async () => {
     const note = await createNote(git, "main", draft());
-    const updated = await editReviewerTurn(git, "main", note.id, 0, "edited");
+    const updated = await editReviewerTurn(
+      git,
+      "main",
+      note.id,
+      note.turns[0].at,
+      "edited",
+    );
     expect(updated.turns[0]).toEqual({ text: "edited", at: note.turns[0].at });
   });
 
-  it("editReviewerTurn rejects an out-of-range turn index", async () => {
+  it("editReviewerTurn rejects a timestamp no turn carries", async () => {
     const note = await createNote(git, "main", draft());
     await expect(
-      editReviewerTurn(git, "main", note.id, 5, "edited"),
-    ).rejects.toThrow(/no turn at index 5/);
+      editReviewerTurn(git, "main", note.id, "2020-01-01T00:00:00.000Z", "x"),
+    ).rejects.toThrow(/no turn with timestamp 2020-01-01T00:00:00\.000Z/);
+  });
+
+  it("editReviewerTurn still hits the right turn after another turn is deleted", async () => {
+    const note = await createNote(git, "main", draft({ text: "first" }));
+    await appendReviewerTurn(git, "main", note.id, "second");
+    const withThird = await appendReviewerTurn(git, "main", note.id, "third");
+    const thirdAt = withThird.turns[2].at;
+
+    // Deleting an earlier turn shifts array indices under the third turn
+    await deleteReviewerTurn(git, "main", note.id, 0);
+    const updated = await editReviewerTurn(
+      git,
+      "main",
+      note.id,
+      thirdAt,
+      "third-edited",
+    );
+
+    expect(updated.turns.map((turn) => turn.text)).toEqual([
+      "second",
+      "third-edited",
+    ]);
+    expect(updated.turns[1].at).toBe(thirdAt);
+    const loaded = await loadNotes(git, "main");
+    expect(
+      loaded.state === "ok" && loaded.file.notes[0].turns.map((t) => t.text),
+    ).toEqual(["second", "third-edited"]);
+  });
+
+  it("editReviewerTurn rejects a deleted turn's timestamp", async () => {
+    const note = await createNote(git, "main", draft({ text: "first" }));
+    await appendReviewerTurn(git, "main", note.id, "second");
+    const firstAt = note.turns[0].at;
+    await deleteReviewerTurn(git, "main", note.id, 0);
+    await expect(
+      editReviewerTurn(git, "main", note.id, firstAt, "edited"),
+    ).rejects.toThrow(/no turn with timestamp/);
   });
 
   it("deleteNote removes the note and drops it from the anchor tree", async () => {

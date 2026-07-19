@@ -55,6 +55,9 @@ const statusContextValues: Record<NoteStatus, string> = {
 interface NoteComment extends vscode.Comment {
   noteId: string;
   reviewerTurnIndex?: number;
+  // The turn's `at` timestamp — stable identity for edits (indices shift
+  // when another turn is deleted, `at` never changes)
+  turnAt: string;
   // The raw turn text: `body` holds display markdown (escaped, and possibly
   // carrying the outdated snapshot block), so edit mode swaps this in instead
   turnText: string;
@@ -185,6 +188,7 @@ export const createNoteCommentController = (
         author: { name: turn.author === "reviewer" ? "You" : "Claude" },
         timestamp: new Date(turn.at),
         noteId: thread.note.id,
+        turnAt: turn.at,
         turnText: turn.text,
       };
       if (turn.author === "reviewer") {
@@ -200,20 +204,31 @@ export const createNoteCommentController = (
     thread: NoteThread,
   ): void => {
     // A background re-render must not blow away an in-progress edit:
-    // comments left in Editing mode are carried over by reviewer-turn index
-    const editing = new Map<number, vscode.Comment>();
+    // comments left in Editing mode are carried over by turn timestamp —
+    // stable identity, so a concurrent turn delete can never retarget the
+    // edit onto a different turn (an edit whose turn was deleted just drops)
+    const editing = new Map<string, NoteComment>();
     for (const existing of commentThread.comments) {
-      const index = (existing as NoteComment).reviewerTurnIndex;
-      if (existing.mode === vscode.CommentMode.Editing && index !== undefined) {
-        editing.set(index, existing);
+      const noteComment = existing as NoteComment;
+      if (
+        existing.mode === vscode.CommentMode.Editing &&
+        noteComment.reviewerTurnIndex !== undefined
+      ) {
+        editing.set(noteComment.turnAt, noteComment);
       }
     }
-    commentThread.comments = commentsFor(thread).map(
-      (comment) =>
-        (comment.reviewerTurnIndex === undefined
+    commentThread.comments = commentsFor(thread).map((comment) => {
+      const carried =
+        comment.reviewerTurnIndex === undefined
           ? undefined
-          : editing.get(comment.reviewerTurnIndex)) ?? comment,
-    );
+          : editing.get(comment.turnAt);
+      if (carried === undefined) {
+        return comment;
+      }
+      // Remap the carried comment's positional index to the fresh render
+      carried.reviewerTurnIndex = comment.reviewerTurnIndex;
+      return carried;
+    });
     commentThread.label =
       statusLabels[thread.status] + (thread.note.outdated ? " • Outdated" : "");
     commentThread.contextValue = statusContextValues[thread.status];
@@ -419,8 +434,7 @@ export const createNoteCommentController = (
   const saveNoteTurn = async (comment: vscode.Comment): Promise<void> => {
     const noteComment = comment as NoteComment;
     const entry = threadCache.get(noteComment.noteId);
-    const turnIndex = noteComment.reviewerTurnIndex;
-    if (entry === undefined || turnIndex === undefined) {
+    if (entry === undefined || noteComment.reviewerTurnIndex === undefined) {
       return;
     }
     const context = activeContext();
@@ -433,26 +447,35 @@ export const createNoteCommentController = (
       typeof noteComment.body === "string"
         ? noteComment.body
         : noteComment.body.value;
+    if (text.trim() === "") {
+      // A turn is never persisted empty: saving an emptied body cancels the
+      // edit back to the original text
+      cancelNoteTurn(comment);
+      return;
+    }
     try {
+      // The turn is addressed by `at`, not index — a concurrent delete of
+      // another turn shifts indices but cannot retarget this edit
       await editReviewerTurn(
         context.git,
         context.model.branch,
         noteComment.noteId,
-        turnIndex,
+        noteComment.turnAt,
         text,
       );
       // Eager restyle so edit mode closes immediately (a comment still in
       // Editing mode would survive the re-render by design); the refresh
       // then re-renders authoritatively. Editing never changes status.
       noteComment.mode = vscode.CommentMode.Preview;
-      const storedTurn = entry.noteThread.note.turns[turnIndex];
+      const storedTurn = entry.noteThread.note.turns.find(
+        (turn) => turn.at === noteComment.turnAt,
+      );
       if (storedTurn !== undefined) {
         storedTurn.text = text;
       }
-      const mergedTurn =
-        entry.noteThread.turns[
-          mergedReviewerTurnIndex(entry.noteThread, turnIndex)
-        ];
+      const mergedTurn = entry.noteThread.turns.find(
+        (turn) => turn.author === "reviewer" && turn.at === noteComment.turnAt,
+      );
       if (mergedTurn !== undefined) {
         mergedTurn.text = text;
       }
@@ -576,6 +599,11 @@ export const createNoteCommentController = (
   };
 
   const replyReopen = async (reply: vscode.CommentReply): Promise<void> => {
+    // An empty reply must not reopen the note — no-op, leaving the typed
+    // whitespace in the input box
+    if (reply.text.trim() === "") {
+      return;
+    }
     const noteId = threadNoteIds.get(reply.thread);
     if (noteId === undefined) {
       return;

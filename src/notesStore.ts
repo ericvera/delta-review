@@ -336,20 +336,22 @@ const recomputeStatus = async (
   }
 };
 
-// Rewrites a turn's text in place; `at` is preserved so the turn keeps its
-// position in the merged thread.
+// Rewrites a turn's text in place. The turn is addressed by its `at`
+// timestamp — stable identity that survives other turns being deleted
+// (array indices shift underneath an in-progress edit) — and `at` itself is
+// preserved so the turn keeps its position in the merged thread.
 export const editReviewerTurn = async (
   git: Git,
   branch: string,
   noteId: string,
-  turnIndex: number,
+  turnAt: string,
   text: string,
 ): Promise<Note> => {
   const file = await loadNotesForMutation(git, branch);
   const note = findNote(file, noteId);
-  const turn = note.turns[turnIndex];
+  const turn = note.turns.find((entry) => entry.at === turnAt);
   if (turn === undefined) {
-    throw new Error(`note "${noteId}" has no turn at index ${turnIndex}`);
+    throw new Error(`note "${noteId}" has no turn with timestamp ${turnAt}`);
   }
   turn.text = text;
   await saveNotes(git, branch, file);

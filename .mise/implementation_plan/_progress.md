@@ -142,3 +142,21 @@
   Display assertions wait ~900ms for the authoritative re-render (eager restyles can be
   transiently clobbered by an in-flight stale refresh). Menu placement/icons remain eyeball-only
   in the F5 dev host.
+
+## Task 3.2 (review fixes) — Empty-input guards; edits address turns by `at` identity
+
+- Key changes: `src/commentController.ts` — `replyReopen` no-ops on an empty/whitespace reply
+  (an empty reply must never reopen a note; the typed whitespace stays in the input box);
+  `saveNoteTurn` treats saving an emptied body as cancel — it reuses `cancelNoteTurn` to close
+  edit mode and restore the original text (chosen over leave-editing-open no-op: same line
+  count, and the reviewer isn't stranded in an empty editor; an empty turn is never persisted).
+  `NoteComment` now carries `turnAt` (the turn's `at` timestamp); `saveNoteTurn` persists via
+  `at` identity and updates the cached thread by `at` lookup, and `styleThread` carries
+  in-progress Editing comments across re-renders keyed by `turnAt` (remapping their
+  `reviewerTurnIndex` to the fresh render) — so a concurrent delete of another reviewer turn
+  can no longer shift indices under an in-progress edit and overwrite the wrong turn.
+  `src/notesStore.ts` — `editReviewerTurn` signature changed from `turnIndex: number` to
+  `turnAt: string`; throws when no turn carries that timestamp. `src/notesStore.test.ts` —
+  existing edit tests moved to the `at` signature; new tests: edit targets the right turn after
+  an earlier turn's deletion shifts indices, and a deleted turn's timestamp is rejected.
+- Deviations from plan: none — review-directed fixes only.
