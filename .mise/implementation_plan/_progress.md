@@ -68,3 +68,30 @@
   pile up empty commits on the ref); everything else mirrors `writeReviewState`. The 3.3
   hook is `applyAnchors(threads)` receiving the merged `NoteThread[]` (whose `note` refs are
   the to-be-persisted clones) rather than a per-note callback.
+
+## Task 3.1 — Comment controller: gutters, note creation, thread rendering
+
+- Key changes: new `src/commentController.ts` (`createNoteCommentController` — commenting
+  range provider offering full-document ranges on both diff sides (working `file://` docs in
+  the review set; base docs only while their query sha is some file's current `diffBaseSha`),
+  `addNote` handler deriving side/path from the thread URI, persisting via `createNote`, and
+  adopting the pending thread in place; `renderThreads` reconciling a noteId→CommentThread
+  cache — working side at the file URI (deleted files at the empty base URI), base side at
+  the currently displayed base sha with dispose+recreate when the sha moves, status labels
+  with `• Outdated` flag and "Line was:" snapshot block in the first comment, `canReply:
+  false`; exported helpers `reviewBasePathFor`/`baseBlobForPath`). `src/extension.ts` —
+  controller instantiation + disposal, `deltaReview.addNote` registration, and a
+  generation-guarded notes block at the end of `refresh()` (loadNotes → loadResponses →
+  `refreshDerived` with `anchorResolves: () => false` → `mergeThreads` → `renderThreads`;
+  threads cleared on the no-git and fatal-error paths, left untouched on an invalid notes
+  file). `package.json` — `deltaReview.addNote` command, `comments/commentThread/context`
+  menu entry (`commentThreadIsEmpty` gate), palette hide.
+- Deviations from plan: none material. The refresh block skips `refreshDerived` entirely
+  when no notes exist on disk so no empty notes file is ever created. Verification: no e2e
+  infra exists in-repo, but the manual-check substitute was scripted with
+  `@vscode/test-electron` (harness in the session scratchpad, not committed): 40 assertions
+  covering working/base/deleted-file note creation, multi-line ranges, pending-thread
+  adoption (label/contextValue/state/canReply), notes-file schema, `refs/review-notes/<branch>`
+  anchoring, derived-position shift on refresh, pre-seeded-note rendering at activation
+  (reload-window substitute), and the unwritable-store failure path (file untouched, thread
+  not adopted). The visible `+` gutter hover remains eyeball-only in the F5 dev host.

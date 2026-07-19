@@ -125,6 +125,11 @@
         "title": "Unmark Reviewed",
         "icon": "$(remove)",
         "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.addNote",
+        "title": "Add Note",
+        "category": "Delta Review"
       }
     ],
     "menus": {
@@ -257,6 +262,13 @@
           "group": "inline"
         }
       ],
+      "comments/commentThread/context": [
+        {
+          "command": "deltaReview.addNote",
+          "when": "commentController == deltaReview.notes && commentThreadIsEmpty",
+          "group": "inline"
+        }
+      ],
       "commandPalette": [
         {
           "command": "deltaReview.openDiff",
@@ -296,6 +308,10 @@
         },
         {
           "command": "deltaReview.unmarkClusterReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.addNote",
           "when": "false"
         }
       ]

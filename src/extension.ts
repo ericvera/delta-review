@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
 import {
@@ -6,6 +7,10 @@ import {
   loadClustersContract,
   resolveClusterModel,
 } from "./clusters";
+import {
+  baseBlobForPath,
+  createNoteCommentController,
+} from "./commentController";
 import {
   createReviewBaseContentProvider,
   createReviewBaseUri,
@@ -20,6 +25,8 @@ import {
   ReviewFile,
   ReviewModel,
 } from "./model";
+import { mergeThreads } from "./noteThreads";
+import { loadNotes, loadResponses, refreshDerived } from "./notesStore";
 import {
   markReviewed,
   reviewRefForBranch,
@@ -178,6 +185,16 @@ export const activate = async (
     ),
   );
 
+  // Inline review-note threads in the diff editor. onDidChangeNotes runs a
+  // full refresh so a freshly saved note immediately goes through the same
+  // derived-field pass as any other note.
+  const commentController = createNoteCommentController(
+    () => git,
+    () => model,
+    () => void refresh(),
+  );
+  context.subscriptions.push(commentController);
+
   // Refreshes run concurrently (watcher bursts, repo switches); the generation
   // counter keeps a slow, older computation from overwriting a newer result
   let refreshGeneration = 0;
@@ -192,6 +209,7 @@ export const activate = async (
       treeView.message =
         "Open a folder inside a git repository to start reviewing.";
       statusBarItem.hide();
+      commentController.renderThreads([]);
       return;
     }
     const configuration = vscode.workspace.getConfiguration("deltaReview");
@@ -271,6 +289,55 @@ export const activate = async (
       statusBarItem.text = `$(checklist) Review ${reviewedCount}/${model.files.length}`;
       statusBarItem.tooltip = `Delta Review: ${model.branch} vs ${baseBranch}`;
       statusBarItem.show();
+
+      // Review-note threads: load, refresh derived positions against the
+      // current documents, and render. The store never creates a notes file
+      // here — with no notes on disk there is nothing to refresh.
+      const gitForNotes = git;
+      const notesResult = await loadNotes(gitForNotes, computed.branch);
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      if (notesResult.state === "ok" && notesResult.file.notes.length > 0) {
+        const responsesResult = await loadResponses(
+          gitForNotes,
+          computed.branch,
+        );
+        if (generation !== refreshGeneration) {
+          return;
+        }
+        const responses =
+          responsesResult.state === "ok" ? responsesResult.file : undefined;
+        const refreshed = await refreshDerived(
+          gitForNotes,
+          computed.branch,
+          notesResult.file,
+          responses,
+          {
+            readWorkingContent: async (path) => {
+              try {
+                return await readFile(join(gitForNotes.repoRoot, path), "utf8");
+              } catch {
+                return undefined;
+              }
+            },
+            baseBlobFor: (path) => baseBlobForPath(computed, path),
+            // Response-anchor resolution lands with the agent-response flow;
+            // until then every anchor is treated as dangling
+            anchorResolves: () => false,
+          },
+        );
+        if (generation !== refreshGeneration) {
+          return;
+        }
+        commentController.renderThreads(
+          mergeThreads(refreshed, responses, () => false),
+        );
+      } else if (notesResult.state !== "invalid") {
+        // Missing or empty — clear any rendered threads. An invalid file
+        // leaves the display untouched (the store refuses to overwrite it).
+        commentController.renderThreads([]);
+      }
     } catch (error) {
       if (generation !== refreshGeneration) {
         return;
@@ -283,6 +350,7 @@ export const activate = async (
       // Fatal model errors win over any contract warning
       treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
+      commentController.renderThreads([]);
     }
   };
 
@@ -421,6 +489,11 @@ export const activate = async (
 
   context.subscriptions.push(
     vscode.commands.registerCommand("deltaReview.refresh", () => refresh()),
+
+    vscode.commands.registerCommand(
+      "deltaReview.addNote",
+      (reply: vscode.CommentReply) => commentController.addNote(reply),
+    ),
 
     vscode.commands.registerCommand(
       "deltaReview.markFileReviewed",
