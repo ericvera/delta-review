@@ -41,3 +41,30 @@
   multi-note ordering.
 - Deviations from plan: none. Tie fallback concatenates reviewer turns before agent turns, so
   an exact timestamp tie orders reviewer first (each source array's internal order preserved).
+
+## Task 2.1 — Notes store: git-backed persistence, blob anchoring, derived-field refresh
+
+- Key changes: new `src/notesStore.ts` (`reviewNotesRefForBranch`; `loadNotes`/`loadResponses`
+  clusters-style via git common dir; `saveNotes` atomic same-dir temp+rename with the
+  idempotence guard — module-level last-written map plus on-disk comparison, returns
+  wrote/skipped boolean; `writeContentBlob` (`hash-object -w --stdin`); `anchorBlobs`
+  commit-tree on `refs/review-notes/<branch>` with path=note id, sha=contentBlob, temp
+  `GIT_INDEX_FILE` in `finally`, ref deleted when no notes remain; mutation helpers
+  `createNote` (takes `NoteDraft`), `appendReviewerTurn`, `editReviewerTurn`, `deleteNote`,
+  `setResolved` — all load→modify→save+anchor, throwing instead of overwriting an invalid
+  on-disk file; `refreshDerived(git, branch, notesFile, responses, options)` with
+  `RefreshOptions` `{readWorkingContent, baseBlobFor, anchorResolves?, applyAnchors?}` —
+  clone-in/clone-out, short-circuit on identical blobs, `git diff -U0 <blob> <blob>` →
+  `mapRangeThroughHunks` otherwise, missing side document → outdated + keep last position,
+  status from `mergeThreads`, re-anchor only when a contentBlob changed). New
+  `src/notesStore.test.ts` (24 tests, real temp repos): load/save round-trip, missing/corrupt,
+  guard skips (module state and fresh on-disk identical content), blob + ref anchoring,
+  `gc --prune=now` survival with `refs/review/<branch>` written then deleted (plus a control
+  blob proving gc prunes unanchored objects), sanitized filename vs raw ref for `feat/x`,
+  mutation helpers incl. refuse-on-corrupt, setResolved/unresolve recompute, refreshDerived
+  shift/outdate/missing/base-side/status-persist/no-input-mutation/hook re-anchor.
+- Deviations from plan: `anchorBlobs` skips creating a commit when the anchored tree is
+  unchanged (mutation helpers anchor after every save, so text-only edits would otherwise
+  pile up empty commits on the ref); everything else mirrors `writeReviewState`. The 3.3
+  hook is `applyAnchors(threads)` receiving the merged `NoteThread[]` (whose `note` refs are
+  the to-be-persisted clones) rather than a per-note callback.
