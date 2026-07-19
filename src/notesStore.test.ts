@@ -10,9 +10,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createGit, Git } from "./git";
-import { Note, NotesFile } from "./notes";
+import { Note, NotesFile, ResponseEntry, ResponsesFile } from "./notes";
 import {
   anchorBlobs,
+  buildAnchorResolver,
   appendReviewerTurn,
   createNote,
   deleteNote,
@@ -69,9 +70,8 @@ const draft = (overrides: Partial<NoteDraft> = {}): NoteDraft => ({
 const notesPath = (branch = "main"): string =>
   join(repoRoot, ".git", "delta-review", `notes-${branch}.json`);
 
-const writeResponses = async (
-  noteId: string,
-  at = "2099-01-01T00:00:00.000Z",
+const writeResponseEntries = async (
+  entries: Array<Partial<ResponseEntry> & { noteId: string }>,
 ): Promise<void> => {
   const dir = join(repoRoot, ".git", "delta-review");
   await mkdir(dir, { recursive: true });
@@ -79,9 +79,27 @@ const writeResponses = async (
     join(dir, "responses-main.json"),
     JSON.stringify({
       version: 1,
-      responses: [{ noteId, status: "addressed", response: "done", at }],
+      responses: entries.map((entry) => ({
+        status: "addressed",
+        response: "done",
+        at: "2099-01-01T00:00:00.000Z",
+        ...entry,
+      })),
     }),
   );
+};
+
+const writeResponses = async (
+  noteId: string,
+  at = "2099-01-01T00:00:00.000Z",
+): Promise<void> => writeResponseEntries([{ noteId, at }]);
+
+const loadedResponses = async (): Promise<ResponsesFile> => {
+  const result = await loadResponses(git, "main");
+  if (result.state !== "ok") {
+    throw new Error(`expected responses, got ${result.state}`);
+  }
+  return result.file;
 };
 
 const refreshOptions = (
@@ -587,29 +605,226 @@ describe("refreshDerived", () => {
     expect(await saveNotes(git, "main", refreshed)).toBe(false);
   });
 
-  it("re-anchors when the applyAnchors hook changes a contentBlob", async () => {
-    await createNote(git, "main", draft());
-    const newContent = "alpha\nbeta\ngamma\ndelta\nnew tail\n";
-    await writeFile(join(repoRoot, "a.txt"), newContent);
-    const newBlob = await writeContentBlob(git, newContent);
+  it("keeps an explicit resolve through a late agent response", async () => {
+    const note = await createNote(git, "main", draft());
+    await setResolved(git, "main", note.id, true);
+    await writeResponses(note.id);
     const refreshed = await refreshDerived(
       git,
       "main",
       await loadedNotes(),
-      undefined,
-      refreshOptions({
-        applyAnchors: (threads) => {
-          // Stand-in for Task 3.3's anchor application: re-snapshot the note
-          threads[0].note.contentBlob = newBlob;
-        },
-      }),
+      await loadedResponses(),
+      refreshOptions(),
     );
-    expect(refreshed.notes[0].contentBlob).toBe(newBlob);
+    expect(refreshed.notes[0].status).toBe("resolved");
+    expect((await loadedNotes()).notes[0].status).toBe("resolved");
+  });
+});
+
+describe("anchor application", () => {
+  const anchoredContent = "one\ntwo fixed\nthree\n";
+  const responseAt = "2099-01-01T00:00:00.000Z";
+
+  const loadedNotes = async (): Promise<NotesFile> => {
+    const result = await loadNotes(git, "main");
+    if (result.state !== "ok") {
+      throw new Error(`expected notes, got ${result.state}`);
+    }
+    return result.file;
+  };
+
+  const refreshWithResponses = async (): Promise<NotesFile> =>
+    refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      await loadedResponses(),
+      refreshOptions(),
+    );
+
+  it("applies a resolving anchor: side flip, relocation, re-snapshot, persistence", async () => {
+    const note = await createNote(git, "main", draft({ side: "base" }));
+    await writeFile(join(repoRoot, "b.txt"), anchoredContent);
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        at: responseAt,
+        anchor: { file: "b.txt", line: 2, snapshot: "two fixed" },
+      },
+    ]);
+    const refreshed = await refreshWithResponses();
+    const expectedBlob = await writeContentBlob(git, anchoredContent);
+    expect(refreshed.notes[0]).toMatchObject({
+      side: "working",
+      file: "b.txt",
+      startLine: 2,
+      endLine: 2,
+      currentStartLine: 2,
+      currentEndLine: 2,
+      snapshot: ["two fixed"],
+      contentBlob: expectedBlob,
+      outdated: false,
+      status: "addressed",
+      appliedAnchorAt: responseAt,
+    });
+    // Persisted, including the one-shot guard field
+    expect((await loadedNotes()).notes[0].appliedAnchorAt).toBe(responseAt);
+    // The re-snapshot blob is re-anchored on the notes ref in the same pass
     const tree = await git.run([
       "ls-tree",
       "-r",
       reviewNotesRefForBranch("main"),
     ]);
-    expect(tree).toContain(newBlob);
+    expect(tree).toContain(expectedBlob);
+  });
+
+  it("is one-shot: a second refresh does not re-apply the same anchor", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeFile(join(repoRoot, "b.txt"), anchoredContent);
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        at: responseAt,
+        anchor: { file: "b.txt", line: 2, snapshot: "two fixed" },
+      },
+    ]);
+    const first = await refreshWithResponses();
+    const second = await refreshWithResponses();
+    expect(second).toEqual(first);
+    // Identical derived state — the guard makes the re-save a no-op write
+    expect(await saveNotes(git, "main", second)).toBe(false);
+  });
+
+  it("applies a newer anchor over an already-applied older one", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeFile(join(repoRoot, "b.txt"), anchoredContent);
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        at: responseAt,
+        anchor: { file: "b.txt", line: 2, snapshot: "two fixed" },
+      },
+    ]);
+    await refreshWithResponses();
+    const laterAt = "2099-02-01T00:00:00.000Z";
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        at: responseAt,
+        anchor: { file: "b.txt", line: 2, snapshot: "two fixed" },
+      },
+      {
+        noteId: note.id,
+        at: laterAt,
+        anchor: { file: "b.txt", line: 3, snapshot: "three" },
+      },
+    ]);
+    const refreshed = await refreshWithResponses();
+    expect(refreshed.notes[0]).toMatchObject({
+      startLine: 3,
+      endLine: 3,
+      snapshot: ["three"],
+      appliedAnchorAt: laterAt,
+    });
+  });
+
+  it("ignores a dangling anchor to a missing file entirely", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        at: responseAt,
+        anchor: { file: "missing.txt", line: 1, snapshot: "gone" },
+      },
+    ]);
+    const refreshed = await refreshWithResponses();
+    expect(refreshed.notes[0]).toMatchObject({
+      side: "working",
+      file: "a.txt",
+      startLine: 2,
+      endLine: 3,
+      snapshot: ["beta", "gamma"],
+      contentBlob: note.contentBlob,
+      // The response still merges as an agent turn — only the anchor is
+      // ignored
+      status: "addressed",
+    });
+    expect(refreshed.notes[0].appliedAnchorAt).toBeUndefined();
+  });
+
+  it("ignores an anchor whose line is beyond the file's line count", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        at: responseAt,
+        anchor: { file: "a.txt", line: 99, snapshot: "nope" },
+      },
+    ]);
+    const refreshed = await refreshWithResponses();
+    expect(refreshed.notes[0]).toMatchObject({
+      startLine: 2,
+      endLine: 3,
+      contentBlob: note.contentBlob,
+    });
+    expect(refreshed.notes[0].appliedAnchorAt).toBeUndefined();
+  });
+});
+
+describe("buildAnchorResolver", () => {
+  const responsesWith = (
+    anchors: Array<{ file: string; line: number }>,
+  ): ResponsesFile => ({
+    version: 1,
+    responses: anchors.map((anchor, index) => ({
+      noteId: `note-${index}`,
+      status: "addressed",
+      response: "done",
+      at: "2099-01-01T00:00:00.000Z",
+      anchor: { ...anchor, snapshot: "" },
+    })),
+  });
+
+  const readContent = async (file: string): Promise<string | undefined> => {
+    if (file === "trailing.txt") {
+      return "a\nb\nc\n";
+    }
+    if (file === "no-trailing.txt") {
+      return "a\nb";
+    }
+    return undefined;
+  };
+
+  it("resolves within the line count, rejects beyond it and missing files", async () => {
+    const resolves = await buildAnchorResolver(
+      responsesWith([
+        { file: "trailing.txt", line: 1 },
+        { file: "no-trailing.txt", line: 1 },
+        { file: "missing.txt", line: 1 },
+      ]),
+      readContent,
+    );
+    expect(resolves({ file: "trailing.txt", line: 3, snapshot: "" })).toBe(
+      true,
+    );
+    expect(resolves({ file: "trailing.txt", line: 4, snapshot: "" })).toBe(
+      false,
+    );
+    expect(resolves({ file: "no-trailing.txt", line: 2, snapshot: "" })).toBe(
+      true,
+    );
+    expect(resolves({ file: "no-trailing.txt", line: 3, snapshot: "" })).toBe(
+      false,
+    );
+    expect(resolves({ file: "missing.txt", line: 1, snapshot: "" })).toBe(
+      false,
+    );
+  });
+
+  it("treats every anchor as dangling with no responses", async () => {
+    const resolves = await buildAnchorResolver(undefined, readContent);
+    expect(resolves({ file: "trailing.txt", line: 1, snapshot: "" })).toBe(
+      false,
+    );
   });
 });

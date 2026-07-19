@@ -5,7 +5,6 @@ import { isAbsolute, join } from "node:path";
 import type { Git } from "./git";
 import { mapRangeThroughHunks, parseUnifiedDiffHunks } from "./noteAnchor";
 import { mergeThreads } from "./noteThreads";
-import type { NoteThread } from "./noteThreads";
 import {
   notesFileName,
   parseNotesFile,
@@ -101,6 +100,44 @@ export const loadResponses = async (
   return parsed.ok
     ? { state: "ok", file: parsed.file }
     : { state: "invalid", error: parsed.error };
+};
+
+// Logical line count of a document: a trailing newline terminates the last
+// line rather than starting an empty one; a fully empty document has none.
+const countLines = (content: string): number => {
+  if (content === "") {
+    return 0;
+  }
+  const segments = content.split("\n");
+  return segments[segments.length - 1] === ""
+    ? segments.length - 1
+    : segments.length;
+};
+
+// Builds the anchorResolves callback for a responses file: an anchor
+// resolves when its file exists in the working tree and its line is within
+// the file's line count. Each distinct anchored file is read once; the
+// returned callback is synchronous (mergeThreads requirement).
+export const buildAnchorResolver = async (
+  responses: ResponsesFile | undefined,
+  readWorkingContent: (file: string) => Promise<string | undefined>,
+): Promise<(anchor: ResponseAnchor) => boolean> => {
+  const lineCounts = new Map<string, number | undefined>();
+  for (const entry of responses?.responses ?? []) {
+    const file = entry.anchor?.file;
+    if (file === undefined || lineCounts.has(file)) {
+      continue;
+    }
+    const content = await readWorkingContent(file);
+    lineCounts.set(
+      file,
+      content === undefined ? undefined : countLines(content),
+    );
+  }
+  return (anchor) => {
+    const lines = lineCounts.get(anchor.file);
+    return lines !== undefined && anchor.line <= lines;
+  };
 };
 
 // Last successfully written serialization per absolute path. Together with
@@ -433,23 +470,19 @@ export interface RefreshOptions {
   // when the file has no base.
   baseBlobFor: (file: string) => string | undefined;
   // Whether a response anchor resolves against the working tree
-  // (mergeThreads passthrough); defaults to treating every anchor as
-  // dangling.
+  // (mergeThreads passthrough). Defaults to the real working-tree resolver
+  // (buildAnchorResolver over readWorkingContent); injectable for tests.
   anchorResolves?: (anchor: ResponseAnchor) => boolean;
-  // Anchor-application hook (Task 3.3): runs on the merged threads before
-  // derived fields are computed or persisted, so an applied effectiveAnchor
-  // (side flip, relocation, contentBlob re-snapshot) lands in the same save
-  // and re-anchor. May mutate the notes the threads reference.
-  applyAnchors?: (threads: NoteThread[]) => Promise<void> | void;
 }
 
-// The derived-field refresh pass: recomputes each note's current position,
-// outdated flag, and status against the current side documents, then
-// persists — but only when something actually changed (saveNotes guard), and
-// re-anchors only when a contentBlob changed (a loose replacement blob would
-// otherwise be pruned by a later gc, breaking re-anchoring for exactly the
-// relocated notes). The input file is never mutated; the refreshed file is
-// returned.
+// The derived-field refresh pass: applies any newly anchored agent response
+// (relocation, base→working side flip, re-snapshot), then recomputes each
+// note's current position, outdated flag, and status against the current
+// side documents, and persists — but only when something actually changed
+// (saveNotes guard), re-anchoring only when a contentBlob changed (a loose
+// replacement blob would otherwise be pruned by a later gc, breaking
+// re-anchoring for exactly the relocated notes). The input file is never
+// mutated; the refreshed file is returned.
 export const refreshDerived = async (
   git: Git,
   branch: string,
@@ -459,13 +492,57 @@ export const refreshDerived = async (
 ): Promise<NotesFile> => {
   const file = structuredClone(notesFile);
   const blobsBefore = file.notes.map((note) => note.contentBlob).join("\n");
-  const threads = mergeThreads(
-    file,
-    responses,
-    options.anchorResolves ?? (() => false),
-  );
-  if (options.applyAnchors !== undefined) {
-    await options.applyAnchors(threads);
+  const anchorResolves =
+    options.anchorResolves ??
+    (await buildAnchorResolver(responses, options.readWorkingContent));
+  const threads = mergeThreads(file, responses, anchorResolves);
+  // Anchor application: a thread's effectiveAnchor (newest resolving agent
+  // anchor) is persisted onto the note exactly once — the appliedAnchorAt
+  // guard keeps a later pass from re-applying it (the re-snapshot changes
+  // contentBlob, so a second application could flap). Dangling anchors never
+  // reach here: mergeThreads already skipped them.
+  for (const thread of threads) {
+    const anchor = thread.effectiveAnchor;
+    if (anchor === undefined) {
+      continue;
+    }
+    // The applied response's `at`: mergeThreads picks effectiveAnchor from a
+    // turn's anchor by reference, so the carrying turn identifies it
+    let appliedAt: string | undefined;
+    for (let index = thread.turns.length - 1; index >= 0; index--) {
+      const turn = thread.turns[index];
+      if (
+        turn !== undefined &&
+        turn.author === "agent" &&
+        turn.anchor === anchor
+      ) {
+        appliedAt = turn.at;
+        break;
+      }
+    }
+    const note = thread.note;
+    if (appliedAt === undefined || note.appliedAnchorAt === appliedAt) {
+      continue;
+    }
+    const content = await options.readWorkingContent(anchor.file);
+    if (content === undefined) {
+      // The file vanished between resolution and application — treat the
+      // anchor as dangling; normal re-anchoring applies below
+      continue;
+    }
+    // Re-snapshot onto the anchor: the note now tracks the new line in the
+    // working tree. The new contentBlob is re-anchored on the notes ref in
+    // this same pass (blob change detected below), so gc cannot prune it.
+    note.side = "working";
+    note.file = anchor.file;
+    note.startLine = anchor.line;
+    note.endLine = anchor.line;
+    note.snapshot = [anchor.snapshot];
+    note.contentBlob = await writeContentBlob(git, content);
+    note.outdated = false;
+    note.currentStartLine = anchor.line;
+    note.currentEndLine = anchor.line;
+    note.appliedAnchorAt = appliedAt;
   }
   for (const [index, note] of file.notes.entries()) {
     const thread = threads[index];

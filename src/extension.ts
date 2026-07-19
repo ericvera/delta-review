@@ -25,8 +25,14 @@ import {
   ReviewFile,
   ReviewModel,
 } from "./model";
+import type { ResponsesFile } from "./notes";
 import { mergeThreads } from "./noteThreads";
-import { loadNotes, loadResponses, refreshDerived } from "./notesStore";
+import {
+  buildAnchorResolver,
+  loadNotes,
+  loadResponses,
+  refreshDerived,
+} from "./notesStore";
 import {
   markReviewed,
   reviewRefForBranch,
@@ -41,8 +47,21 @@ import {
 } from "./treeProvider";
 
 // Dedupes the non-fatal notes-refresh warning across watcher-triggered
-// refreshes (same pattern the response-file warning will use)
+// refreshes: identical failures warn once until the message changes. The
+// notes-file and responses-file warnings follow the same pattern, each with
+// its own last-warned string (reset when its file loads cleanly, so a
+// recurrence after a fix warns again). Toasts stand in for the notes-view
+// message surface until Task 4.1 adds the view.
 let lastNotesWarning: string | undefined;
+let lastNotesFileWarning: string | undefined;
+let lastResponsesFileWarning: string | undefined;
+
+const warnOnce = (lastWarned: string | undefined, warning: string): string => {
+  if (warning !== lastWarned) {
+    void vscode.window.showWarningMessage(warning);
+  }
+  return warning;
+};
 
 export const activate = async (
   context: vscode.ExtensionContext,
@@ -304,10 +323,31 @@ export const activate = async (
       // rendered threads intact and only surfaces a deduped warning.
       try {
         const gitForNotes = git;
+        const readWorkingContent = async (
+          path: string,
+        ): Promise<string | undefined> => {
+          try {
+            return await readFile(join(gitForNotes.repoRoot, path), "utf8");
+          } catch {
+            return undefined;
+          }
+        };
         const notesResult = await loadNotes(gitForNotes, computed.branch);
         if (generation !== refreshGeneration) {
           return;
         }
+        if (notesResult.state === "invalid") {
+          // An invalid notes file is read-only broken: warn, render nothing,
+          // and never rewrite the file. Mutation attempts surface their own
+          // toast — the store refuses to overwrite an invalid file.
+          lastNotesFileWarning = warnOnce(
+            lastNotesFileWarning,
+            `Delta Review: review notes file: ${notesResult.error} — notes are read-only until the file is fixed`,
+          );
+          commentController.renderThreads([]);
+          return;
+        }
+        lastNotesFileWarning = undefined;
         if (notesResult.state === "ok" && notesResult.file.notes.length > 0) {
           const responsesResult = await loadResponses(
             gitForNotes,
@@ -316,39 +356,45 @@ export const activate = async (
           if (generation !== refreshGeneration) {
             return;
           }
-          const responses =
-            responsesResult.state === "ok" ? responsesResult.file : undefined;
+          let responses: ResponsesFile | undefined;
+          if (responsesResult.state === "invalid") {
+            // Invalid responses file: non-fatal — warn and behave as missing
+            lastResponsesFileWarning = warnOnce(
+              lastResponsesFileWarning,
+              `Delta Review: review notes responses: ${responsesResult.error}`,
+            );
+          } else {
+            // Missing is the normal state (no agent has responded) — silent
+            lastResponsesFileWarning = undefined;
+            responses =
+              responsesResult.state === "ok" ? responsesResult.file : undefined;
+          }
+          // Anchor resolution runs against the working tree once per refresh;
+          // the same resolver drives anchor application (refreshDerived) and
+          // the rendered merge, so both see identical effective anchors
+          const anchorResolves = await buildAnchorResolver(
+            responses,
+            readWorkingContent,
+          );
           const refreshed = await refreshDerived(
             gitForNotes,
             computed.branch,
             notesResult.file,
             responses,
             {
-              readWorkingContent: async (path) => {
-                try {
-                  return await readFile(
-                    join(gitForNotes.repoRoot, path),
-                    "utf8",
-                  );
-                } catch {
-                  return undefined;
-                }
-              },
+              readWorkingContent,
               baseBlobFor: (path) => baseBlobForPath(computed, path),
-              // Response-anchor resolution lands with the agent-response
-              // flow; until then every anchor is treated as dangling
-              anchorResolves: () => false,
+              anchorResolves,
             },
           );
           if (generation !== refreshGeneration) {
             return;
           }
           commentController.renderThreads(
-            mergeThreads(refreshed, responses, () => false),
+            mergeThreads(refreshed, responses, anchorResolves),
           );
-        } else if (notesResult.state !== "invalid") {
-          // Missing or empty — clear any rendered threads. An invalid file
-          // leaves the display untouched (the store refuses to overwrite it).
+        } else {
+          // Missing or empty — clear any rendered threads
           commentController.renderThreads([]);
         }
       } catch (notesError) {
@@ -357,11 +403,10 @@ export const activate = async (
         }
         // Watcher bursts re-run refresh constantly; identical failures warn
         // once until the message changes
-        const warning = `Delta Review: review notes refresh failed (${notesError instanceof Error ? notesError.message : String(notesError)})`;
-        if (warning !== lastNotesWarning) {
-          lastNotesWarning = warning;
-          void vscode.window.showWarningMessage(warning);
-        }
+        lastNotesWarning = warnOnce(
+          lastNotesWarning,
+          `Delta Review: review notes refresh failed (${notesError instanceof Error ? notesError.message : String(notesError)})`,
+        );
       }
     } catch (error) {
       if (generation !== refreshGeneration) {

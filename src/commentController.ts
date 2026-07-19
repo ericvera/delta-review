@@ -88,6 +88,15 @@ export interface NoteCommentController extends vscode.Disposable {
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+// Markdown inline-code span safe for arbitrary text: the backtick fence is
+// longer than any backtick run inside, space-padded per CommonMark
+const inlineCode = (text: string): string => {
+  const longestRun =
+    text.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
+  const fence = "`".repeat(longestRun + 1);
+  return `${fence} ${text} ${fence}`;
+};
+
 // Thread-menu commands receive the CommentThread itself; reply-row commands
 // receive a CommentReply wrapping it
 const threadOf = (
@@ -179,8 +188,11 @@ export const createNoteCommentController = (
       const body = new vscode.MarkdownString();
       body.appendText(turn.text);
       if (index === 0 && thread.note.outdated) {
-        body.appendMarkdown("\n\n*Line was:*\n");
-        body.appendCodeblock(thread.note.snapshot.join("\n"));
+        // Mock 4: a dimmed one-liner with the first anchored line's original
+        // text (italic is the closest to dimmed a MarkdownString gets)
+        body.appendMarkdown(
+          `\n\n*line was: ${inlineCode(thread.note.snapshot[0] ?? "")}*`,
+        );
       }
       const comment: NoteComment = {
         body,
@@ -329,7 +341,12 @@ export const createNoteCommentController = (
         0,
       );
       let entry = threadCache.get(thread.note.id);
+      // Thread URIs are immutable: relocation (anchor application, base-sha
+      // progression) means dispose + recreate, keeping the collapse state
+      let carriedCollapsibleState:
+        vscode.CommentThreadCollapsibleState | undefined;
       if (entry !== undefined && entry.uriKey !== uriKey) {
+        carriedCollapsibleState = entry.thread.collapsibleState;
         threadNoteIds.delete(entry.thread);
         entry.thread.dispose();
         entry = undefined;
@@ -337,6 +354,7 @@ export const createNoteCommentController = (
       if (entry === undefined) {
         const created = controller.createCommentThread(uri, range, []);
         created.collapsibleState =
+          carriedCollapsibleState ??
           vscode.CommentThreadCollapsibleState.Expanded;
         entry = { thread: created, uriKey, noteThread: thread };
         threadCache.set(thread.note.id, entry);

@@ -160,3 +160,39 @@
   existing edit tests moved to the `at` signature; new tests: edit targets the right turn after
   an earlier turn's deletion shifts indices, and a deleted turn's timestamp is rejected.
 - Deviations from plan: none — review-directed fixes only.
+
+## Task 3.3 — Live agent loop: anchor application, live merge, outdated polish, contract freshness
+
+- Key changes: `src/notesStore.ts` — new `buildAnchorResolver(responses, readWorkingContent)`
+  (an anchor resolves when its file exists and its line ≤ the file's logical line count; each
+  anchored file read once, sync callback returned) and the finalized anchor-application path
+  inside `refreshDerived` replacing Task 2.1's `applyAnchors` hook: for each thread's
+  `effectiveAnchor` the carrying agent turn's `at` is found by reference, guarded one-shot via
+  `note.appliedAnchorAt`, then the note is rewritten (side → working, file/lines → anchor,
+  snapshot → `[anchor.snapshot]`, `contentBlob` re-snapshotted from the anchor file's current
+  content, outdated → false) with the blob re-anchored on `refs/review-notes/<branch>` in the
+  same pass; `anchorResolves` now defaults to the real resolver. `src/extension.ts` — notes
+  block builds one resolver per refresh (drives both `refreshDerived` and the render merge);
+  invalid notes file → deduped warning + `renderThreads([])` (read-only broken, file never
+  rewritten); invalid responses file → deduped warning, treated as missing; `warnOnce` helper
+  unifies the three warning dedupes (each reset when its file loads cleanly).
+  `src/commentController.ts` — outdated first comment now renders the mock-4 dimmed
+  `*line was: `<first snapshot line>`*` one-liner (backtick-safe `inlineCode` helper);
+  relocation dispose+recreate carries `collapsibleState` over. `src/notesStore.test.ts` —
+  responses helper generalized to full entries; new suites: anchor application (side
+  flip/relocation/re-snapshot/ref re-anchor, one-shot idempotence, newer-anchor re-apply,
+  dangling missing-file and out-of-range-line anchors, resolved survives late response) and
+  `buildAnchorResolver` line-count semantics; the old `applyAnchors` hook test replaced by the
+  real-path coverage (250 tests total).
+- Deviations from plan: none material. The `applyAnchors` hook was removed rather than kept
+  alongside the built-in path — the application now lives inside `refreshDerived` as the plan's
+  "finalize" instruction intended. Verification: manual agent-loop checks 1–7 scripted with the
+  session `@vscode/test-electron` harness (`runAgentLoop.mjs` + `suite/agentLoop.cjs` in the
+  scratchpad, not committed): 34 assertions all passing — watcher-driven response merge with no
+  manual refresh (label flips to Addressed, status persisted), anchored relocation across files
+  with base→working flip and ref re-anchor, dangling anchor ignored, edit-above shift +
+  noted-line edit → Outdated label and "line was" body, base progression after mark-reviewed
+  (base thread disposed/recreated at the new sha; turns/status byte-untouched), deleted noted
+  file outdated-but-listed, corrupt responses (extension keeps working, recovers on fix),
+  corrupt notes (never rewritten, no rendering, mutation refused), and a 5s mtime-stability
+  window proving no refresh/write oscillation. Toast dedup wording remains eyeball-only.
