@@ -28,3 +28,16 @@
   rule": an outdated range collapses to a single line at the mapped start (start shifted by
   hunks above when the start line survives; offset into the replacement capped at its last
   line when rewritten; deletion hunk's `newStart` clamped to >= 1 when deleted outright).
+
+## Task 1.3 — Thread merge: notes + responses → display threads in `src/noteThreads.ts`
+
+- Key changes: new `src/noteThreads.ts` (`ThreadTurn`, `NoteThread`; `mergeThreads` grouping
+  responses by noteId, dropping unknown ids, interleaving reviewer/agent turns by `at` with a
+  stable file-order fallback for ties/unparsable timestamps, deriving status — explicit
+  `resolved` wins, else last speaker agent → addressed / reviewer → open — and picking
+  `effectiveAnchor` as the newest agent anchor passing the injected `anchorResolves` callback,
+  dangling anchors skipped with fall-through to next-newest; `workSet` filtering derived-open
+  threads). New `src/noteThreads.test.ts` covering all plan-listed cases plus no-mutation and
+  multi-note ordering.
+- Deviations from plan: none. Tie fallback concatenates reviewer turns before agent turns, so
+  an exact timestamp tie orders reviewer first (each source array's internal order preserved).
