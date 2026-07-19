@@ -315,6 +315,27 @@ export const appendReviewerTurn = async (
   return note;
 };
 
+// Re-derives a note's status from its merged thread with any explicit
+// resolve cleared (agent last speaker → addressed, reviewer → open).
+const recomputeStatus = async (
+  git: Git,
+  branch: string,
+  note: Note,
+): Promise<void> => {
+  note.status = "open";
+  const responsesResult = await loadResponses(git, branch);
+  const responses =
+    responsesResult.state === "ok" ? responsesResult.file : undefined;
+  const thread = mergeThreads(
+    { version: 1, notes: [note] },
+    responses,
+    () => false,
+  )[0];
+  if (thread !== undefined) {
+    note.status = thread.status;
+  }
+};
+
 // Rewrites a turn's text in place; `at` is preserved so the turn keeps its
 // position in the merged thread.
 export const editReviewerTurn = async (
@@ -334,6 +355,37 @@ export const editReviewerTurn = async (
   await saveNotes(git, branch, file);
   await anchorBlobs(git, branch, file.notes);
   return note;
+};
+
+// Removes one reviewer turn. Deleting the only reviewer turn deletes the
+// whole note instead (a note must always keep at least one reviewer turn —
+// the parser invariant). Returns the updated note, or undefined when the
+// note itself was deleted. An explicit resolve stays sticky; otherwise the
+// status re-derives from the remaining merged thread.
+export const deleteReviewerTurn = async (
+  git: Git,
+  branch: string,
+  noteId: string,
+  turnIndex: number,
+): Promise<Note | undefined> => {
+  const file = await loadNotesForMutation(git, branch);
+  const note = findNote(file, noteId);
+  if (note.turns[turnIndex] === undefined) {
+    throw new Error(`note "${noteId}" has no turn at index ${turnIndex}`);
+  }
+  let remaining: Note | undefined;
+  if (note.turns.length === 1) {
+    file.notes = file.notes.filter((entry) => entry.id !== noteId);
+  } else {
+    note.turns.splice(turnIndex, 1);
+    if (note.status !== "resolved") {
+      await recomputeStatus(git, branch, note);
+    }
+    remaining = note;
+  }
+  await saveNotes(git, branch, file);
+  await anchorBlobs(git, branch, file.notes);
+  return remaining;
 };
 
 // Deletes the whole thread. Deleting the last note deletes the anchor ref.
@@ -363,20 +415,7 @@ export const setResolved = async (
   if (resolved) {
     note.status = "resolved";
   } else {
-    // Clear the explicit resolve first — mergeThreads gives it priority
-    note.status = "open";
-    const responsesResult = await loadResponses(git, branch);
-    const responses =
-      responsesResult.state === "ok" ? responsesResult.file : undefined;
-    const threads = mergeThreads(
-      { version: 1, notes: [note] },
-      responses,
-      () => false,
-    );
-    const thread = threads[0];
-    if (thread !== undefined) {
-      note.status = thread.status;
-    }
+    await recomputeStatus(git, branch, note);
   }
   await saveNotes(git, branch, file);
   await anchorBlobs(git, branch, file.notes);

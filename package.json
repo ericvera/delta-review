@@ -130,6 +130,51 @@
         "command": "deltaReview.addNote",
         "title": "Add Note",
         "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.editNoteTurn",
+        "title": "Edit",
+        "icon": "$(edit)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.deleteNoteTurn",
+        "title": "Delete",
+        "icon": "$(trash)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.saveNoteTurn",
+        "title": "Save",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.cancelNoteTurn",
+        "title": "Cancel",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.deleteNoteThread",
+        "title": "Delete Thread",
+        "icon": "$(trash)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.resolveNote",
+        "title": "Resolve",
+        "icon": "$(check)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unresolveNote",
+        "title": "Unresolve",
+        "icon": "$(debug-restart)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.replyReopen",
+        "title": "Reply & Reopen",
+        "category": "Delta Review"
       }
     ],
     "menus": {
@@ -262,11 +307,62 @@
           "group": "inline"
         }
       ],
+      "comments/comment/title": [
+        {
+          "command": "deltaReview.editNoteTurn",
+          "when": "commentController == deltaReview.notes && comment == reviewerTurn",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.deleteNoteTurn",
+          "when": "commentController == deltaReview.notes && comment == reviewerTurn",
+          "group": "inline@2"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "deltaReview.cancelNoteTurn",
+          "when": "commentController == deltaReview.notes && comment == reviewerTurn",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.saveNoteTurn",
+          "when": "commentController == deltaReview.notes && comment == reviewerTurn",
+          "group": "inline@2"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "deltaReview.resolveNote",
+          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.unresolveNote",
+          "when": "commentController == deltaReview.notes && commentThread == resolvedNote",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.deleteNoteThread",
+          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|resolvedNote)$/",
+          "group": "inline@2"
+        }
+      ],
       "comments/commentThread/context": [
         {
           "command": "deltaReview.addNote",
           "when": "commentController == deltaReview.notes && commentThreadIsEmpty",
           "group": "inline"
+        },
+        {
+          "command": "deltaReview.replyReopen",
+          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread == addressedNote",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.resolveNote",
+          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread == addressedNote",
+          "group": "inline@2"
         }
       ],
       "commandPalette": [
@@ -312,6 +408,38 @@
         },
         {
           "command": "deltaReview.addNote",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.editNoteTurn",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.saveNoteTurn",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.cancelNoteTurn",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.deleteNoteTurn",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.deleteNoteThread",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.resolveNote",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unresolveNote",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.replyReopen",
           "when": "false"
         }
       ]

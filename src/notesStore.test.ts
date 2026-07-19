@@ -16,6 +16,7 @@ import {
   appendReviewerTurn,
   createNote,
   deleteNote,
+  deleteReviewerTurn,
   editReviewerTurn,
   loadNotes,
   loadResponses,
@@ -326,6 +327,57 @@ describe("mutation helpers", () => {
     await expect(
       appendReviewerTurn(git, "main", "nope", "text"),
     ).rejects.toThrow(/not found/);
+  });
+});
+
+describe("deleteReviewerTurn", () => {
+  it("removes the targeted turn and keeps the note", async () => {
+    const note = await createNote(git, "main", draft());
+    await appendReviewerTurn(git, "main", note.id, "second");
+    const updated = await deleteReviewerTurn(git, "main", note.id, 0);
+    expect(updated?.turns.map((turn) => turn.text)).toEqual(["second"]);
+    expect(updated?.status).toBe("open");
+    const loaded = await loadNotes(git, "main");
+    expect(
+      loaded.state === "ok" && loaded.file.notes[0].turns.map((t) => t.text),
+    ).toEqual(["second"]);
+  });
+
+  it("deletes the whole note when its only turn is removed", async () => {
+    const note = await createNote(git, "main", draft());
+    const result = await deleteReviewerTurn(git, "main", note.id, 0);
+    expect(result).toBeUndefined();
+    const loaded = await loadNotes(git, "main");
+    expect(loaded.state === "ok" && loaded.file.notes).toEqual([]);
+    // Last note gone → anchor ref deleted too
+    await expect(
+      git.run(["rev-parse", "--verify", reviewNotesRefForBranch("main")]),
+    ).rejects.toThrow();
+  });
+
+  it("re-derives the status from the remaining merged thread", async () => {
+    const note = await createNote(git, "main", draft());
+    await appendReviewerTurn(git, "main", note.id, "second");
+    // Agent response after both reviewer turns: once a reviewer turn is
+    // deleted the agent is still the last speaker → addressed
+    await writeResponses(note.id);
+    const updated = await deleteReviewerTurn(git, "main", note.id, 1);
+    expect(updated?.status).toBe("addressed");
+  });
+
+  it("keeps an explicit resolve sticky", async () => {
+    const note = await createNote(git, "main", draft());
+    await appendReviewerTurn(git, "main", note.id, "second");
+    await setResolved(git, "main", note.id, true);
+    const updated = await deleteReviewerTurn(git, "main", note.id, 1);
+    expect(updated?.status).toBe("resolved");
+  });
+
+  it("rejects an out-of-range turn index", async () => {
+    const note = await createNote(git, "main", draft());
+    await expect(deleteReviewerTurn(git, "main", note.id, 3)).rejects.toThrow(
+      /no turn at index 3/,
+    );
   });
 });
 

@@ -521,6 +521,49 @@ export const activate = async (
     ),
 
     vscode.commands.registerCommand(
+      "deltaReview.editNoteTurn",
+      (comment: vscode.Comment) => commentController.editNoteTurn(comment),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.saveNoteTurn",
+      (comment: vscode.Comment) => commentController.saveNoteTurn(comment),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.cancelNoteTurn",
+      (comment: vscode.Comment) => commentController.cancelNoteTurn(comment),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.deleteNoteTurn",
+      (comment: vscode.Comment) => commentController.deleteNoteTurn(comment),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.deleteNoteThread",
+      (thread: vscode.CommentThread) =>
+        commentController.deleteNoteThread(thread),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.resolveNote",
+      (target: vscode.CommentThread | vscode.CommentReply) =>
+        commentController.resolveNote(target),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.unresolveNote",
+      (target: vscode.CommentThread | vscode.CommentReply) =>
+        commentController.unresolveNote(target),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.replyReopen",
+      (reply: vscode.CommentReply) => commentController.replyReopen(reply),
+    ),
+
+    vscode.commands.registerCommand(
       "deltaReview.markFileReviewed",
       async (element?: ReviewTreeElement) => {
         if (

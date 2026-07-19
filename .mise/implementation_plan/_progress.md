@@ -105,3 +105,40 @@
   `showWarningMessage` surfaces the error, deduped via a module-level `lastNotesWarning`
   string (the same pattern Task 3.3 will use for response-file warnings).
 - Deviations from plan: none — review-directed fix only.
+
+## Task 3.2 — Thread actions: edit/delete turns, delete thread, resolve/unresolve, reply-to-reopen
+
+- Key changes: `src/commentController.ts` — comments are now `NoteComment`s carrying
+  `noteId`/`reviewerTurnIndex`/`turnText`, with `contextValue: "reviewerTurn"` on reviewer turns
+  only (agent turns get none); handlers `editNoteTurn` (flips to `CommentMode.Editing` with the
+  raw text as body — display body is escaped markdown and may carry the snapshot block),
+  `saveNoteTurn` (persists via `editReviewerTurn`, reads the edited value from `comment.body`),
+  `cancelNoteTurn`, `deleteNoteTurn` (store decides single-turn → whole-note delete),
+  `deleteNoteThread`, `resolveNote`/`unresolveNote` (accept a `CommentThread` or a
+  `CommentReply` — the reply-row Resolve passes the latter), `replyReopen`
+  (`appendReviewerTurn` → open); `canReply = (status === "addressed")` in `styleThread`; cache
+  entries now hold the last rendered `NoteThread` (handlers restyle eagerly, then
+  `onDidChangeNotes` re-renders authoritatively) plus a reverse `Map<CommentThread, noteId>`;
+  `styleThread` carries comments in Editing mode across re-renders by reviewer-turn index so
+  watcher refreshes don't blow away an in-progress edit. `src/notesStore.ts` — new
+  `deleteReviewerTurn` (deletes the whole note when its only turn is removed, returns
+  `undefined` then; re-derives status via extracted `recomputeStatus`, now shared with
+  `setResolved`). `src/extension.ts` — registered the eight commands. `package.json` — command
+  declarations with codicons, `comments/comment/title` (edit/delete, `comment == reviewerTurn`),
+  `comments/comment/context` (Cancel/Save), `comments/commentThread/title` (Resolve on
+  open|addressed, Unresolve on resolved, Delete Thread on all three — regex gates anchored
+  `^(...)$`), `comments/commentThread/context` (Reply & Reopen + Resolve on
+  `commentThread == addressedNote && !commentThreadIsEmpty`), palette hiding.
+- Deviations from plan: `deleteReviewerTurn` added to `src/notesStore.ts` (+5 tests) though the
+  task's file list omitted it — removing a single turn needs store-level persistence and the
+  ≥1-reviewer-turn invariant enforced at save time. Verification: manual checks 1–7 scripted
+  with the session `@vscode/test-electron` harness (`runThreadActions.mjs` +
+  `suite/threadActions.cjs` in the scratchpad, not committed): 44 assertions all passing —
+  edit/save/cancel (timestamp preserved, status unchanged), single-turn delete disposes thread,
+  hand-written response → Addressed + reply box, Reply & Reopen → open + box gone, multi-turn
+  delete re-derives addressed, resolve/unresolve from both statuses and via the reply-row
+  `CommentReply` shape, addressed-thread delete, and review-state isolation (notes file
+  byte-identical across `markAllReviewed`; no note action creates `refs/review/<branch>`).
+  Display assertions wait ~900ms for the authoritative re-render (eager restyles can be
+  transiently clobbered by an in-flight stale refresh). Menu placement/icons remain eyeball-only
+  in the F5 dev host.
