@@ -322,3 +322,14 @@
   `createCommentController`, only stock `comments/*` menu contributions, no panel-specific
   code). Purely visual details (icons, badge pill, menu placement, toast wording) remain
   eyeball-only in the F5 dev host.
+
+## 05_01 (review fix) — corrected anchor-validation docs in review-notes skill
+
+- Key changes: `plugin/skills/review-notes/SKILL.md` conventions bullet — "treated as
+  dangling" now scoped to the actual checks (path shape, file existence, line in range) and
+  states `anchor.snapshot` is never validated: it is stored as-is as the note's new
+  authoritative snapshot, so a wrong snapshot silently corrupts the anchor content.
+  `DEVELOPMENT.md` scenario 28 tightened to match (bad path shape / missing file /
+  out-of-range line → ignored; snapshot not validated).
+- Deviations from plan: none. Documentation-only; no source changes. `yarn format`,
+  `yarn lint`, `yarn build`, `yarn test` (256 tests) all green.

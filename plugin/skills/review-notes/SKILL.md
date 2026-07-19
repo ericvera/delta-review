@@ -88,7 +88,7 @@ Conventions you must follow anyway — the extension does not reject these, it f
 
 - `at` must be an ISO-8601 UTC timestamp (`date -u +%FT%TZ`; second precision is fine). The extension sorts thread turns by it — a bogus timestamp misorders the conversation and can make a note look unhandled.
 - `noteId` must be the id of an existing note; entries with unknown ids are silently dropped.
-- `anchor.file` must be a repo-relative, `/`-separated path — never absolute, no `\`, no `.` or `..` segments. `anchor.line` is 1-based in the **current working tree**, and `anchor.snapshot` is the exact current text of that line. An anchor that violates any of this (or points at a missing file / out-of-range line) is treated as dangling: your response text still shows, but the note is not relocated.
+- `anchor.file` must be a repo-relative, `/`-separated path — never absolute, no `\`, no `.` or `..` segments. `anchor.line` is 1-based in the **current working tree**. An anchor with a bad path shape, a missing file, or an out-of-range line is treated as dangling: your response text still shows, but the note is not relocated. Those are the only checks — `anchor.snapshot` is **not** validated against the file. It is stored as-is as the note's new authoritative `snapshot`, so it must be the exact current text of `anchor.line`; a wrong snapshot still relocates the note and silently corrupts its anchor content.
 
 If you ever need to change this schema, you must bump `version` and update the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit; the extension rejects any version other than 1.
 
