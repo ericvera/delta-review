@@ -190,6 +190,12 @@
         "command": "deltaReview.openNoteInDiff",
         "title": "Open Note in Diff",
         "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.clearResolvedNotes",
+        "title": "Clear Resolved Notes",
+        "icon": "$(clear-all)",
+        "category": "Delta Review"
       }
     ],
     "menus": {
@@ -218,6 +224,11 @@
           "command": "deltaReview.refresh",
           "when": "view == deltaReview",
           "group": "navigation@2"
+        },
+        {
+          "command": "deltaReview.clearResolvedNotes",
+          "when": "view == deltaReviewNotes",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [

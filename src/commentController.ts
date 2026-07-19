@@ -66,6 +66,9 @@ interface NoteComment extends vscode.Comment {
 export interface NoteCommentController extends vscode.Disposable {
   // Reconciles rendered comment threads with the given display threads
   renderThreads: (threads: NoteThread[]) => void;
+  // Expands a note's rendered thread — the reveal approximation for
+  // click-to-navigate (VS Code 1.90 has no stable thread.reveal())
+  expandThread: (noteId: string) => void;
   // Handler for the deltaReview.addNote comment-input command
   addNote: (reply: vscode.CommentReply) => Promise<void>;
   // Comment-level actions on reviewer turns
@@ -372,6 +375,14 @@ export const createNoteCommentController = (
     }
   };
 
+  const expandThread = (noteId: string): void => {
+    const entry = threadCache.get(noteId);
+    if (entry !== undefined) {
+      entry.thread.collapsibleState =
+        vscode.CommentThreadCollapsibleState.Expanded;
+    }
+  };
+
   const addNote = async (reply: vscode.CommentReply): Promise<void> => {
     const context = activeContext();
     const pending = reply.thread;
@@ -660,6 +671,7 @@ export const createNoteCommentController = (
 
   return {
     renderThreads,
+    expandThread,
     addNote,
     editNoteTurn,
     saveNoteTurn,

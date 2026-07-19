@@ -17,6 +17,7 @@ import {
   appendReviewerTurn,
   createNote,
   deleteNote,
+  deleteNotes,
   deleteReviewerTurn,
   editReviewerTurn,
   loadNotes,
@@ -377,6 +378,81 @@ describe("mutation helpers", () => {
     await expect(
       git.run(["rev-parse", "--verify", reviewNotesRefForBranch("main")]),
     ).rejects.toThrow();
+  });
+
+  it("deleteNotes removes all listed notes in one pass and re-anchors", async () => {
+    const keep = await createNote(git, "main", draft({ text: "keep" }));
+    const removeA = await createNote(
+      git,
+      "main",
+      draft({ text: "remove a", content: fileContent + "zeta\n" }),
+    );
+    const removeB = await createNote(
+      git,
+      "main",
+      draft({ text: "remove b", content: fileContent + "eta\n" }),
+    );
+
+    const deleted = await deleteNotes(git, "main", [
+      removeA.id,
+      removeB.id,
+      "unknown-id",
+    ]);
+
+    expect(deleted).toBe(2);
+    const result = await loadNotes(git, "main");
+    expect(result.state === "ok" && result.file.notes.map((n) => n.id)).toEqual(
+      [keep.id],
+    );
+    const tree = await git.run([
+      "ls-tree",
+      "-r",
+      reviewNotesRefForBranch("main"),
+    ]);
+    expect(tree).toContain(keep.id);
+    expect(tree).not.toContain(removeA.id);
+    expect(tree).not.toContain(removeB.id);
+  });
+
+  it("deleteNotes with no matching ids touches neither the file nor the ref", async () => {
+    await createNote(git, "main", draft());
+    const fileBefore = await readFile(notesPath(), "utf8");
+    const refBefore = (
+      await git.run(["rev-parse", reviewNotesRefForBranch("main")])
+    ).trim();
+
+    const spy = spyingGit();
+    const deleted = await deleteNotes(spy.git, "main", ["unknown-id"]);
+
+    expect(deleted).toBe(0);
+    expect(spy.commands).not.toContain("update-ref");
+    expect(spy.commands).not.toContain("commit-tree");
+    expect(await readFile(notesPath(), "utf8")).toBe(fileBefore);
+    expect(
+      (await git.run(["rev-parse", reviewNotesRefForBranch("main")])).trim(),
+    ).toBe(refBefore);
+  });
+
+  it("deleteNotes deleting every note deletes the anchor ref", async () => {
+    const a = await createNote(git, "main", draft({ text: "a" }));
+    const b = await createNote(git, "main", draft({ text: "b" }));
+    const deleted = await deleteNotes(git, "main", [a.id, b.id]);
+
+    expect(deleted).toBe(2);
+    const result = await loadNotes(git, "main");
+    expect(result.state === "ok" && result.file.notes).toEqual([]);
+    await expect(
+      git.run(["rev-parse", "--verify", reviewNotesRefForBranch("main")]),
+    ).rejects.toThrow();
+  });
+
+  it("deleteNotes refuses to rewrite an invalid notes file", async () => {
+    await createNote(git, "main", draft());
+    await writeFile(notesPath(), "{ not json");
+    await expect(deleteNotes(git, "main", ["any"])).rejects.toThrow(
+      /will not be overwritten/,
+    );
+    expect(await readFile(notesPath(), "utf8")).toBe("{ not json");
   });
 
   it("anchorBlobs tolerates deleting an absent ref", async () => {

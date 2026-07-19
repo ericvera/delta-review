@@ -465,6 +465,29 @@ export const deleteNote = async (
   await anchorBlobs(git, branch, file.notes);
 };
 
+// Batch delete (Clear Resolved): one load→save→anchor pass no matter how
+// many notes go, instead of rewriting the file once per note. Unknown ids
+// are ignored. With nothing matched it returns early — neither the notes
+// file nor the anchor ref is touched, so an idempotent re-run cannot
+// trigger the watcher. Returns the number of notes deleted.
+export const deleteNotes = async (
+  git: Git,
+  branch: string,
+  noteIds: readonly string[],
+): Promise<number> => {
+  const file = await loadNotesForMutation(git, branch);
+  const ids = new Set(noteIds);
+  const remaining = file.notes.filter((note) => !ids.has(note.id));
+  const deleted = file.notes.length - remaining.length;
+  if (deleted === 0) {
+    return 0;
+  }
+  file.notes = remaining;
+  await saveNotes(git, branch, file);
+  await anchorBlobs(git, branch, file.notes);
+  return deleted;
+};
+
 // Resolve sets the sticky "resolved" status; unresolve recomputes the
 // derived status from the merged thread's last speaker (agent → addressed,
 // reviewer → open).

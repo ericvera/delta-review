@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
 import {
@@ -30,6 +30,7 @@ import { mergeThreads, NoteThread } from "./noteThreads";
 import { notesCollapseKeyFor, NotesTreeProvider } from "./notesTreeProvider";
 import {
   buildAnchorResolver,
+  deleteNotes,
   loadNotes,
   loadResponses,
   refreshDerived,
@@ -239,11 +240,16 @@ export const activate = async (
   );
   context.subscriptions.push(commentController);
 
+  // The currently rendered thread set — what Clear Resolved operates on.
+  // Only renderNoteThreads assigns it, so it always matches both surfaces.
+  let currentNoteThreads: NoteThread[] = [];
+
   // Renders the merged threads into both notes surfaces: the inline comment
   // threads and the REVIEW NOTES tree (with its to-handle badge). Every call
   // site is generation-guarded inside refresh(), so the two surfaces always
   // show the same thread set.
   const renderNoteThreads = (threads: NoteThread[]): void => {
+    currentNoteThreads = threads;
     commentController.renderThreads(threads);
     notesTreeProvider.setThreads(threads);
     // Open + addressed need reviewer attention; resolved notes are done
@@ -548,7 +554,10 @@ export const activate = async (
     await refresh();
   };
 
-  const openDiff = async (file: ReviewFile): Promise<void> => {
+  const openDiff = async (
+    file: ReviewFile,
+    selection?: vscode.Range,
+  ): Promise<void> => {
     if (git === undefined) {
       return;
     }
@@ -570,11 +579,14 @@ export const activate = async (
       file.movedFrom === undefined
         ? `${basename(file.path)} (${baseLabel} ↔ ${workingLabel})`
         : `${basename(file.path)} (moved from ${file.movedFrom} — ${baseLabel} ↔ ${workingLabel})`;
+    // The TextDocumentShowOptions must be the positional 4th argument —
+    // folding it into the title silently breaks the command
     await vscode.commands.executeCommand(
       "vscode.diff",
       leftUri,
       rightUri,
       title,
+      selection === undefined ? undefined : { selection },
     );
   };
 
@@ -698,18 +710,78 @@ export const activate = async (
     ),
     vscode.commands.registerCommand("deltaReview.openDiff", openDiff),
 
-    // Stub navigation for REVIEW NOTES rows: opens the file's review diff
-    // when the noted file is in the review set (real reveal-the-line
-    // navigation lands with the notes-view actions)
+    // REVIEW NOTES row click: open the noted file's review diff with the
+    // cursor at the note's current line and the thread expanded; a file that
+    // left the review set falls back to the plain working file
     vscode.commands.registerCommand(
       "deltaReview.openNoteInDiff",
       async (thread: NoteThread) => {
+        if (git === undefined) {
+          return;
+        }
+        const line = Math.max(thread.note.currentStartLine - 1, 0);
+        const selection = new vscode.Range(line, 0, line, 0);
         const file = model?.files.find(
           (candidate) => candidate.path === thread.note.file,
         );
         if (file !== undefined) {
-          await openDiff(file);
+          // vscode.diff applies the selection to the modified (right) side,
+          // so for a base-side note the cursor line is an approximation —
+          // the expanded thread on the left is the visible cue
+          await openDiff(file, selection);
+          // Reveal approximation (no stable thread.reveal() in 1.90):
+          // expand the note's thread once the diff editor exists — one tick
+          // after the await, never a busy-wait
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          commentController.expandThread(thread.note.id);
+          return;
         }
+        // Not in the review set — open the plain file at the note's line
+        const absolutePath = join(git.repoRoot, thread.note.file);
+        try {
+          await access(absolutePath);
+        } catch {
+          void vscode.window.showInformationMessage(
+            "Delta Review: file no longer exists; note kept.",
+          );
+          return;
+        }
+        await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+          selection,
+        });
+        // Working-side threads attach to the plain file URI, so the thread
+        // renders here too (base-side threads live on the base document —
+        // expanding is a harmless no-op for those)
+        commentController.expandThread(thread.note.id);
+      },
+    ),
+
+    // Clear Resolved: batch-deletes every resolved note on the current
+    // branch. No confirmation modal — resolved notes were already confirmed
+    // twice (agent addressed, reviewer resolved).
+    vscode.commands.registerCommand(
+      "deltaReview.clearResolvedNotes",
+      async () => {
+        if (git === undefined || model === undefined) {
+          return;
+        }
+        const resolvedIds = currentNoteThreads
+          .filter((thread) => thread.status === "resolved")
+          .map((thread) => thread.note.id);
+        if (resolvedIds.length === 0) {
+          return;
+        }
+        try {
+          await deleteNotes(git, model.branch, resolvedIds);
+        } catch (error) {
+          // E.g. an invalid on-disk notes file — the store refuses to
+          // overwrite it; nothing changed, so nothing to refresh
+          void vscode.window.showErrorMessage(
+            `Delta Review: failed to clear resolved notes (${error instanceof Error ? error.message : String(error)})`,
+          );
+          return;
+        }
+        await refresh();
       },
     ),
 

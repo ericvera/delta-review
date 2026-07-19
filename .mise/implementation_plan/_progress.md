@@ -251,3 +251,36 @@
   isolation (`markAllReviewed` unaffected, no notes file created by an empty
   view). Welcome-view rendering, badge pill, and section placement remain
   eyeball-only in the F5 dev host.
+
+## Task 4.2 — View actions: click-to-diff navigation, Clear Resolved, live updates, branch switching
+
+- Key changes: `src/extension.ts` — real `deltaReview.openNoteInDiff` (in-set file →
+  `openDiff` with a selection at `currentStartLine - 1` passed as `vscode.diff`'s positional
+  4th options argument, then `expandThread` one tick after the await; deleted in-set file →
+  its deletion diff via the same path; off-set file → plain `showTextDocument` at the line,
+  with an `access` check first and a "file no longer exists; note kept" info toast when the
+  file is gone from disk too); `openDiff` gained an optional `selection` parameter; new
+  `deltaReview.clearResolvedNotes` command (collects resolved ids from the rendered thread
+  set held in `currentNoteThreads`, batch-deletes, refreshes; error toast without refresh on
+  store failure); `currentNoteThreads` assigned only in `renderNoteThreads`.
+  `src/commentController.ts` — new `expandThread(noteId)` (sets the cached thread's
+  `collapsibleState` to Expanded — the reveal approximation, no stable `thread.reveal()` in
+  1.90). `src/notesStore.ts` — new `deleteNotes(git, branch, ids)` batch helper: one
+  load→save→anchor pass, early-return with nothing matched (file and ref untouched).
+  `package.json` — `clearResolvedNotes` declaration (`$(clear-all)`), `view/title` entry on
+  `deltaReviewNotes`. `src/notesStore.test.ts` — 4 new `deleteNotes` tests (260 total).
+- Deviations from plan: none. Live updates (REQ-VIEW-5) and branch/repo switching
+  (REQ-VIEW-8) needed no code: every render path funnels through `renderNoteThreads` (both
+  surfaces + badge), the responses/notes files are watched via the delta-review-dir watcher,
+  and the notes load path derives branch/repo from the current refresh's `computed.branch` /
+  captured `git` with no caches. Verification: manual checks 1–6 scripted with the session
+  `@vscode/test-electron` harness (`runViewActions.mjs` + `suite/viewActions.cjs` in the
+  scratchpad, not committed): 26 assertions all passing — diff navigation with cursor at the
+  note's line and thread expanded, plain-file fallback after reverting the change, base-side
+  note (diff opens, left thread expanded), deletion-diff navigation, vanished-file note-kept
+  path, Clear Resolved (resolved gone from file/threads/ref, open notes untouched, second
+  run touches neither file nor ref), watcher-driven addressed flip with no manual refresh,
+  and branch switching (per-branch notes files isolated across `git switch`). SCM-picker
+  repo switching wasn't scripted (single-repo harness; `setActiveRepo` funnels through
+  `refresh()` — code-verified); toast wording and title-button placement remain eyeball-only
+  in the F5 dev host.
