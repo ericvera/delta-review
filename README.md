@@ -6,7 +6,8 @@ Incremental local code review for VS Code — mark files reviewed and, when they
 - Content-based state: survives commits, amends, and rebases; only an actual content change resets a file.
 - Auto-review: mechanical files (lockfiles, build output, `linguist-generated`) fold into a collapsed **Auto** subgroup — review or bulk-✓ them separately, or let them mark themselves.
 - Clustered review: group the change into narrative clusters (written by Claude Code) and review it story by story instead of file by file.
-- Zero footprint: state lives inside `.git` (`refs/review/<branch>`), never in your working tree, never pushed.
+- Review notes: comment on diff lines, have Claude Code address them, and track the thread to resolution — all inside the editor.
+- Zero footprint: state lives inside `.git` (`refs/review/<branch>` and `.git/delta-review/`), never in your working tree, never pushed.
 
 ## Install
 
@@ -51,9 +52,37 @@ To update to the latest version later:
 
 (then restart Claude Code to apply)
 
+The plugin ships two skills: `cluster-review` (this section) and `review-notes` (see [Review notes](#review-notes)) — one install covers both.
+
 - Ask Claude to cluster the change; it writes a per-branch contract file under `.git` describing narrative clusters (label, summary, members) — nothing touches your working tree.
 - A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last.
 - Grouping is pure presentation — toggling it never changes what's marked reviewed.
+
+### Review notes
+
+Comment on the code right in the review diff and drive the fixes without leaving the editor.
+
+Creating notes:
+
+- Hover a line (or select a range) in a review diff and click the `+` in the gutter — works on both sides, so you can comment on removed code too.
+- Threads use VS Code's standard commenting UI; they also show up in the built-in Comments panel.
+
+Lifecycle:
+
+- **Open** → the note needs work. **Addressed** → the agent replied; a reply box appears so you can **Reply & Reopen** if the fix isn't right. **Resolved** → you accepted it (Resolve/Unresolve from the thread title; Delete Thread removes it entirely).
+- Notes follow the code: edits above shift them, edits to the noted lines flag them **Outdated** (with the original line shown), and they survive commits, amends, and rebases.
+
+Agent loop:
+
+- Install the `review-notes` skill (same plugin install as [clusters](#cluster-with-claude-code)), then ask Claude Code to "address my review notes".
+- The agent reads your notes, edits the code, and replies with what it changed; replies appear live in the thread and the note relocates to where the fix landed.
+
+REVIEW NOTES view:
+
+- A sibling section in the Source Control sidebar lists every note, grouped by file with status icons.
+- Click a note to open its diff with the cursor on the noted line and the thread expanded.
+- The **Clear Resolved** title button deletes resolved notes; the badge counts notes still needing your attention.
+- Notes are per-branch, live inside `.git`, and are never pushed — like all Delta Review state.
 
 ## Settings
 

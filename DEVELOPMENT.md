@@ -82,6 +82,30 @@ Clustered review is driven by a JSON contract the extension only ever **reads** 
 - Reviewed-bucket folder `−` (tree mode) unmarks every visible child — auto files included, since they render inline in the bucket rather than in an Auto subgroup. With `markAutomatically` on, an unmarked auto file returns to Reviewed on the next refresh (standard auto-review behavior, for every unmark path).
 - Grouping is pure presentation: tree rows resolve their files from the current `ClusterModel` at render time, and no lever flip touches `refs/review/<branch>`. Mark/unmark writes through the normal snapshot path, and that ref write is what moves a row between a cluster and the Reviewed bucket.
 
+### Review notes
+
+Inline notes on diff lines, threaded with an agent's replies. Two contract files per branch under `<git common dir>/delta-review/` (same dir and branch sanitization as clusters):
+
+- `notes-<sanitized branch>.json` — **extension-owned**; created/edited from the diff editor. Agents only read it; the extension never rewrites an invalid one (corrupt → deduped warning, notes unrendered, mutations refused).
+- `responses-<sanitized branch>.json` — **agent-owned**; the `review-notes` skill in `plugin/` appends `{ noteId, status: "addressed", response, at, anchor? }` entries. The extension only reads it (corrupt → deduped warning, treated as missing).
+
+Types and whole-file parsers live in `src/notes.ts` (clusters semantics: one violating entry rejects the file with a one-line error); persistence and mutation in `src/notesStore.ts` (atomic same-dir temp+rename saves, an idempotence guard so identical saves never touch the file — no watcher loops — and load→modify→save helpers).
+
+#### The ref: `refs/review-notes/<branch>`
+
+Each note snapshots the whole noted document as a git blob (`contentBlob`, via `hash-object -w`). All live blobs are anchored by a commit on `refs/review-notes/<branch>` (tree path = note id → blob), so `git gc` cannot prune them. It is deliberately separate from `refs/review/<branch>`: Clear Review State must not destroy note snapshots. The ref is deleted when the last note goes. Inspect with `git ls-tree refs/review-notes/<branch>`.
+
+#### Anchoring model & derived-field refresh
+
+A note pins `file`, `side` (`working` = right/current code, `base` = left/old code), a 1-based line range, the range's text (`snapshot`), and `contentBlob`. Every `refresh()` runs `refreshDerived` (`src/notesStore.ts`) to recompute the persisted hints (`status`, `outdated`, `currentStartLine/EndLine`):
+
+- Diff `contentBlob` against the side's current content (`git diff -U0 <blob> <blob>`, hunks mapped by `src/noteAnchor.ts`): hunks above shift the range; a hunk touching it sets `outdated: true` and collapses it to one line; a missing document sets `outdated` and keeps the last position. Base-side notes compare against the file's current diff base, so they progress when the file is marked reviewed.
+- Threads are merged in `src/noteThreads.ts`: reviewer `turns` + agent responses interleaved by `at`; status derived — explicit `resolved` wins, else last speaker (agent → **addressed**, reviewer → **open**). Derived fields are persisted back so agents reading the file get near-current hints.
+- Response anchors: the newest agent anchor that resolves (`buildAnchorResolver` — repo-relative `/`-separated path only, file exists, line in range; traversal/absolute paths are always dangling) relocates the note to the fix — side flips to `working`, file/lines/snapshot/`contentBlob` are rewritten and re-anchored on the ref. One-shot per response via `appliedAnchorAt`.
+- The clusters watcher on `<common dir>/delta-review/*.json` also covers both notes files, so agent replies merge live without a manual refresh.
+
+Rendering is the standard VS Code comments API (`src/commentController.ts`) — threads appear in the built-in Comments panel for free, nothing is built against it. The REVIEW NOTES section (`src/notesTreeProvider.ts`) is a sibling SCM view fed the same merged threads; `renderNoteThreads` in `src/extension.ts` fans out to both surfaces plus the view badge.
+
 ## Manual test script
 
 Basics (no contract, default settings):
@@ -117,3 +141,19 @@ Clusters:
 20. Both levers persist across reload. Flipping either lever changes no review state (`git ls-tree -r refs/review/<branch>` identical before/after).
 21. Break the contract (e.g. `"version": 3`) → ⚠ message, view falls back to ungrouped, grouping preference survives a later fix. Delete the contract → button and message disappear.
 22. Throughout: `git status` in the test repo stays clean — the contract lives under `.git`.
+
+Notes:
+
+23. In a review diff, hover a right-side line and click the gutter `+` → the thread renders in place (Open), the REVIEW NOTES section lists it with the blue open icon, and the view badge counts it. `git status` stays clean; `.git/delta-review/notes-<branch>.json` and `refs/review-notes/<branch>` now exist.
+24. Add a note on a **left** (base) side line → thread renders on the left editor with a `base` marker in REVIEW NOTES. Select a multi-line range first → the note spans the range.
+25. Edit a reviewer turn (pencil on the comment) → Save persists, Cancel restores the original. Delete the only turn → the whole thread disappears (note gone from file and view); deleting one turn of a multi-turn thread keeps the rest.
+26. Resolve from the thread title → green check in REVIEW NOTES, thread shows Resolved, badge drops. Unresolve → back to its derived status.
+27. Agent round-trip: hand-write `.git/delta-review/responses-<branch>.json` (`{"version":1,"responses":[{"noteId":"<id>","status":"addressed","response":"…","at":"<UTC ISO-8601>"}]}`) → with **no manual refresh** the reply appears in the thread as Claude, the label flips to Addressed (yellow outline icon), and a reply box appears. Type a reply and hit Reply & Reopen → Open again, reply box gone.
+28. Anchor relocation: append a response entry whose `anchor` names another file/line with that line's exact text as `snapshot` → the note relocates there (a base-side note flips to the working side) and the REVIEW NOTES row follows. An anchor with a bad path or stale line is ignored — reply still shows, note stays put.
+29. Outdated: edit lines **above** a note → the thread shifts down/up, not outdated. Edit the noted line itself → `⚠` in REVIEW NOTES and a dimmed `line was: …` in the thread's first comment.
+30. Base progression: with a base-side note on a file, mark the file reviewed → the base thread is recreated against the new base (the reviewed snapshot); turns and status untouched.
+31. REVIEW NOTES navigation: click a note → the file's review diff opens with the cursor on the noted line and the thread expanded. A note on a file no longer in the review set opens the plain file; if the file is gone from disk too → "note kept" info toast, nothing opens.
+32. Clear Resolved (view title `$(clear-all)`) → resolved notes vanish from the file, the threads, and the ref; open/addressed notes untouched; clicking again is a no-op (file mtime unchanged).
+33. Branch switch: `git switch` to another branch → that branch's own (empty or different) notes render; switch back → the originals return. Review marks and notes stay per-branch.
+34. Corrupt files: garbage in the notes file → warning toast, notes unrendered, note actions refuse, and the extension **never rewrites the file**; restore it → everything returns. Garbage in the responses file → warning, notes still render (without replies), recovers when fixed. Each warning shows once, not per refresh.
+35. Comments panel: open the built-in Comments panel → the same threads are listed there via the standard API; review tree, clusters, and auto-review behave exactly as before while notes exist.

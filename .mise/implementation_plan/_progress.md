@@ -284,3 +284,41 @@
   repo switching wasn't scripted (single-repo harness; `setActiveRepo` funnels through
   `refresh()` — code-verified); toast wording and title-button placement remain eyeball-only
   in the F5 dev host.
+
+## Task 5.1 — review-notes skill, README/DEVELOPMENT docs, full verification pass
+
+- Key changes: new `plugin/skills/review-notes/SKILL.md` (agent-facing contract doc mirroring
+  cluster-review: frontmatter with the plan's trigger phrases; both schemas with
+  parser-rejection rules vs silent-failure conventions; numbered steps — repo/branch/common-dir
+  resolution with the shared sanitization rule and explicitly no base-branch logic;
+  missing/empty notes → report and stop; timestamp-based work-set rule — actionable iff newest
+  turn across both files is a reviewer turn and status ≠ resolved, never trust `status` alone;
+  snapshot-first target location with `currentStartLine` as hint; append-only atomic
+  responses writing with `date -u +%FT%TZ` timestamps and working-tree anchors; never write
+  the notes file, never repair a corrupt one; version-bump rule). `README.md` — feature
+  bullet, "Review notes" usage section (creation, lifecycle, agent loop, REVIEW NOTES view),
+  and a two-skills install note beside the cluster instructions; Settings untouched.
+  `DEVELOPMENT.md` — "Review notes" internals section (contract files and ownership,
+  `refs/review-notes/<branch>` anchoring, anchoring model + derived-field refresh, thread
+  merge/status derivation, response-anchor application, watcher/warning behavior,
+  standard-comments-API rendering) and manual-script "Notes" group (scenarios 23–35).
+  `plugin/.claude-plugin/plugin.json` untouched — skills are directory-discovered, not
+  enumerated there.
+- Deviations from plan: none. Verification: `yarn format`/`yarn lint`/`yarn build`/`yarn test`
+  (256 tests)/`yarn package` all green; vsix excludes `plugin/**` so skill files ship with the
+  plugin only. Skill dry-run executed literally against a scratch repo on branch `notes/demo`
+  (exercises sanitization): phase A created a working-side and a base-side note through the
+  real `deltaReview.addNote` path in a scripted extension host; the agent role was then
+  simulated out-of-host by following SKILL.md step-by-step (bash resolution incl. relative
+  `--git-common-dir`, snapshot-located code edits, atomic temp+rename append of two anchored
+  responses); phase B host run verified the extension merge picked it up — both notes
+  persisted `addressed`, anchor relocation incl. the base→working flip, `appliedAnchorAt`
+  one-shot, contentBlobs re-anchored on the ref — and completed the lifecycle in-host (third
+  note → live watcher merge to Addressed → `deltaReview.resolveNote` → resolved persisted),
+  with the skill's step-3 work-set rule returning empty afterwards (no re-addressing).
+  Full-manual-pass substitute (interactive F5 unavailable): re-ran every session
+  extension-host harness — notes (39 checks), threadActions (44), agentLoop (34), notesView,
+  viewActions, moves — all PASSED; Comments-panel check done at code level (single standard
+  `createCommentController`, only stock `comments/*` menu contributions, no panel-specific
+  code). Purely visual details (icons, badge pill, menu placement, toast wording) remain
+  eyeball-only in the F5 dev host.
