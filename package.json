@@ -21,9 +21,19 @@
         {
           "id": "deltaReview",
           "name": "Delta Review"
+        },
+        {
+          "id": "deltaReviewNotes",
+          "name": "Review Notes"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "deltaReviewNotes",
+        "contents": "No review notes on this branch.\nHover a line in a review diff and click + to add one."
+      }
+    ],
     "commands": [
       {
         "command": "deltaReview.refresh",
@@ -174,6 +184,11 @@
       {
         "command": "deltaReview.replyReopen",
         "title": "Reply & Reopen",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.openNoteInDiff",
+        "title": "Open Note in Diff",
         "category": "Delta Review"
       }
     ],
@@ -440,6 +455,10 @@
         },
         {
           "command": "deltaReview.replyReopen",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.openNoteInDiff",
           "when": "false"
         }
       ]

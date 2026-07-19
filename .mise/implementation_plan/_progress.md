@@ -212,3 +212,42 @@
   (traversal anchor stays dangling under an accept-all injected resolver; resolver rejects
   traversal/absolute/backslash/drive/`.`-segment paths without reading them), 252 total.
 - Deviations from plan: none — targeted fixes for the two reviewer-confirmed defects only.
+
+## Task 4.1 — REVIEW NOTES view: sibling SCM section with file groups, status icons, empty state
+
+- Key changes: new `src/notesTreeProvider.ts` (`NotesTreeElement` union
+  `fileGroup`/`note`, `notesCollapseKeyFor` (`notes:<path>` namespace),
+  `NotesTreeProvider` — root = file groups sorted by path (basename label, dimmed
+  dirname ` · <n>` description with the bare count for root-dir files, resolved
+  notes included, full-path tooltip, id `notesFile:<path>`, default expanded via
+  injected `isCollapsed`); children = that file's threads sorted by
+  `currentStartLine` (status icon circle-large-filled/blue → open,
+  circle-large-outline/yellow → addressed, check/green → resolved; ~60-char
+  first-line label; `:<line> base ⚠` description parts; full-text+status tooltip;
+  `contextValue: noteRow-<status>`; id `note:<noteId>`; click command
+  `deltaReview.openNoteInDiff` with the thread argument); `getChildren(root)`
+  returns `[]` when empty so `viewsWelcome` renders). `src/extension.ts` —
+  `notesTreeProvider`/`notesTreeView` (`createTreeView("deltaReviewNotes")`),
+  collapse wiring into the shared collapsed set, `renderNoteThreads(threads)`
+  helper replacing every `commentController.renderThreads` call site (renders
+  both surfaces + sets the notes badge to the open+addressed count, tooltip
+  "n review note(s) to handle"), and the `deltaReview.openNoteInDiff` stub
+  (opens the file's review diff via `openDiff` when the noted file is in the
+  review set; no-op otherwise). `package.json` — `views.scm` sibling entry
+  `deltaReviewNotes`/"Review Notes", `viewsWelcome` empty state, command
+  declaration + palette hide. `deltaReview` view entries untouched.
+- Deviations from plan: none. The plan's "module-level `NoteThread[]` variable"
+  isn't needed — the provider holds the current threads; `renderNoteThreads`
+  centralizes the fan-out at the already-generation-guarded call sites (the
+  notes-failure catch still leaves both surfaces and the badge intact).
+  Verification: manual checks scripted with the session `@vscode/test-electron`
+  harness (`runNotesView.mjs` + `suite/notesView.cjs` in the scratchpad, not
+  committed): 36 assertions all passing — manifest contributions (sibling view
+  second in `views.scm`, welcome text, command), empty root → `[]`,
+  grouping/sorting incl. same-basename subdir disambiguation, all three status
+  icons with `charts.*` colors, truncation, base/⚠ markers, ids/contextValues,
+  click-command wiring, collapse-key replay, live setThreads events, the
+  openNoteInDiff stub opening the review diff (and no-op off-set), review-flow
+  isolation (`markAllReviewed` unaffected, no notes file created by an empty
+  view). Welcome-view rendering, badge pill, and section placement remain
+  eyeball-only in the F5 dev host.

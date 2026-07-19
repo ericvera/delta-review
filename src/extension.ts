@@ -26,7 +26,8 @@ import {
   ReviewModel,
 } from "./model";
 import type { ResponsesFile } from "./notes";
-import { mergeThreads } from "./noteThreads";
+import { mergeThreads, NoteThread } from "./noteThreads";
+import { notesCollapseKeyFor, NotesTreeProvider } from "./notesTreeProvider";
 import {
   buildAnchorResolver,
   loadNotes,
@@ -50,8 +51,7 @@ import {
 // refreshes: identical failures warn once until the message changes. The
 // notes-file and responses-file warnings follow the same pattern, each with
 // its own last-warned string (reset when its file loads cleanly, so a
-// recurrence after a fix warns again). Toasts stand in for the notes-view
-// message surface until Task 4.1 adds the view.
+// recurrence after a fix warns again).
 let lastNotesWarning: string | undefined;
 let lastNotesFileWarning: string | undefined;
 let lastResponsesFileWarning: string | undefined;
@@ -129,6 +129,14 @@ export const activate = async (
     treeDataProvider: treeProvider,
   });
 
+  // REVIEW NOTES: sibling SCM section below the review set. File groups
+  // default to expanded, so they use the bare-key-while-collapsed convention
+  // of the shared collapsed set (keys namespaced `notes:<path>`).
+  const notesTreeProvider = new NotesTreeProvider((key) => collapsed.has(key));
+  const notesTreeView = vscode.window.createTreeView("deltaReviewNotes", {
+    treeDataProvider: notesTreeProvider,
+  });
+
   const setViewMode = (mode: ViewMode): void => {
     viewMode = mode;
     void context.workspaceState.update(viewModeKey, mode);
@@ -176,6 +184,18 @@ export const activate = async (
       }
       persistCollapsed();
     }),
+    notesTreeView.onDidCollapseElement((event) => {
+      if (event.element.kind === "fileGroup") {
+        collapsed.add(notesCollapseKeyFor(event.element));
+        persistCollapsed();
+      }
+    }),
+    notesTreeView.onDidExpandElement((event) => {
+      if (event.element.kind === "fileGroup") {
+        collapsed.delete(notesCollapseKeyFor(event.element));
+        persistCollapsed();
+      }
+    }),
     vscode.commands.registerCommand("deltaReview.viewAsTree", () =>
       setViewMode("tree"),
     ),
@@ -198,6 +218,7 @@ export const activate = async (
 
   context.subscriptions.push(
     treeView,
+    notesTreeView,
     statusBarItem,
     vscode.workspace.registerTextDocumentContentProvider(
       REVIEW_BASE_SCHEME,
@@ -218,6 +239,26 @@ export const activate = async (
   );
   context.subscriptions.push(commentController);
 
+  // Renders the merged threads into both notes surfaces: the inline comment
+  // threads and the REVIEW NOTES tree (with its to-handle badge). Every call
+  // site is generation-guarded inside refresh(), so the two surfaces always
+  // show the same thread set.
+  const renderNoteThreads = (threads: NoteThread[]): void => {
+    commentController.renderThreads(threads);
+    notesTreeProvider.setThreads(threads);
+    // Open + addressed need reviewer attention; resolved notes are done
+    const toHandle = threads.filter(
+      (thread) => thread.status !== "resolved",
+    ).length;
+    notesTreeView.badge =
+      toHandle > 0
+        ? {
+            value: toHandle,
+            tooltip: `${toHandle} review note${toHandle === 1 ? "" : "s"} to handle`,
+          }
+        : undefined;
+  };
+
   // Refreshes run concurrently (watcher bursts, repo switches); the generation
   // counter keeps a slow, older computation from overwriting a newer result
   let refreshGeneration = 0;
@@ -232,7 +273,7 @@ export const activate = async (
       treeView.message =
         "Open a folder inside a git repository to start reviewing.";
       statusBarItem.hide();
-      commentController.renderThreads([]);
+      renderNoteThreads([]);
       return;
     }
     const configuration = vscode.workspace.getConfiguration("deltaReview");
@@ -344,7 +385,7 @@ export const activate = async (
             lastNotesFileWarning,
             `Delta Review: review notes file: ${notesResult.error} — notes are read-only until the file is fixed`,
           );
-          commentController.renderThreads([]);
+          renderNoteThreads([]);
           return;
         }
         lastNotesFileWarning = undefined;
@@ -393,12 +434,10 @@ export const activate = async (
           if (generation !== refreshGeneration) {
             return;
           }
-          commentController.renderThreads(
-            mergeThreads(refreshed, responses, anchorResolves),
-          );
+          renderNoteThreads(mergeThreads(refreshed, responses, anchorResolves));
         } else {
           // Missing or empty — clear any rendered threads
-          commentController.renderThreads([]);
+          renderNoteThreads([]);
         }
       } catch (notesError) {
         if (generation !== refreshGeneration) {
@@ -423,7 +462,7 @@ export const activate = async (
       // Fatal model errors win over any contract warning
       treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
-      commentController.renderThreads([]);
+      renderNoteThreads([]);
     }
   };
 
@@ -658,6 +697,21 @@ export const activate = async (
       },
     ),
     vscode.commands.registerCommand("deltaReview.openDiff", openDiff),
+
+    // Stub navigation for REVIEW NOTES rows: opens the file's review diff
+    // when the noted file is in the review set (real reveal-the-line
+    // navigation lands with the notes-view actions)
+    vscode.commands.registerCommand(
+      "deltaReview.openNoteInDiff",
+      async (thread: NoteThread) => {
+        const file = model?.files.find(
+          (candidate) => candidate.path === thread.note.file,
+        );
+        if (file !== undefined) {
+          await openDiff(file);
+        }
+      },
+    ),
 
     vscode.commands.registerCommand(
       "deltaReview.openFile",
