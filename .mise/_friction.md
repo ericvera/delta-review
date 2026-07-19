@@ -4,3 +4,4 @@ critic requirements: round 2 blocking count equal to round 1 (1→1) — stall r
 critic requirements: 3 rounds, blocking 1/1/0
 critic plan: 2 rounds, blocking 1/0
 task 03_01: review found notes-refresh failures escalate to fatal tree teardown (block inside pre-existing try/catch)
+task 03_02: review found empty-reply reopen path + stale reviewerTurnIndex overwrite on concurrent edit/delete
