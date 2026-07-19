@@ -85,7 +85,10 @@ their own ref, `refs/review-notes/<branch>`, to survive gc regardless of review-
    - Status: from `mergeThreads` (derived addressed/open; stored resolved wins).
    - Anchor relocation persistence is Task 3.3's concern — here only compute; accept a hook so 3.3
      can apply `effectiveAnchor` before persisting.
-   - Persist via `saveNotes` only if anything changed (guard above).
+   - Persist via `saveNotes` only if anything changed (guard above). If any `contentBlob` changed in
+     this pass (anchor application re-snapshots, and working-side comparison blobs are written with
+     `-w`), call `anchorBlobs` before returning — a loose replacement blob is prunable and a later
+     `git gc` would break re-anchoring for exactly the relocated notes (REQ-STORE-3).
 7. Export everything the UI layers need; keep `vscode` out of this module (Node + `Git` only) so the
    temp-repo tests run under Vitest.
 

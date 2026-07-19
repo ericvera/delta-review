@@ -55,7 +55,10 @@ Existing machinery that makes "live" free:
    parsed, re-serialized optional field** in `src/notes.ts` (Task 1.1 declares it) — it must NOT be
    an unknown key: the parser mirrors clusters.ts, which normalizes to known fields only
    (`clusters.ts:181-216`), so an unknown key would be stripped on the first load→save cycle and
-   the guard would fail, re-applying anchors after every reload.
+   the guard would fail, re-applying anchors after every reload. The re-snapshot's new
+   `contentBlob` MUST be re-anchored on `refs/review-notes/<branch>` in the same pass (Task 2.1's
+   `refreshDerived` calls `anchorBlobs` when blobs changed) — otherwise gc can prune it
+   (REQ-STORE-3).
 3. **Status persistence** (REQ-AGENT-9): `refreshDerived` writes derived `status`
    (addressed/open flips from responses; resolved preserved — REQ-AGENT-6's resolved-wins rule is in
    `mergeThreads`).

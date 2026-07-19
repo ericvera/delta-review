@@ -76,7 +76,11 @@ VS Code Comments API (engines `^1.90`):
      `vscode.window.showErrorMessage("Delta Review: failed to save note (…)")` and do NOT dispose
      the pending thread — the typed text stays (REQ-NOTE-3/4, mock 2B).
 3. `renderThreads(threads: NoteThread[])` — reconcile a `Map<noteId, vscode.CommentThread>`:
-   - Thread URI: working side → `Uri.file(join(git.repoRoot, note.file))`; base side → the
+   - Thread URI: working side → `Uri.file(join(git.repoRoot, note.file))` — EXCEPT when the file is
+     deleted from the working tree: the deletion diff's right side is
+     `createReviewBaseUri(file.path, undefined)` (query `"empty"`, `extension.ts:382-384`), so
+     attach the thread to that URI instead or it can never render in the deletion diff (requirements
+     "Deleted-file diffs" assumption; REQ-VIEW-4 reveal). Base side → the
      **currently displayed** base document, `createReviewBaseUri(note.file, currentDiffBaseSha)`,
      where `currentDiffBaseSha` is the review model's `diffBaseSha` for that file (`model.ts:28`;
      `movedFrom` handling as in `openDiff` `extension.ts:378-381`). A `CommentThread` renders only
@@ -97,7 +101,9 @@ VS Code Comments API (engines `^1.90`):
    - Dispose threads whose note ids vanished.
 4. Extension wiring: after the model is set in `refresh()`, load notes+responses via the store,
    `mergeThreads`, `refreshDerived`, then `renderThreads`. Guard with the existing generation
-   counter (`extension.ts:183-205` pattern) so stale renders drop.
+   counter (`extension.ts:183-205` pattern) so stale renders drop. `mergeThreads` requires an
+   `anchorResolves` callback (Task 1.3 signature) whose real implementation is Task 3.3's — pass
+   `() => false` here (anchors simply don't apply yet); do not reach forward into 3.3's logic.
 
 ## Testing suggestions
 

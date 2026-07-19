@@ -55,6 +55,9 @@ Existing navigation machinery:
    - Base-side notes: selection targets the left document's line — `vscode.diff` selection applies
      to the modified (right) side; acceptable approximation: still pass the line, the expanded
      thread on the left is the visible cue. Note this in a code comment.
+   - Deleted file still in the review set → open its deletion diff (right side
+     `createReviewBaseUri(path, undefined)`, as `openDiff` does `extension.ts:382-384`); the thread
+     attaches to that same URI (Task 3.1's deleted-file rule), so it renders and expands there.
    - Not in the review set (file left the set — requirements Assumption) → open the plain file via
      `vscode.window.showTextDocument(Uri.file(join(git.repoRoot, file)), { selection })`; deleted
      from disk too → info toast "file no longer exists; note kept".
