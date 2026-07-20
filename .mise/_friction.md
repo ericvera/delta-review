@@ -7,3 +7,4 @@ task 03_01: review found notes-refresh failures escalate to fatal tree teardown 
 task 03_02: review found empty-reply reopen path + stale reviewerTurnIndex overwrite on concurrent edit/delete
 task 03_03: review found responses-warning gap when notes empty + unvalidated anchor.file path traversal
 task 05_01: review found SKILL.md overstates anchor.snapshot validation (extension never checks it)
+acceptance: user flagged review-notes skill shape — restructure into binding Contract layer + overridable default workflow (1a)

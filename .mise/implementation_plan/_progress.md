@@ -333,3 +333,14 @@
   out-of-range line → ignored; snapshot not validated).
 - Deviations from plan: none. Documentation-only; no source changes. `yarn format`,
   `yarn lint`, `yarn build`, `yarn test` (256 tests) all green.
+
+## 05_01 (acceptance revision) — SKILL.md split into Contract + Default workflow layers
+
+- Key changes: `plugin/skills/review-notes/SKILL.md` restructured into a binding "## Contract"
+  section (file locations/sanitization, schemas + parser-rejection and silent-failure rules,
+  note-reading semantics, append-only atomic response writing, never commit/push, mandatory
+  work-set rule, response conventions, version-bump rule) and a "## Default workflow:
+  addressing the notes" section that references the Contract, so other skills/instructions can
+  drive different behavior (summarize, triage, explain-only) on the same contract; frontmatter
+  description broadened to also trigger as the contract reference. No technical content changed.
+- Deviations from plan: none. `yarn format`/`yarn lint`/`yarn build`/`yarn test` (256) green.
