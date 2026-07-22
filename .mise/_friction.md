@@ -8,3 +8,4 @@ task 03_02: review found empty-reply reopen path + stale reviewerTurnIndex overw
 task 03_03: review found responses-warning gap when notes empty + unvalidated anchor.file path traversal
 task 05_01: review found SKILL.md overstates anchor.snapshot validation (extension never checks it)
 acceptance: user flagged review-notes skill shape — restructure into binding Contract layer + overridable default workflow (1a)
+acceptance: user flagged review-notes skill verbosity — tighten so every line earns its place (model-first audience)

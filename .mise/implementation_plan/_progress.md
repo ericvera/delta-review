@@ -344,3 +344,13 @@
   drive different behavior (summarize, triage, explain-only) on the same contract; frontmatter
   description broadened to also trigger as the contract reference. No technical content changed.
 - Deviations from plan: none. `yarn format`/`yarn lint`/`yarn build`/`yarn test` (256) green.
+
+## 05_01 (acceptance revision 2) — SKILL.md tightened; every line earns its place
+
+- Key changes: `plugin/skills/review-notes/SKILL.md` compressed 172 → 133 lines with zero
+  normative loss: two-layer Contract/Default-workflow structure kept (framing statements now
+  one line each), never-write-the-notes-file stated once (in Contract), narrative loop cut to
+  one line, motivational prose reduced to behavior-changing clauses, workflow steps reference
+  the Contract instead of restating it; both v1 JSON examples, sanitization regex, parser
+  rejections, silent-failure conventions, work-set rule, and version-bump rule all intact.
+- Deviations from plan: none. `yarn format`/`yarn lint`/`yarn build`/`yarn test` (256) green.

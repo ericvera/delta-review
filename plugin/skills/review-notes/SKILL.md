@@ -14,38 +14,31 @@ description: >-
 
 # Review Notes
 
-Work with the inline review notes a human wrote in the Delta Review VS Code extension. Two JSON files per branch make up the contract:
-
-- **Notes file** — extension-owned. You only ever **read** it. Never write, reformat, or "fix" it, even if it looks wrong.
-- **Responses file** — agent-owned. You reply by appending entries to it; the extension is the only reader. One writer per file.
-
-The loop: the reviewer writes notes on diff lines → you fix the code and append a response per note → the extension shows your reply in the thread, flips it to **Addressed**, and relocates the note to where your fix landed (via the anchor you provide). The reviewer then resolves it or replies to reopen.
+Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. Loop: the reviewer notes diff lines → you fix the code and append a response per note → the extension shows your reply, flips the note to **Addressed**, and relocates it via your anchor.
 
 ## Contract
 
-This section is binding for every consumer of these files, whether you are following the default workflow below or being driven by other skills or instructions.
+Binding for every consumer of these files, whatever workflow or skill is driving.
 
-### Locating the contract files
+### Files
 
-Work from the repository root: `git rev-parse --show-toplevel`, and `cd` there.
+Work from the repo root (`git rev-parse --show-toplevel`, `cd` there):
 
 ```bash
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 COMMON_DIR=$(git rev-parse --git-common-dir)   # may be relative (".git") — resolve against the repo root
 ```
 
-Sanitize the branch name for the filenames: replace every character outside `[A-Za-z0-9._-]` with `-` (regex `[^A-Za-z0-9._-]` → `-`; `feature/x` becomes `feature-x`), matching the extension's `sanitizeBranchForFilename` exactly.
+Sanitize the branch for filenames with regex `[^A-Za-z0-9._-]` → `-` (`feature/x` → `feature-x`; matches the extension's `sanitizeBranchForFilename`).
 
 - Notes: `<COMMON_DIR>/delta-review/notes-<sanitized-branch>.json`
 - Responses: `<COMMON_DIR>/delta-review/responses-<sanitized-branch>.json`
 
-You do not need the base branch or any VS Code settings — notes are keyed by branch only.
+Files are keyed by branch only — no base branch or VS Code settings needed. Never commit, push, or stage either file; they live under the git directory, invisible to `git status`, and must stay that way.
 
-Never commit or push either contract file, and never add them to the working tree or the index — they live under the git directory (`.git/delta-review/`), invisible to `git status`, and must stay that way.
+### Notes file (read-only)
 
-### Schemas (version 1)
-
-Notes file (you read this):
+Never write, reformat, or repair the notes file. If it exists but is not valid JSON, report that to the user and stop.
 
 ```json
 {
@@ -72,17 +65,13 @@ Notes file (you read this):
 }
 ```
 
-How to read a note:
+- `turns` — reviewer messages, oldest first. The newest reviewer turn is the instruction; earlier turns and your prior responses are context.
+- `snapshot` — exact text of the noted lines at note time, one entry per line; the authoritative locator — search the file for it. `currentStartLine`/`currentEndLine` are hints refreshed only while the extension runs; never trust them over content.
+- `side: "working"` — the note is on current code in `file`. `side: "base"` — it is on old/removed code from the diff's left side; that text may no longer exist anywhere, so address the intent of what replaced it (or its deletion).
+- `outdated: true` — the noted lines changed after the note was written; `snapshot` is what they were.
+- `status`, `contentBlob`, `appliedAnchorAt` — extension bookkeeping; `status` matters only in the work-set rule below.
 
-- `turns` — the reviewer's messages, oldest first. The **newest reviewer turn is the instruction**; earlier turns and your own prior responses are context.
-- `snapshot` — the exact text of the noted lines at note time, one entry per line. This is the authoritative way to find the target: search the file for it. `currentStartLine`/`currentEndLine` are hints the extension refreshes **only while it is running** — never trust them over content.
-- `side: "working"` — the note is on current code in `file`. `side: "base"` — the note is on old/removed code shown on the left of the diff; `snapshot` is that old text, which may no longer exist anywhere. Figure out what replaced it (or that it was deleted) and address the intent.
-- `outdated: true` — the noted lines changed after the note was written; `snapshot` shows what the line was when noted.
-- `status`, `contentBlob`, `appliedAnchorAt` — extension bookkeeping. `status` matters only as part of the work-set rule below; everything else you can ignore.
-
-If the notes file exists but is not valid JSON, report that to the user and stop — never repair or rewrite the notes file.
-
-Responses file (you write this):
+### Responses file (write)
 
 ```json
 {
@@ -103,69 +92,42 @@ Responses file (you write this):
 }
 ```
 
-Entries only ever **accumulate** — multiple entries per `noteId` are normal (each becomes one agent turn in the thread). Never edit or remove existing entries.
+Append-only: never edit or remove existing entries; multiple entries per `noteId` are normal (each is one agent turn in the thread). To write, read-modify-write the whole JSON — keep `"version": 1`, preserve every existing entry, append yours — atomically: serialize to a temp file in the same `delta-review` directory, then rename over the responses file (the extension watches the directory). If the file exists but is corrupt, stop and tell the user; a missing file just means no responses yet.
 
-Rules the extension's parser rejects (one violating entry rejects the whole file, and the reviewer sees a warning instead of your replies):
+Parser rejections (one bad entry rejects the whole file; the reviewer sees a warning instead of your replies):
 
 - `version` must be exactly the integer `1`; `responses` must be an array.
-- Each entry must be an object with non-empty string `noteId`, `status` exactly `"addressed"`, non-empty string `response`, and non-empty string `at`.
-- `anchor` is optional; when present it must have a non-empty string `file`, an integer `line` >= 1, and a string `snapshot`.
+- Each entry: an object with non-empty string `noteId`, `status` exactly `"addressed"`, non-empty string `response`, non-empty string `at`.
+- `anchor` optional; when present: non-empty string `file`, integer `line` >= 1, string `snapshot`.
 
-Conventions you must follow anyway — the extension does not reject these, it fails silently instead:
+Silent failures — not rejected, so you must get these right:
 
-- `at` must be an ISO-8601 UTC timestamp (`date -u +%FT%TZ`; second precision is fine). The extension sorts thread turns by it — a bogus timestamp misorders the conversation and can make a note look unhandled.
-- `noteId` must be the id of an existing note; entries with unknown ids are silently dropped.
-- `anchor.file` must be a repo-relative, `/`-separated path — never absolute, no `\`, no `.` or `..` segments. `anchor.line` is 1-based in the **current working tree**. An anchor with a bad path shape, a missing file, or an out-of-range line is treated as dangling: your response text still shows, but the note is not relocated. Those are the only checks — `anchor.snapshot` is **not** validated against the file. It is stored as-is as the note's new authoritative `snapshot`, so it must be the exact current text of `anchor.line`; a wrong snapshot still relocates the note and silently corrupts its anchor content.
+- `at`: ISO-8601 UTC (`date -u +%FT%TZ`, second precision fine). Thread turns sort by it, so a bogus timestamp misorders the thread and can make a note look unhandled.
+- `noteId` not matching an existing note → entry silently dropped.
+- `anchor.file`: repo-relative, `/`-separated — never absolute, no `\`, no `.` or `..` segments. `anchor.line`: 1-based in the current working tree. Bad path shape, missing file, or out-of-range line → dangling: your response text still shows, but the note is not relocated.
+- `anchor.snapshot` is not validated against the file — it is stored as-is as the note's new authoritative `snapshot`. It must be the exact current text of `anchor.line`; a wrong value still relocates the note and silently corrupts its anchor.
 
-### Writing responses
+Entry conventions: `response` is concise — what you changed and where, written for a human reading a comment thread. Include `anchor` whenever the addressed code has a clear location (working-tree coordinates); omit it only when there is none (code deleted, change spans many places).
 
-Writing the file: read-modify-write the **whole** JSON — keep `"version": 1`, preserve every existing entry, append yours. Write atomically: serialize to a temporary file in the same `delta-review` directory, then rename it over the responses file (the extension watches the directory and may read at any moment).
+### Work set
 
-If the responses file exists but is corrupt, stop and tell the user rather than clobbering it (a missing file just means no responses yet).
+Any driver that responds to notes must compute the work set this way. A note is **actionable** iff:
 
-Response entry conventions:
+- `status` is not `"resolved"`, and
+- the newest turn across both files is a reviewer turn — the latest `at` in the note's `turns` is newer than every one of your response entries for that `noteId`.
 
-- `at`: current UTC time, ISO-8601 (`date -u +%FT%TZ`).
-- `response`: concise — what you changed and where. Written for a human reading a comment thread.
-- `anchor`: include one whenever the addressed code has a clear location — `file` (repo-relative), `line`, and the exact current text of that line as `snapshot`, always working-tree coordinates. Omit it only when there is no single sensible location (e.g. the fix was deleting the code, or it spans many places).
+Never trust `status` alone (the extension that refreshes it may not be running); the timestamp comparison is what prevents re-addressing a note you already answered.
 
-### The work set
+### Schema changes
 
-Any driver that responds to notes must compute the work set this way — no exceptions. A note is **actionable** iff both:
-
-- its `status` is not `"resolved"`, and
-- the **newest turn across both files** is a reviewer turn — i.e. the latest `at` among the note's `turns` is newer than every one of your response entries for that `noteId`.
-
-Never trust `status` alone: it is refreshed by the extension, which may not be running. Comparing turn timestamps is what prevents re-addressing a note you already responded to.
-
-### Changing the schema
-
-If you ever need to change this schema, you must bump `version` and update the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit; the extension rejects any version other than 1.
+Changing the schema requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version other than 1.
 
 ## Default workflow: addressing the notes
 
-This is the default behavior when the user asks to address their review notes; other skills or instructions may drive different behavior on the same contract (summarize, triage, explain without code changes, custom fix policies) — the Contract section above still governs all file access. Responding without a code change is legitimate: a response entry is just a turn in the thread, and explain-only replies are fine.
+The default when the user asks to address their review notes; other skills or instructions may drive different behavior on the same contract (summarize, triage, custom fix policies) — the Contract still governs all file access. Explain-only replies are legitimate: a response entry is just a turn, with or without a code change.
 
-### 1. Locate and read the notes
-
-Resolve the contract file paths per the Contract section. If the notes file is missing, or parses with an empty `notes` array, report "no review notes on this branch" and stop. If it is corrupt JSON, stop as the Contract requires.
-
-### 2. Compute the work set
-
-Read the responses file too and apply the Contract's work-set rule to find the actionable notes.
-
-### 3. Address each actionable note
-
-For each actionable note:
-
-1. Read the whole thread — the note's `turns` plus your prior responses for that id, interleaved oldest → newest by `at`. The newest reviewer turn is the instruction.
-2. Locate the target by searching for the `snapshot` content; treat `currentStartLine` as a hint only. Remember `side: "base"` snapshots describe old code and `outdated` snapshots describe what the line was.
-3. Make the code change the note asks for, following the project's conventions as you would for any edit.
-
-### 4. Respond
-
-Append one entry per note you addressed, following the Contract's response entry conventions and its atomic read-modify-write rule.
-
-### 5. Report
-
-Tell the user what you did: each note addressed (file, what the note asked, what you changed), any notes you skipped and why (already resolved, already responded and awaiting the reviewer, or could not be acted on — say so in the response entry too, so the thread shows it).
+1. **Locate and read the notes** per the Contract. Missing file or empty `notes` array → report "no review notes on this branch" and stop. Corrupt JSON → stop per the Contract.
+2. **Compute the work set** from both files per the Contract.
+3. **Address each actionable note**: read its whole thread (`turns` plus your prior responses, interleaved oldest → newest by `at`), locate the target per the Contract's reading semantics, and make the change the newest reviewer turn asks for, following project conventions.
+4. **Respond**: append one entry per note handled, per the Contract's entry conventions and write rules.
+5. **Report** to the user: each note addressed (file, what it asked, what you changed) and any skipped (already resolved, awaiting the reviewer, or not actionable — say so in a response entry too, so the thread shows it).
