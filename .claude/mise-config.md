@@ -26,7 +26,7 @@ Vitest; colocate `*.test.ts` next to the source in `src/`. Unit tests cover pure
 
 ## Test exceptions
 
-- Anything that would need an extension-host e2e test (no e2e infrastructure exists) — verify with unit tests plus manual verification in the F5 Extension Development Host
+- Anything that would need an extension-host e2e test — verify with unit tests plus a scripted `@vscode/test-electron` check (recipe: DEVELOPMENT.md, "Scripted extension-host checks"); interactive F5 is usually unavailable to agent runs, so treat it as eyeball-only polish, not the primary verification
 - Purely visual changes (icons, labels, spacing) — verify manually in the dev host
 
 ## Skills & guides

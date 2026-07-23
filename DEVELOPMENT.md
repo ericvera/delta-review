@@ -108,6 +108,17 @@ Rendering is the standard VS Code comments API (`src/commentController.ts`) — 
 
 ## Manual test script
 
+### Scripted extension-host checks
+
+There is no committed e2e suite, but extension-host behavior can be verified headlessly with
+`@vscode/test-electron`: a runner script calls `runTests` with `extensionDevelopmentPath` = this
+repo root, a throwaway temp git repo as the workspace folder, and a short `--user-data-dir`
+path; launch the runner with `env -u ELECTRON_RUN_AS_NODE`. The CommonJS suite drives the real
+extension via `vscode.commands.executeCommand` and asserts on the contract files under
+`.git/delta-review/`, the `refs/review*` refs, and rendered tree/thread state. Simulate SCM
+repository switching via `git.toggleRepositoryVisibility` rather than the picker. These are
+throwaway verification harnesses (session scratchpad), not shipped tests.
+
 Basics (no contract, default settings):
 
 1. In the dev host, open a repo with changes vs `main`. The panel lists them under Needs Review.
