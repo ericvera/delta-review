@@ -1,5 +1,5 @@
 ---
-name: cluster-review
+name: cluster
 description: >-
   Group the current branch's changed files into logical clusters for the
   Delta Review VS Code extension by writing its clusters contract file. Use
@@ -9,7 +9,7 @@ description: >-
   a git repository with a feature branch.
 ---
 
-# Cluster Review
+# Cluster
 
 Produce the clusters contract that the Delta Review VS Code extension renders in its grouped view: a JSON file grouping the branch's changed files into named logical changes. You are the writer; the extension is the only reader.
 

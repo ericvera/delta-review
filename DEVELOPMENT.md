@@ -65,7 +65,7 @@ Every file in the review set is classified `auto` or `normal` (`src/triage.ts`, 
 
 ### Clusters contract
 
-Clustered review is driven by a JSON contract the extension only ever **reads** — an external tool (the `cluster-review` Claude Code skill in `plugin/`) writes it:
+Clustered review is driven by a JSON contract the extension only ever **reads** — an external tool (the `/delta:cluster` Claude Code skill in `plugin/`) writes it:
 
 - Path: `<git common dir>/delta-review/clusters-<sanitized branch>.json`. The common dir (`git rev-parse --git-common-dir`, resolved against the repo root when relative) keeps the contract next to the review refs, shared across linked worktrees.
 - Sanitization: every branch-name char outside `[A-Za-z0-9._-]` becomes `-` (`sanitizeBranchForFilename` in `src/clusters.ts`; the skill applies the identical rule).

@@ -40,19 +40,19 @@ Install the companion skill in Claude Code:
 
 ```
 /plugin marketplace add ericvera/delta-review
-/plugin install cluster-review@delta-review
+/plugin install delta@delta-review
 ```
 
 To update to the latest version later:
 
 ```
 /plugin marketplace update delta-review
-/plugin update cluster-review@delta-review
+/plugin update delta@delta-review
 ```
 
 (then restart Claude Code to apply)
 
-The plugin ships two skills: `cluster-review` (this section) and `review-notes` (see [Review notes](#review-notes)) — one install covers both.
+The plugin ships two skills: `/delta:cluster` (this section) and `/delta:review-notes` (see [Review notes](#review-notes)) — one install covers both.
 
 - Ask Claude to cluster the change; it writes a per-branch contract file under `.git` describing narrative clusters (label, summary, members) — nothing touches your working tree.
 - A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last.
@@ -74,7 +74,7 @@ Lifecycle:
 
 Agent loop:
 
-- Install the `review-notes` skill (same plugin install as [clusters](#cluster-with-claude-code)), then ask Claude Code to "address my review notes".
+- Install the `/delta:review-notes` skill (same plugin install as [clusters](#cluster-with-claude-code)), then ask Claude Code to "address my review notes".
 - The agent reads your notes, edits the code, and replies with what it changed; replies appear live in the thread and the note relocates to where the fix landed.
 
 REVIEW NOTES view:
