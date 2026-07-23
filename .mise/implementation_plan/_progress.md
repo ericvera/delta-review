@@ -354,3 +354,15 @@
   the Contract instead of restating it; both v1 JSON examples, sanitization regex, parser
   rejections, silent-failure conventions, work-set rule, and version-bump rule all intact.
 - Deviations from plan: none. `yarn format`/`yarn lint`/`yarn build`/`yarn test` (256) green.
+
+## 01_01 (acceptance revision) — `status` field dropped from response entries
+
+- Key changes: `src/notes.ts` — `ResponseEntry` no longer has `status`; `parseResponsesFile`
+  no longer validates or copies it (a legacy entry carrying `status` is tolerated via the
+  existing unknown-key rule). Test fixtures updated in `src/notes.test.ts` (two status
+  error rows removed, legacy-key tolerance test added), `src/noteThreads.test.ts`,
+  `src/notesStore.test.ts`. Docs: `plugin/skills/review-notes/SKILL.md` (responses example
+  + parser-rejection bullet), `DEVELOPMENT.md` (contract line + manual scenario 27).
+  No schema version bump — nothing has shipped; `version` stays 1.
+- Deviations from plan: none — user-approved contract simplification; the field was a
+  constant carrying no runtime information (thread status derives from last speaker).

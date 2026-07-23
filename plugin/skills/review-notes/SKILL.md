@@ -79,7 +79,6 @@ Never write, reformat, or repair the notes file. If it exists but is not valid J
   "responses": [
     {
       "noteId": "a1b2c3",
-      "status": "addressed",
       "response": "Wrapped the fetch in a try/catch and surfaced the error — src/api.ts",
       "at": "2026-07-18T20:05:00Z",
       "anchor": {
@@ -97,7 +96,7 @@ Append-only: never edit or remove existing entries; multiple entries per `noteId
 Parser rejections (one bad entry rejects the whole file; the reviewer sees a warning instead of your replies):
 
 - `version` must be exactly the integer `1`; `responses` must be an array.
-- Each entry: an object with non-empty string `noteId`, `status` exactly `"addressed"`, non-empty string `response`, non-empty string `at`.
+- Each entry: an object with non-empty string `noteId`, non-empty string `response`, non-empty string `at`.
 - `anchor` optional; when present: non-empty string `file`, integer `line` >= 1, string `snapshot`.
 
 Silent failures — not rejected, so you must get these right:

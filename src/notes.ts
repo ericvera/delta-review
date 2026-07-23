@@ -57,7 +57,6 @@ export interface ResponseAnchor {
 
 export interface ResponseEntry {
   noteId: string;
-  status: "addressed";
   response: string;
   at: string;
   anchor?: ResponseAnchor;
@@ -230,9 +229,6 @@ const parseResponseEntry = (
     return { error: `${where}: "noteId" must be a non-empty string` };
   }
   const where2 = `${where} ("${value.noteId}")`;
-  if (value.status !== "addressed") {
-    return { error: `${where2}: "status" must be "addressed"` };
-  }
   if (!isNonEmptyString(value.response)) {
     return { error: `${where2}: "response" must be a non-empty string` };
   }
@@ -241,7 +237,6 @@ const parseResponseEntry = (
   }
   const entry: ResponseEntry = {
     noteId: value.noteId,
-    status: value.status,
     response: value.response,
     at: value.at,
   };

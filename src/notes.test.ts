@@ -32,7 +32,6 @@ const noteWith = (overrides: Record<string, unknown>): string =>
 
 const validResponse: ResponseEntry = {
   noteId: "a1b2",
-  status: "addressed",
   response: "Renamed the variable as suggested.",
   at: "2026-07-18T11:00:00Z",
 };
@@ -391,6 +390,14 @@ describe("parseResponsesFile", () => {
     });
   });
 
+  it("ignores a legacy status key on an entry", () => {
+    const result = parseResponsesFile(responseWith({ status: "addressed" }));
+    expect(result).toEqual({
+      ok: true,
+      file: { version: 1, responses: [validResponse] },
+    });
+  });
+
   it("rejects invalid JSON", () => {
     const result = parseResponsesFile("{not json");
     expect(result.ok).toBe(false);
@@ -449,16 +456,6 @@ describe("parseResponsesFile", () => {
       "empty noteId",
       { noteId: "" },
       'response 1: "noteId" must be a non-empty string',
-    ],
-    [
-      "wrong status",
-      { status: "resolved" },
-      'response 1 ("a1b2"): "status" must be "addressed"',
-    ],
-    [
-      "missing status",
-      { status: undefined },
-      'response 1 ("a1b2"): "status" must be "addressed"',
     ],
     [
       "empty response",

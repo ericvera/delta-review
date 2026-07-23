@@ -81,7 +81,6 @@ const writeResponseEntries = async (
     JSON.stringify({
       version: 1,
       responses: entries.map((entry) => ({
-        status: "addressed",
         response: "done",
         at: "2099-01-01T00:00:00.000Z",
         ...entry,
@@ -891,7 +890,6 @@ describe("buildAnchorResolver", () => {
     version: 1,
     responses: anchors.map((anchor, index) => ({
       noteId: `note-${index}`,
-      status: "addressed",
       response: "done",
       at: "2099-01-01T00:00:00.000Z",
       anchor: { ...anchor, snapshot: "" },

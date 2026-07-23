@@ -87,7 +87,7 @@ Clustered review is driven by a JSON contract the extension only ever **reads** 
 Inline notes on diff lines, threaded with an agent's replies. Two contract files per branch under `<git common dir>/delta-review/` (same dir and branch sanitization as clusters):
 
 - `notes-<sanitized branch>.json` — **extension-owned**; created/edited from the diff editor. Agents only read it; the extension never rewrites an invalid one (corrupt → deduped warning, notes unrendered, mutations refused).
-- `responses-<sanitized branch>.json` — **agent-owned**; the `review-notes` skill in `plugin/` appends `{ noteId, status: "addressed", response, at, anchor? }` entries. The extension only reads it (corrupt → deduped warning, treated as missing).
+- `responses-<sanitized branch>.json` — **agent-owned**; the `review-notes` skill in `plugin/` appends `{ noteId, response, at, anchor? }` entries. The extension only reads it (corrupt → deduped warning, treated as missing).
 
 Types and whole-file parsers live in `src/notes.ts` (clusters semantics: one violating entry rejects the file with a one-line error); persistence and mutation in `src/notesStore.ts` (atomic same-dir temp+rename saves, an idempotence guard so identical saves never touch the file — no watcher loops — and load→modify→save helpers).
 
@@ -148,7 +148,7 @@ Notes:
 24. Add a note on a **left** (base) side line → thread renders on the left editor with a `base` marker in REVIEW NOTES. Select a multi-line range first → the note spans the range.
 25. Edit a reviewer turn (pencil on the comment) → Save persists, Cancel restores the original. Delete the only turn → the whole thread disappears (note gone from file and view); deleting one turn of a multi-turn thread keeps the rest.
 26. Resolve from the thread title → green check in REVIEW NOTES, thread shows Resolved, badge drops. Unresolve → back to its derived status.
-27. Agent round-trip: hand-write `.git/delta-review/responses-<branch>.json` (`{"version":1,"responses":[{"noteId":"<id>","status":"addressed","response":"…","at":"<UTC ISO-8601>"}]}`) → with **no manual refresh** the reply appears in the thread as Claude, the label flips to Addressed (yellow outline icon), and a reply box appears. Type a reply and hit Reply & Reopen → Open again, reply box gone.
+27. Agent round-trip: hand-write `.git/delta-review/responses-<branch>.json` (`{"version":1,"responses":[{"noteId":"<id>","response":"…","at":"<UTC ISO-8601>"}]}`) → with **no manual refresh** the reply appears in the thread as Claude, the label flips to Addressed (yellow outline icon), and a reply box appears. Type a reply and hit Reply & Reopen → Open again, reply box gone.
 28. Anchor relocation: append a response entry whose `anchor` names another file/line with that line's exact text as `snapshot` → the note relocates there (a base-side note flips to the working side) and the REVIEW NOTES row follows. An anchor with a bad path shape, a missing file, or an out-of-range line is ignored — reply still shows, note stays put. `snapshot` is not validated: a wrong-but-in-range anchor still relocates the note and stores that snapshot verbatim.
 29. Outdated: edit lines **above** a note → the thread shifts down/up, not outdated. Edit the noted line itself → `⚠` in REVIEW NOTES and a dimmed `line was: …` in the thread's first comment.
 30. Base progression: with a base-side note on a file, mark the file reviewed → the base thread is recreated against the new base (the reviewed snapshot); turns and status untouched.

@@ -30,7 +30,6 @@ const notesFile = (...notes: Note[]): NotesFile => ({ version: 1, notes });
 
 const response = (overrides: Partial<ResponseEntry> = {}): ResponseEntry => ({
   noteId: "n1",
-  status: "addressed",
   response: "renamed it",
   at: "2026-07-01T11:00:00Z",
   ...overrides,
