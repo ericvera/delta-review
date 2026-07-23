@@ -1,7 +1,7 @@
 {
   "name": "delta",
   "description": "Companion skills for the Delta Review VS Code extension: cluster the branch's changes for review and address the reviewer's inline notes.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "Eric Vera"
   }

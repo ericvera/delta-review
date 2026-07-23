@@ -129,4 +129,4 @@ The default when the user asks to address their review notes; other skills or in
 2. **Compute the work set** from both files per the Contract.
 3. **Address each actionable note**: read its whole thread (`turns` plus your prior responses, interleaved oldest → newest by `at`), locate the target per the Contract's reading semantics, and make the change the newest reviewer turn asks for, following project conventions.
 4. **Respond**: append one entry per note handled, per the Contract's entry conventions and write rules.
-5. **Report** to the user: each note addressed (file, what it asked, what you changed) and any skipped (already resolved, awaiting the reviewer, or not actionable — say so in a response entry too, so the thread shows it).
+5. **Report** minimally. Response entries are the record — the extension renders each inline and flips the note to **Addressed** — so don't repeat per-note outcomes (including skips) in chat. Say only how many notes you handled and to check Delta Review for the replies. Surface in chat only what the notes UI can't: a corrupt/blocked file, an unlocatable target, or a decision you need from the user.
