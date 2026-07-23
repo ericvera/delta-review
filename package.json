@@ -2,7 +2,7 @@
   "name": "delta-review",
   "displayName": "Delta Review",
   "description": "Incremental local code review: mark files reviewed and see only the delta since your last review.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "eric",
   "private": true,
   "engines": {
