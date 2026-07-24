@@ -1,5 +1,6 @@
 import { basename, dirname } from "node:path";
 import * as vscode from "vscode";
+import { escapeMarkdownText } from "./markdown";
 import type { NoteStatus } from "./notes";
 import type { NoteThread } from "./noteThreads";
 
@@ -147,7 +148,7 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
     }
     item.description = descriptionParts.join(" ");
     const tooltip = new vscode.MarkdownString();
-    tooltip.appendText(thread.turns[0]?.text ?? "");
+    tooltip.appendMarkdown(escapeMarkdownText(thread.turns[0]?.text ?? ""));
     tooltip.appendMarkdown(`\n\nStatus: ${thread.status}`);
     if (thread.note.outdated) {
       tooltip.appendMarkdown(

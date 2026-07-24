@@ -2,6 +2,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
 import { Git } from "./git";
+import { escapeMarkdownText } from "./markdown";
 import { ReviewFile, ReviewModel } from "./model";
 import { Note, NoteSide, NoteStatus } from "./notes";
 import { NoteThread } from "./noteThreads";
@@ -189,7 +190,7 @@ export const createNoteCommentController = (
     let reviewerTurnIndex = 0;
     return thread.turns.map((turn, index) => {
       const body = new vscode.MarkdownString();
-      body.appendText(turn.text);
+      body.appendMarkdown(escapeMarkdownText(turn.text));
       if (index === 0 && thread.note.outdated) {
         // Mock 4: a dimmed one-liner with the first anchored line's original
         // text (italic is the closest to dimmed a MarkdownString gets)
