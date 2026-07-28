@@ -34,3 +34,11 @@ Vitest; colocate `*.test.ts` next to the source in `src/`. Unit tests cover pure
 ## Skills & guides
 
 - DEVELOPMENT.md (doc): build/run/packaging, how review state works internally, manual test script
+- plugin/skills/cluster/SKILL.md (doc): the clusters contract file — read before changing cluster generation or its file format
+- plugin/skills/review-notes/SKILL.md (doc): the notes/responses contract files — read before changing review notes or their file format
+
+## Models
+
+- implementer: opus
+- explore: opus
+- retrospective: opus
