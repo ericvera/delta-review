@@ -17,9 +17,24 @@ export interface ClusterDefinition {
   patterns: string[];
 }
 
+// A file the writer moved into its current location, declared because git
+// cannot see the move: it came from another repository, or was rewritten
+// heavily enough that rename detection misses it.
+export interface MoveDeclaration {
+  path: string;
+  from: string;
+  origin: "repo" | "external";
+  // Donor project name and the origin's blob id — external origins only
+  donor?: string;
+  baseBlob?: string;
+  note?: string;
+}
+
 export interface ClustersContract {
-  version: 1;
+  version: 1 | 2;
   clusters: ClusterDefinition[];
+  // Always present; a version 1 contract normalizes to an empty list
+  moves: MoveDeclaration[];
 }
 
 export interface ClusterBucket {
@@ -140,6 +155,20 @@ export const sanitizeBranchForFilename = (branch: string): string =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string");
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+const isContractVersion = (
+  value: unknown,
+): value is ClustersContract["version"] => value === 1 || value === 2;
+
+const isMoveOrigin = (value: unknown): value is MoveDeclaration["origin"] =>
+  value === "repo" || value === "external";
+
+// Anchored: the value reaches `git cat-file blob <value>`, so a leading "-"
+// must never be accepted as it would be read as a command-line option.
+const BASE_BLOB_PATTERN = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/;
+
 // Validates one raw cluster entry; returns the normalized definition or a
 // user-facing error string.
 const parseCluster = (
@@ -176,8 +205,85 @@ const parseCluster = (
   };
 };
 
+// Validates one raw move entry; returns the normalized declaration, a
+// user-facing error string, or `{ move: undefined }` for an entry that
+// declares nothing and is dropped without failing the contract.
+const parseMove = (
+  value: unknown,
+  index: number,
+): { move: MoveDeclaration | undefined } | { error: string } => {
+  const where = `move ${index + 1}`;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { error: `${where} must be an object` };
+  }
+  const entry = value as Record<string, unknown>;
+  const isRepoOrigin = entry.origin === "repo";
+  // donor/baseBlob are meaningless for a repo origin: drop them whatever
+  // their type, so a harmless extra field never costs the reviewer their
+  // clustering.
+  const rawDonor = isRepoOrigin ? undefined : entry.donor;
+  const rawBaseBlob = isRepoOrigin ? undefined : entry.baseBlob;
+  // A repo move onto its own path declares nothing. Skip it before
+  // validation and before dedup, so it can neither reject the contract nor
+  // shadow a real declaration for the same path. Both keys must be non-empty
+  // strings — two absent keys are a mangled entry and still get diagnosed.
+  if (
+    isRepoOrigin &&
+    isNonEmptyString(entry.path) &&
+    entry.from === entry.path
+  ) {
+    return { move: undefined };
+  }
+  if (!isNonEmptyString(entry.path)) {
+    return { error: `${where}: "path" must be a non-empty string` };
+  }
+  const where2 = `${where} ("${entry.path}")`;
+  if (!isNonEmptyString(entry.from)) {
+    return { error: `${where2}: "from" must be a non-empty string` };
+  }
+  if (!isMoveOrigin(entry.origin)) {
+    return { error: `${where2}: "origin" must be "repo" or "external"` };
+  }
+  let donor: string | undefined;
+  if (rawDonor !== undefined) {
+    if (!isNonEmptyString(rawDonor)) {
+      return { error: `${where2}: "donor" must be a non-empty string` };
+    }
+    donor = rawDonor;
+  }
+  let baseBlob: string | undefined;
+  if (rawBaseBlob !== undefined) {
+    if (
+      typeof rawBaseBlob !== "string" ||
+      !BASE_BLOB_PATTERN.test(rawBaseBlob)
+    ) {
+      return {
+        error: `${where2}: "baseBlob" must be a 40- or 64-character hex object id`,
+      };
+    }
+    baseBlob = rawBaseBlob;
+  }
+  let note: string | undefined;
+  if (entry.note !== undefined) {
+    if (typeof entry.note !== "string") {
+      return { error: `${where2}: "note" must be a string` };
+    }
+    note = entry.note;
+  }
+  return {
+    move: {
+      path: entry.path,
+      from: entry.from,
+      origin: entry.origin,
+      donor,
+      baseBlob,
+      note,
+    },
+  };
+};
+
 // Parses and validates contract text. Errors are one-line and user-facing.
-// Unknown extra keys are ignored (forward-friendly within version 1).
+// Unknown extra keys are ignored (forward-friendly within a version).
 export const parseClustersContract = (text: string): ParseClustersResult => {
   let data: unknown;
   try {
@@ -192,13 +298,17 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
     return { ok: false, error: "top level must be an object" };
   }
   const record = data as Record<string, unknown>;
-  if (record.version === undefined) {
-    return { ok: false, error: 'missing "version" (extension supports 1)' };
-  }
-  if (record.version !== 1) {
+  const version = record.version;
+  if (version === undefined) {
     return {
       ok: false,
-      error: `unsupported version ${JSON.stringify(record.version)} (extension supports 1)`,
+      error: 'missing "version" (extension supports 1 and 2)',
+    };
+  }
+  if (!isContractVersion(version)) {
+    return {
+      ok: false,
+      error: `unsupported version ${JSON.stringify(version)} (extension supports 1 and 2)`,
     };
   }
   if (!Array.isArray(record.clusters)) {
@@ -212,7 +322,29 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
     }
     clusters.push(result.cluster);
   }
-  return { ok: true, contract: { version: 1, clusters } };
+  // `moves` arrived in version 2; inside a version 1 contract it is just an
+  // unknown extra key and stays ignored.
+  const moves: MoveDeclaration[] = [];
+  if (version === 2 && record.moves !== undefined) {
+    if (!Array.isArray(record.moves)) {
+      return { ok: false, error: '"moves" must be an array' };
+    }
+    const declared = new Set<string>();
+    for (let index = 0; index < record.moves.length; index++) {
+      const result = parseMove(record.moves[index], index);
+      if ("error" in result) {
+        return { ok: false, error: result.error };
+      }
+      // Later duplicates of a path lose to the first declaration, as
+      // explicit cluster membership resolves.
+      if (result.move === undefined || declared.has(result.move.path)) {
+        continue;
+      }
+      declared.add(result.move.path);
+      moves.push(result.move);
+    }
+  }
+  return { ok: true, contract: { version, clusters, moves } };
 };
 
 // Resolves review-set membership into cluster buckets. Rules, in order:

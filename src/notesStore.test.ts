@@ -112,7 +112,7 @@ const refreshOptions = (
       return undefined;
     }
   },
-  baseBlobFor: () => undefined,
+  baseBlobFor: (_file: string, _contentBlob: string) => undefined,
   ...overrides,
 });
 
@@ -622,15 +622,23 @@ describe("refreshDerived", () => {
   });
 
   it("resolves base-side notes through baseBlobFor", async () => {
-    await createNote(git, "main", draft({ side: "base" }));
+    const note = await createNote(git, "main", draft({ side: "base" }));
     const baseSha = (await git.run(["rev-parse", "HEAD:a.txt"])).trim();
+    // The note's own creation blob is what identifies its base document
+    const lookups: Array<[string, string]> = [];
     const unchanged = await refreshDerived(
       git,
       "main",
       await loadedNotes(),
       undefined,
-      refreshOptions({ baseBlobFor: () => baseSha }),
+      refreshOptions({
+        baseBlobFor: (file, contentBlob) => {
+          lookups.push([file, contentBlob]);
+          return baseSha;
+        },
+      }),
     );
+    expect(lookups).toEqual([["a.txt", note.contentBlob]]);
     expect(unchanged.notes[0].outdated).toBe(false);
 
     // No base blob (e.g. history rewritten): outdated, position kept
@@ -639,12 +647,34 @@ describe("refreshDerived", () => {
       "main",
       await loadedNotes(),
       undefined,
-      refreshOptions({ baseBlobFor: () => undefined }),
+      refreshOptions({
+        baseBlobFor: (_file: string, _contentBlob: string) => undefined,
+      }),
     );
     expect(gone.notes[0]).toMatchObject({
       currentStartLine: 2,
       currentEndLine: 3,
       outdated: true,
+    });
+  });
+
+  it("remaps a base-side note when its base document advanced", async () => {
+    await createNote(git, "main", draft({ side: "base" }));
+    // The advanced base (a reviewed snapshot, say) gains two leading lines
+    const advanced = await writeContentBlob(git, `zero\none\n${fileContent}`);
+    const refreshed = await refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      undefined,
+      refreshOptions({
+        baseBlobFor: (_file: string, _contentBlob: string) => advanced,
+      }),
+    );
+    expect(refreshed.notes[0]).toMatchObject({
+      currentStartLine: 4,
+      currentEndLine: 5,
+      outdated: false,
     });
   });
 

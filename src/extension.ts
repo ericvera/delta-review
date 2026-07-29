@@ -1,16 +1,14 @@
 import { access, readFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
+import { baseBlobForNote } from "./baseDocument";
 import {
   ClusterModel,
   clusterFilesForKey,
   loadClustersContract,
   resolveClusterModel,
 } from "./clusters";
-import {
-  baseBlobForPath,
-  createNoteCommentController,
-} from "./commentController";
+import { createNoteCommentController } from "./commentController";
 import {
   createReviewBaseContentProvider,
   createReviewBaseUri,
@@ -22,6 +20,7 @@ import { getGitApi, GitRepository } from "./gitExtensionApi";
 import {
   computeReviewModel,
   FileReviewStatus,
+  resolveBranch,
   ReviewFile,
   ReviewModel,
 } from "./model";
@@ -287,8 +286,30 @@ export const activate = async (
     const autoReviewGlobs =
       configuration.get<string[]>("autoReview.globs") ?? [];
     try {
+      // The branch, then the clusters contract, are resolved before anything
+      // is computed: the contract's move declarations feed the review model,
+      // so they have to be in hand first. Both git calls stay inside this try
+      // so an unborn HEAD or a repo torn down mid-refresh reaches the fatal
+      // banner below rather than becoming an unhandled rejection.
+      const branch = await resolveBranch(git);
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      // Loaded once per refresh, so correctness never depends on watcher
+      // delivery, and re-applied to every computation below — a contract
+      // rewritten mid-refresh cannot yield a model whose moves and clusters
+      // disagree. Missing is normal (no warning); invalid warns but otherwise
+      // behaves as missing, taking its move declarations down with it.
+      const contractResult = await loadClustersContract(git, branch);
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      const moves =
+        contractResult.state === "ok" ? contractResult.contract.moves : [];
       let computed = await computeReviewModel(git, baseBranch, {
         autoReviewGlobs,
+        branch,
+        moves,
       });
       if (generation !== refreshGeneration) {
         return;
@@ -313,19 +334,13 @@ export const activate = async (
           }
           computed = await computeReviewModel(git, baseBranch, {
             autoReviewGlobs,
+            branch,
+            moves,
           });
           if (generation !== refreshGeneration) {
             return;
           }
         }
-      }
-      // Clusters contract, reloaded on every refresh so correctness never
-      // depends on watcher delivery. Missing is normal (no warning); invalid
-      // surfaces a warning but otherwise behaves as missing. A branch switch
-      // is covered too: `computed.branch` selects the contract file.
-      const contractResult = await loadClustersContract(git, computed.branch);
-      if (generation !== refreshGeneration) {
-        return;
       }
       let contractWarning: string | undefined;
       if (contractResult.state === "ok") {
@@ -433,7 +448,8 @@ export const activate = async (
             responses,
             {
               readWorkingContent,
-              baseBlobFor: (path) => baseBlobForPath(computed, path),
+              baseBlobFor: (path, contentBlob) =>
+                baseBlobForNote(computed, path, contentBlob),
               anchorResolves,
             },
           );
@@ -561,13 +577,11 @@ export const activate = async (
     if (git === undefined) {
       return;
     }
-    // For a move diffed against the merge base, the base blob came from the
-    // old path — label the left editor with it. A reviewed snapshot was
-    // captured from the new path, so it keeps the new path.
-    const leftPath = file.diffBaseIsReviewedSnapshot
-      ? file.path
-      : (file.movedFrom ?? file.path);
-    const leftUri = createReviewBaseUri(leftPath, file.diffBaseSha);
+    // The path identifying the base document the model actually resolved: a
+    // repo origin's old path when the base really is that origin's blob, the
+    // file's own path otherwise. Always repo-relative, so a declared external
+    // origin can never escape the repo through a base-document URI.
+    const leftUri = createReviewBaseUri(file.diffBasePath, file.diffBaseSha);
     const rightUri = file.deleted
       ? createReviewBaseUri(file.path, undefined)
       : vscode.Uri.file(join(git.repoRoot, file.path));

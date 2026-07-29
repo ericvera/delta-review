@@ -1,9 +1,10 @@
 import { isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
+import { baseBlobForNote } from "./baseDocument";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
 import { Git } from "./git";
 import { escapeMarkdownText } from "./markdown";
-import { ReviewFile, ReviewModel } from "./model";
+import { ReviewModel } from "./model";
 import { Note, NoteSide, NoteStatus } from "./notes";
 import { NoteThread } from "./noteThreads";
 import {
@@ -21,20 +22,6 @@ import {
 // and the thread actions (edit/delete turns, delete thread, resolve/
 // unresolve, reply-to-reopen). Model/git access is injected as callbacks so
 // the controller always sees the extension's current state.
-
-// The path shown on the left (base) side of a review file's diff — for a
-// move diffed against the merge base the base blob came from the old path
-// (mirrors openDiff's leftPath).
-export const reviewBasePathFor = (file: ReviewFile): string =>
-  file.diffBaseIsReviewedSnapshot ? file.path : (file.movedFrom ?? file.path);
-
-// The blob currently displayed as the base document for a given base-side
-// path; undefined when no review-set file shows that path on its left side.
-export const baseBlobForPath = (
-  model: ReviewModel,
-  path: string,
-): string | undefined =>
-  model.files.find((file) => reviewBasePathFor(file) === path)?.diffBaseSha;
 
 const statusLabels: Record<NoteStatus, string> = {
   open: "Open",
@@ -164,8 +151,7 @@ export const createNoteCommentController = (
       const path = document.uri.path.slice(1);
       return model.files.some(
         (file) =>
-          reviewBasePathFor(file) === path &&
-          file.diffBaseSha === document.uri.query,
+          file.diffBasePath === path && file.diffBaseSha === document.uri.query,
       )
         ? fullDocument
         : [];
@@ -276,7 +262,9 @@ export const createNoteCommentController = (
         : vscode.Uri.file(join(git.repoRoot, note.file));
     }
     const currentBase =
-      model === undefined ? undefined : baseBlobForPath(model, note.file);
+      model === undefined
+        ? undefined
+        : baseBlobForNote(model, note.file, note.contentBlob);
     // No current base (file left the review set): fall back to the creation
     // blob so the thread still has a stable home
     return createReviewBaseUri(note.file, currentBase ?? note.contentBlob);

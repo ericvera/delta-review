@@ -14,7 +14,9 @@ import {
   createReviewItemUri,
   createUnclusteredHeaderUri,
 } from "./decorations";
+import { escapeMarkdownText } from "./markdown";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
+import { buildRowDescription, buildTooltipOriginLine } from "./moveDisplay";
 import { Triage } from "./triage";
 
 export type ViewMode = "list" | "tree";
@@ -473,31 +475,50 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       element.alwaysFlat === true || this.getViewMode() === "list";
     const directoryText =
       showDirectory && directory !== "." ? directory : undefined;
-    // Moves show their origin like the built-in git view's staged renames:
-    // "<dir> ← <old>" when the directory is shown, bare "← <old>" otherwise
-    const movedText =
-      file.movedFrom !== undefined ? `← ${file.movedFrom}` : undefined;
-    const locationText =
-      movedText !== undefined
-        ? directoryText !== undefined
-          ? `${directoryText} ${movedText}`
-          : movedText
-        : directoryText;
-    item.description = locationText;
+    // The origin segment ("← [donor] <origin> · adapted") is assembled by the
+    // display module; every abbreviation rule lives there, none here
+    item.description = buildRowDescription({
+      path: file.path,
+      directoryText,
+      movedFrom: file.movedFrom,
+      moveOrigin: file.moveOrigin,
+      donor: file.donor,
+      moveClassification: file.moveClassification,
+    });
     // Hover always leads with the full repo-relative path (the row usually
     // truncates it), with any status notes on separate lines
     const tooltip = new vscode.MarkdownString();
     tooltip.appendCodeblock(file.path, "text");
-    // Paragraph break so a following note (move + edit since last review)
-    // renders on its own line
-    if (file.movedFrom !== undefined) {
-      tooltip.appendMarkdown(`Moved from ${file.movedFrom}\n\n`);
+    // Fixed order, joined by paragraph breaks so each lands on its own line
+    // however many of them stack
+    const notes: string[] = [];
+    // Assembled and escaped by the display module, alongside the row's form
+    const originLine = buildTooltipOriginLine({
+      movedFrom: file.movedFrom,
+      donor: file.donor,
+    });
+    if (originLine !== undefined) {
+      notes.push(originLine);
+    }
+    if (file.moveNote !== undefined && file.moveNote !== "") {
+      // Contract text: escaped so its markdown cannot restyle the tooltip
+      notes.push(escapeMarkdownText(file.moveNote));
+    }
+    if (file.moveClassification === "verbatim") {
+      notes.push("Identical to the origin");
+    } else if (file.originContentUnavailable) {
+      notes.push(
+        "Origin content is no longer available — showing the whole file.",
+      );
     }
     if (file.deleted) {
-      tooltip.appendMarkdown("Deleted from the working tree");
+      notes.push("Deleted from the working tree");
     }
     if (file.diffBaseIsReviewedSnapshot) {
-      tooltip.appendMarkdown("Changed since last reviewed");
+      notes.push("Changed since last reviewed");
+    }
+    if (notes.length > 0) {
+      tooltip.appendMarkdown(notes.join("\n\n"));
     }
     item.tooltip = tooltip;
     item.command = {

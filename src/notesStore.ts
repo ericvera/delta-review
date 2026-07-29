@@ -514,9 +514,11 @@ export interface RefreshOptions {
   // file is missing from the working tree. Injected so this module stays
   // vscode-free.
   readWorkingContent: (file: string) => Promise<string | undefined>;
-  // Current left-side blob for a file (ReviewModel's diffBaseSha); undefined
-  // when the file has no base.
-  baseBlobFor: (file: string) => string | undefined;
+  // Current left-side blob for the base document a note belongs to
+  // (ReviewModel's diffBaseSha). The note's creation blob disambiguates when
+  // two review files present the same base path; undefined when the note has
+  // no current base document.
+  baseBlobFor: (file: string, contentBlob: string) => string | undefined;
   // Whether a response anchor resolves against the working tree
   // (mergeThreads passthrough). Defaults to the real working-tree resolver
   // (buildAnchorResolver over readWorkingContent); injectable for tests.
@@ -612,7 +614,7 @@ export const refreshDerived = async (
           ? undefined
           : await writeContentBlob(git, content);
     } else {
-      currentBlob = options.baseBlobFor(note.file);
+      currentBlob = options.baseBlobFor(note.file, note.contentBlob);
     }
     if (currentBlob === undefined) {
       // Side document is gone: flag outdated, keep the last known position

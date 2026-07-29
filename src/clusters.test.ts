@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ClusterModel,
   ClustersContract,
+  MoveDeclaration,
+  ParseClustersResult,
   clusterBodyState,
   clusterBucketForKey,
   clusterContextValue,
@@ -27,7 +29,13 @@ const file = (path: string, triage: Triage = "normal"): ReviewFile => ({
   existsInMergeBase: true,
   diffBaseIsReviewedSnapshot: false,
   diffBaseSha: undefined,
+  diffBasePath: path,
   movedFrom: undefined,
+  moveOrigin: undefined,
+  donor: undefined,
+  moveNote: undefined,
+  moveClassification: undefined,
+  originContentUnavailable: false,
   triage,
 });
 
@@ -38,7 +46,27 @@ const reviewedFile = (path: string, triage: Triage = "normal"): ReviewFile => ({
 
 const contract = (
   clusters: ClustersContract["clusters"],
-): ClustersContract => ({ version: 1, clusters });
+): ClustersContract => ({ version: 1, clusters, moves: [] });
+
+const contractV2 = (
+  clusters: ClustersContract["clusters"],
+  moves: ClustersContract["moves"] = [],
+): ClustersContract => ({ version: 2, clusters, moves });
+
+const move = (
+  path: string,
+  from: string,
+  origin: MoveDeclaration["origin"],
+  optional: Partial<MoveDeclaration> = {},
+): MoveDeclaration => ({
+  path,
+  from,
+  origin,
+  donor: undefined,
+  baseBlob: undefined,
+  note: undefined,
+  ...optional,
+});
 
 describe("sanitizeBranchForFilename", () => {
   it("replaces slashes", () => {
@@ -134,14 +162,13 @@ describe("parseClustersContract", () => {
     const result = parseClustersContract(JSON.stringify({ clusters: [] }));
     expect(result).toEqual({
       ok: false,
-      error: 'missing "version" (extension supports 1)',
+      error: 'missing "version" (extension supports 1 and 2)',
     });
   });
 
   it.each([
-    [0, "unsupported version 0 (extension supports 1)"],
-    [2, "unsupported version 2 (extension supports 1)"],
-    ["1", 'unsupported version "1" (extension supports 1)'],
+    [0, "unsupported version 0 (extension supports 1 and 2)"],
+    ["1", 'unsupported version "1" (extension supports 1 and 2)'],
   ])("rejects version %j", (version, error) => {
     const result = parseClustersContract(
       JSON.stringify({ version, clusters: [] }),
@@ -250,6 +277,310 @@ describe("parseClustersContract", () => {
     expect(
       parseClustersContract(JSON.stringify({ version: 1, clusters: [] })),
     ).toEqual({ ok: true, contract: contract([]) });
+  });
+
+  it("rejects version 3, naming both supported versions", () => {
+    const result = parseClustersContract(
+      JSON.stringify({ version: 3, clusters: [] }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "unsupported version 3 (extension supports 1 and 2)",
+    });
+  });
+});
+
+describe("parseClustersContract moves", () => {
+  const parseMoves = (moves: unknown): ParseClustersResult =>
+    parseClustersContract(JSON.stringify({ version: 2, clusters: [], moves }));
+
+  it("yields an empty moves array for a version 1 contract", () => {
+    const result = parseClustersContract(
+      JSON.stringify({ version: 1, clusters: [] }),
+    );
+    expect(result).toEqual({ ok: true, contract: contract([]) });
+  });
+
+  it("ignores a moves key inside a version 1 contract", () => {
+    const result = parseClustersContract(
+      JSON.stringify({
+        version: 1,
+        clusters: [],
+        moves: [{ path: "", origin: "nonsense" }],
+      }),
+    );
+    expect(result).toEqual({ ok: true, contract: contract([]) });
+  });
+
+  it("yields an empty moves array for a version 2 contract without moves", () => {
+    const result = parseClustersContract(
+      JSON.stringify({ version: 2, clusters: [] }),
+    );
+    expect(result).toEqual({ ok: true, contract: contractV2([]) });
+  });
+
+  it("accepts an empty moves array", () => {
+    expect(parseMoves([])).toEqual({ ok: true, contract: contractV2([]) });
+  });
+
+  it("accepts an external declaration with every optional field", () => {
+    const result = parseMoves([
+      {
+        path: "src/cache.ts",
+        from: "lib/cache.ts",
+        origin: "external",
+        donor: "donor-app",
+        baseBlob: "a".repeat(40),
+        note: "renamed the logger import",
+        unknownKey: "ignored",
+      },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      contract: contractV2(
+        [],
+        [
+          move("src/cache.ts", "lib/cache.ts", "external", {
+            donor: "donor-app",
+            baseBlob: "a".repeat(40),
+            note: "renamed the logger import",
+          }),
+        ],
+      ),
+    });
+  });
+
+  it("accepts a 64-character baseBlob", () => {
+    const result = parseMoves([
+      {
+        path: "a.ts",
+        from: "b.ts",
+        origin: "external",
+        baseBlob: "0".repeat(64),
+      },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      contract: contractV2(
+        [],
+        [move("a.ts", "b.ts", "external", { baseBlob: "0".repeat(64) })],
+      ),
+    });
+  });
+
+  it("accepts a repo declaration", () => {
+    const result = parseMoves([
+      { path: "src/new.ts", from: "src/old.ts", origin: "repo" },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      contract: contractV2([], [move("src/new.ts", "src/old.ts", "repo")]),
+    });
+  });
+
+  it("rejects moves that are not an array", () => {
+    expect(parseMoves({ path: "a.ts" })).toEqual({
+      ok: false,
+      error: '"moves" must be an array',
+    });
+    expect(parseMoves("a.ts")).toEqual({
+      ok: false,
+      error: '"moves" must be an array',
+    });
+  });
+
+  it.each([
+    ["a non-object entry", "nope", "move 1 must be an object"],
+    ["an array entry", [], "move 1 must be an object"],
+    [
+      "a missing path",
+      { from: "src/old.ts", origin: "repo" },
+      'move 1: "path" must be a non-empty string',
+    ],
+    [
+      "an empty path",
+      { path: "", from: "src/old.ts", origin: "repo" },
+      'move 1: "path" must be a non-empty string',
+    ],
+    [
+      "a non-string path",
+      { path: 3, from: "src/old.ts", origin: "repo" },
+      'move 1: "path" must be a non-empty string',
+    ],
+    [
+      "a missing from",
+      { path: "src/new.ts", origin: "repo" },
+      'move 1 ("src/new.ts"): "from" must be a non-empty string',
+    ],
+    [
+      "an empty from",
+      { path: "src/new.ts", from: "", origin: "repo" },
+      'move 1 ("src/new.ts"): "from" must be a non-empty string',
+    ],
+    [
+      "a missing origin",
+      { path: "src/new.ts", from: "src/old.ts" },
+      'move 1 ("src/new.ts"): "origin" must be "repo" or "external"',
+    ],
+    [
+      "an unknown origin",
+      { path: "src/new.ts", from: "src/old.ts", origin: "Repo" },
+      'move 1 ("src/new.ts"): "origin" must be "repo" or "external"',
+    ],
+    [
+      "an empty donor",
+      {
+        path: "src/new.ts",
+        from: "src/old.ts",
+        origin: "external",
+        donor: "",
+      },
+      'move 1 ("src/new.ts"): "donor" must be a non-empty string',
+    ],
+    [
+      "a non-string donor",
+      {
+        path: "src/new.ts",
+        from: "src/old.ts",
+        origin: "external",
+        donor: ["donor-app"],
+      },
+      'move 1 ("src/new.ts"): "donor" must be a non-empty string',
+    ],
+    [
+      "a short baseBlob",
+      {
+        path: "src/new.ts",
+        from: "src/old.ts",
+        origin: "external",
+        baseBlob: "abc",
+      },
+      'move 1 ("src/new.ts"): "baseBlob" must be a 40- or 64-character hex object id',
+    ],
+    [
+      "a non-hex baseBlob",
+      {
+        path: "src/new.ts",
+        from: "src/old.ts",
+        origin: "external",
+        baseBlob: `-oops${"a".repeat(35)}`,
+      },
+      'move 1 ("src/new.ts"): "baseBlob" must be a 40- or 64-character hex object id',
+    ],
+    [
+      "a baseBlob with trailing junk",
+      {
+        path: "src/new.ts",
+        from: "src/old.ts",
+        origin: "external",
+        baseBlob: `${"a".repeat(40)} --bad`,
+      },
+      'move 1 ("src/new.ts"): "baseBlob" must be a 40- or 64-character hex object id',
+    ],
+    [
+      "a non-string note",
+      { path: "src/new.ts", from: "src/old.ts", origin: "repo", note: 7 },
+      'move 1 ("src/new.ts"): "note" must be a string',
+    ],
+  ])("rejects the contract for %s", (_name, entry, error) => {
+    expect(parseMoves([entry])).toEqual({ ok: false, error });
+  });
+
+  it("names the offending entry by its index", () => {
+    const result = parseMoves([
+      { path: "a.ts", from: "b.ts", origin: "repo" },
+      { path: "c.ts", from: "d.ts", origin: "sideways" },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('move 2 ("c.ts")');
+    }
+  });
+
+  it("drops donor and baseBlob on a repo entry, whatever their type", () => {
+    const result = parseMoves([
+      {
+        path: "src/new.ts",
+        from: "src/old.ts",
+        origin: "repo",
+        donor: 42,
+        baseBlob: "not-a-blob",
+      },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      contract: contractV2([], [move("src/new.ts", "src/old.ts", "repo")]),
+    });
+  });
+
+  it("skips a repo entry whose from equals its path", () => {
+    expect(
+      parseMoves([{ path: "a.ts", from: "a.ts", origin: "repo" }]),
+    ).toEqual({ ok: true, contract: contractV2([]) });
+  });
+
+  it("lets a later real declaration win over a skipped self-move", () => {
+    const result = parseMoves([
+      { path: "a.ts", from: "a.ts", origin: "repo" },
+      { path: "a.ts", from: "old/a.ts", origin: "repo" },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      contract: contractV2([], [move("a.ts", "old/a.ts", "repo")]),
+    });
+  });
+
+  it("does not skip a self-move on an external entry", () => {
+    const result = parseMoves([
+      { path: "a.ts", from: "a.ts", origin: "external", donor: "donor-app" },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      contract: contractV2(
+        [],
+        [move("a.ts", "a.ts", "external", { donor: "donor-app" })],
+      ),
+    });
+  });
+
+  it("rejects a repo entry with neither path nor from", () => {
+    expect(parseMoves([{ origin: "repo" }])).toEqual({
+      ok: false,
+      error: 'move 1: "path" must be a non-empty string',
+    });
+  });
+
+  it("rejects a repo entry whose path and from are both null", () => {
+    expect(parseMoves([{ path: null, from: null, origin: "repo" }])).toEqual({
+      ok: false,
+      error: 'move 1: "path" must be a non-empty string',
+    });
+  });
+
+  it("keeps the first declaration for a duplicated path", () => {
+    const result = parseMoves([
+      { path: "a.ts", from: "first.ts", origin: "repo" },
+      { path: "a.ts", from: "second.ts", origin: "external", donor: "d" },
+      { path: "b.ts", from: "other.ts", origin: "repo" },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      contract: contractV2(
+        [],
+        [move("a.ts", "first.ts", "repo"), move("b.ts", "other.ts", "repo")],
+      ),
+    });
+  });
+
+  it("rejects a bad moves entry even when the clusters are valid", () => {
+    const result = parseClustersContract(
+      JSON.stringify({
+        version: 2,
+        clusters: [{ label: "A", summary: "s", files: ["a.ts"] }],
+        moves: [{ path: "a.ts", from: "b.ts", origin: "repo" }, "nope"],
+      }),
+    );
+    expect(result).toEqual({ ok: false, error: "move 2 must be an object" });
   });
 });
 
@@ -621,12 +952,12 @@ describe("loadClustersContract", () => {
   it("returns invalid with the parse error for a bad contract", async () => {
     await writeContract(
       "clusters-main.json",
-      JSON.stringify({ version: 2, clusters: [] }),
+      JSON.stringify({ version: 3, clusters: [] }),
     );
     const result = await loadClustersContract(gitWithCommonDir(".git"), "main");
     expect(result).toEqual({
       state: "invalid",
-      error: "unsupported version 2 (extension supports 1)",
+      error: "unsupported version 3 (extension supports 1 and 2)",
     });
   });
 

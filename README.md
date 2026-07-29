@@ -24,6 +24,8 @@ The **Delta Review** panel lives in the Source Control sidebar:
 
 - Files changed vs the base branch appear under **Needs Review** / **Reviewed**.
 - Click a file to open its review diff — against the merge base, or against your last-reviewed version if you've reviewed it before.
+- Moved files show as one row at the new path saying where they came from — `← src/old`, or `← [donor-app] src/telemetry` when the file was ported in from another project — with the full origin in the row's tooltip.
+- `verbatim` or `adapted` on that row tells you whether the file changed on the way in, and — while the original content is still reachable — the diff opens against it, so a copied-and-tweaked file shows only the tweak.
 - Hover a row: `+` marks reviewed, `−` unmarks. Group headers and folders (in tree mode) mark/unmark everything inside.
 - The Source Control icon badge and the status bar (`Review 7/23`) show how many files are left.
 - Command palette: `Delta Review: Clear Review State`.
@@ -47,6 +49,9 @@ To update to the latest version later:
 
 ```
 /plugin marketplace update delta-review
+```
+
+```
 /plugin update delta@delta-review
 ```
 
@@ -55,6 +60,8 @@ To update to the latest version later:
 The plugin ships two skills: `/delta:cluster` (this section) and `/delta:review-notes` (see [Review notes](#review-notes)) — one install covers both.
 
 - Ask Claude to cluster the change; it writes a per-branch contract file under `.git` describing narrative clusters (label, summary, members) — nothing touches your working tree.
+- The same contract declares moves: a file moved within the repo, or ported in from another project — the case git cannot detect at all, since the origin was never in your history.
+- Provenance is declared, never inferred: Claude records only the moves it made or that you described — it never guesses one from the diff. (The panel still recognizes ordinary git renames on its own, contract or not.)
 - A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last.
 - Grouping is pure presentation — toggling it never changes what's marked reviewed.
 

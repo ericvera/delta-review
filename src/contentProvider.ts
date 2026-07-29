@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { reviewBaseUriParts } from "./baseDocument";
 import { Git } from "./git";
 
 export const REVIEW_BASE_SCHEME = "delta-review-base";
@@ -11,8 +12,7 @@ export const createReviewBaseUri = (
 ): vscode.Uri =>
   vscode.Uri.from({
     scheme: REVIEW_BASE_SCHEME,
-    path: `/${path}`,
-    query: sha ?? "empty",
+    ...reviewBaseUriParts(path, sha),
   });
 
 export const createReviewBaseContentProvider = (
