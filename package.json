@@ -192,9 +192,33 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.openFullNote",
+        "title": "Open Full Note",
+        "icon": "$(open-preview)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.clearResolvedNotes",
         "title": "Clear Resolved Notes",
         "icon": "$(clear-all)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.resolveNoteRow",
+        "title": "Resolve",
+        "icon": "$(check)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.unresolveNoteRow",
+        "title": "Unresolve",
+        "icon": "$(debug-restart)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.deleteNoteRow",
+        "title": "Delete Note",
+        "icon": "$(trash)",
         "category": "Delta Review"
       }
     ],
@@ -331,6 +355,36 @@
           "command": "deltaReview.unmarkAllReviewed",
           "when": "view == deltaReview && viewItem == reviewedGroup",
           "group": "inline"
+        },
+        {
+          "command": "deltaReview.resolveNoteRow",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.resolveNoteRow",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed)$/",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.unresolveNoteRow",
+          "when": "view == deltaReviewNotes && viewItem == noteRow-resolved",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.unresolveNoteRow",
+          "when": "view == deltaReviewNotes && viewItem == noteRow-resolved",
+          "group": "navigation"
+        },
+        {
+          "command": "deltaReview.deleteNoteRow",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-/",
+          "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.deleteNoteRow",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-/",
+          "group": "navigation"
         }
       ],
       "comments/comment/title": [
@@ -372,6 +426,11 @@
           "command": "deltaReview.deleteNoteThread",
           "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|resolvedNote)$/",
           "group": "inline@2"
+        },
+        {
+          "command": "deltaReview.openFullNote",
+          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|resolvedNote)$/",
+          "group": "inline@3"
         }
       ],
       "comments/commentThread/context": [
@@ -470,6 +529,22 @@
         },
         {
           "command": "deltaReview.openNoteInDiff",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.openFullNote",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.resolveNoteRow",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.unresolveNoteRow",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.deleteNoteRow",
           "when": "false"
         }
       ]

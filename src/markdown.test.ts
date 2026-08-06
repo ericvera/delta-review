@@ -28,8 +28,31 @@ describe("escapeMarkdownText", () => {
     expect(escapeMarkdownText(">quoted")).toBe("\\>quoted");
   });
 
-  it("turns newlines into paragraph breaks", () => {
-    expect(escapeMarkdownText("line1\nline2")).toBe("line1\n\nline2");
+  it("turns newlines into markdown hard line breaks", () => {
+    expect(escapeMarkdownText("line1\nline2")).toBe("line1  \nline2");
+  });
+
+  it("keeps a blank line separating paragraphs", () => {
+    expect(escapeMarkdownText("para1\n\npara2")).toBe("para1  \n  \npara2");
+  });
+
+  it("escapes a line-leading equals so it cannot become a setext heading", () => {
+    expect(escapeMarkdownText("Title\n=====")).toBe("Title  \n\\=====");
+    expect(escapeMarkdownText("a=b")).toBe("a=b");
+  });
+
+  it("escapes pipes so note lines cannot form a table", () => {
+    expect(escapeMarkdownText("| a | b |\n|---|---|")).toBe(
+      "\\| a \\| b \\|  \n\\|---\\|---\\|",
+    );
+    expect(escapeMarkdownText("a | b")).toBe("a \\| b");
+  });
+
+  it("escapes angle brackets so note lines cannot start an HTML block", () => {
+    expect(escapeMarkdownText("<div>\nstill visible")).toBe(
+      "\\<div\\>  \nstill visible",
+    );
+    expect(escapeMarkdownText("a < b")).toBe("a \\< b");
   });
 
   it("preserves leading indentation as &nbsp; without making a code block", () => {

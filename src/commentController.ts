@@ -1,11 +1,19 @@
+import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
-import { baseBlobForNote } from "./baseDocument";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
 import { Git } from "./git";
 import { escapeMarkdownText } from "./markdown";
 import { ReviewModel } from "./model";
+import { truncateTurnText, turnLineBudget } from "./noteBody";
 import { Note, NoteSide, NoteStatus } from "./notes";
+import {
+  clampNoteRange,
+  NoteLineSource,
+  NoteTarget,
+  noteAnchorLines,
+  noteTargetFor,
+} from "./noteTarget";
 import { NoteThread } from "./noteThreads";
 import {
   appendReviewerTurn,
@@ -22,6 +30,10 @@ import {
 // and the thread actions (edit/delete turns, delete thread, resolve/
 // unresolve, reply-to-reopen). Model/git access is injected as callbacks so
 // the controller always sees the extension's current state.
+
+// Opens the whole thread as a scrollable document; the only command a
+// comment body is trusted to link to
+export const OPEN_FULL_NOTE_COMMAND = "deltaReview.openFullNote";
 
 const statusLabels: Record<NoteStatus, string> = {
   open: "Open",
@@ -57,6 +69,12 @@ export interface NoteCommentController extends vscode.Disposable {
   // Expands a note's rendered thread — the reveal approximation for
   // click-to-navigate (VS Code 1.90 has no stable thread.reveal())
   expandThread: (noteId: string) => void;
+  // Re-clamps the ranges of the cached threads attached to a document that
+  // just opened — the clamp needs a line count, which only exists once the
+  // document is open. Range only: no dispose, no create, no git, no store.
+  reclampThreadsFor: (document: vscode.TextDocument) => void;
+  // Reverse lookup for thread-title commands, which receive a CommentThread
+  noteIdForThread: (thread: vscode.CommentThread) => string | undefined;
   // Handler for the deltaReview.addNote comment-input command
   addNote: (reply: vscode.CommentReply) => Promise<void>;
   // Comment-level actions on reviewer turns
@@ -172,17 +190,36 @@ export const createNoteCommentController = (
     );
   };
 
+  // A command link's arguments are a URI-encoded JSON array
+  const openFullNoteLink = (noteId: string): string =>
+    `\n\n[Show full note](command:${OPEN_FULL_NOTE_COMMAND}?${encodeURIComponent(
+      JSON.stringify([noteId]),
+    )})`;
+
   const commentsFor = (thread: NoteThread): NoteComment[] => {
     let reviewerTurnIndex = 0;
+    // Derived from the turn count, so a many-turn thread stays bounded too
+    const lineBudget = turnLineBudget(thread.turns.length);
     return thread.turns.map((turn, index) => {
       const body = new vscode.MarkdownString();
-      body.appendMarkdown(escapeMarkdownText(turn.text));
+      // Scoped, never blanket: the body also carries reviewer- and
+      // agent-authored text
+      body.isTrusted = { enabledCommands: [OPEN_FULL_NOTE_COMMAND] };
+      // The budget applies to the author's text, not to escape artifacts, so
+      // it is the raw turn text that is cut
+      const { text, truncated } = truncateTurnText(turn.text, lineBudget);
+      body.appendMarkdown(escapeMarkdownText(text));
       if (index === 0 && thread.note.outdated) {
         // Mock 4: a dimmed one-liner with the first anchored line's original
         // text (italic is the closest to dimmed a MarkdownString gets)
         body.appendMarkdown(
           `\n\n*line was: ${inlineCode(thread.note.snapshot[0] ?? "")}*`,
         );
+      }
+      if (truncated) {
+        // A link on a later turn can itself be clipped; the unconditional
+        // title-bar button is the escape hatch that never can
+        body.appendMarkdown(openFullNoteLink(thread.note.id));
       }
       const comment: NoteComment = {
         body,
@@ -244,39 +281,61 @@ export const createNoteCommentController = (
     commentThread.canReply = thread.status === "addressed";
   };
 
-  // A CommentThread renders only on an exactly matching URI. Base-side
-  // threads attach to the *currently displayed* base document (the model's
-  // diffBaseSha travels in the uri query), not the creation blob — otherwise
-  // the thread would vanish the moment mark-reviewed advances the base.
-  const threadUriFor = (
+  // A CommentThread renders only on an exactly matching URI. The decision of
+  // which document a note lives on is `src/noteTarget.ts` — shared with the
+  // REVIEW NOTES click, so both always land on the same document.
+  const threadTargetFor = (
     git: Git,
     model: ReviewModel | undefined,
     note: Note,
-  ): vscode.Uri => {
-    if (note.side === "working") {
-      const file = model?.files.find((entry) => entry.path === note.file);
-      // A deleted file's diff shows the empty base uri on the right — the
-      // thread must attach there or it could never render in that diff
-      return file?.deleted === true
-        ? createReviewBaseUri(note.file, undefined)
-        : vscode.Uri.file(join(git.repoRoot, note.file));
-    }
-    const currentBase =
-      model === undefined
-        ? undefined
-        : baseBlobForNote(model, note.file, note.contentBlob);
-    // No current base (file left the review set): fall back to the creation
-    // blob so the thread still has a stable home
-    return createReviewBaseUri(note.file, currentBase ?? note.contentBlob);
+  ): NoteTarget =>
+    noteTargetFor(
+      model,
+      note,
+      // Only a working-side note consults it, so a base-side note costs no
+      // stat at all
+      note.side === "working" && existsSync(join(git.repoRoot, note.file)),
+    );
+
+  const uriForTarget = (git: Git, target: NoteTarget): vscode.Uri =>
+    target.kind === "working"
+      ? vscode.Uri.file(join(git.repoRoot, target.path))
+      : createReviewBaseUri(target.path, target.sha);
+
+  const openDocumentFor = (uri: vscode.Uri): vscode.TextDocument | undefined =>
+    vscode.workspace.textDocuments.find(
+      (entry) => entry.uri.toString() === uri.toString(),
+    );
+
+  // The anchor a thread renders at, clamped into its document. An unopened
+  // document has no line count to clamp against, so the unclamped range
+  // stands until reclampThreadsFor runs on open.
+  const rangeFor = (
+    note: Note,
+    lines: NoteLineSource,
+    document: vscode.TextDocument | undefined,
+  ): vscode.Range => {
+    const { startLine, endLine } = noteAnchorLines(note, lines);
+    const { start, end } =
+      document === undefined
+        ? { start: startLine - 1, end: endLine - 1 }
+        : clampNoteRange(startLine, endLine, document.lineCount);
+    return new vscode.Range(start, 0, end, 0);
   };
 
   // Rendered threads by note id; uriKey detects base-sha changes (thread
   // URIs are immutable, so those need dispose + recreate). noteThread is the
   // last rendered display thread — action handlers restyle from it eagerly
-  // before the authoritative refresh re-render lands.
+  // before the authoritative refresh re-render lands. lines is the target's
+  // coordinate choice, cached so a re-clamp needs no model or fs access.
   const threadCache = new Map<
     string,
-    { thread: vscode.CommentThread; uriKey: string; noteThread: NoteThread }
+    {
+      thread: vscode.CommentThread;
+      uriKey: string;
+      noteThread: NoteThread;
+      lines: NoteLineSource;
+    }
   >();
   // Reverse lookup for the thread-level handlers, which receive a
   // CommentThread and must find its note id
@@ -324,14 +383,10 @@ export const createNoteCommentController = (
     const rendered = new Set<string>();
     for (const thread of threads) {
       rendered.add(thread.note.id);
-      const uri = threadUriFor(git, model, thread.note);
+      const target = threadTargetFor(git, model, thread.note);
+      const uri = uriForTarget(git, target);
       const uriKey = uri.toString();
-      const range = new vscode.Range(
-        thread.note.currentStartLine - 1,
-        0,
-        thread.note.currentEndLine - 1,
-        0,
-      );
+      const range = rangeFor(thread.note, target.lines, openDocumentFor(uri));
       let entry = threadCache.get(thread.note.id);
       // Thread URIs are immutable: relocation (anchor application, base-sha
       // progression) means dispose + recreate, keeping the collapse state
@@ -348,12 +403,18 @@ export const createNoteCommentController = (
         created.collapsibleState =
           carriedCollapsibleState ??
           vscode.CommentThreadCollapsibleState.Expanded;
-        entry = { thread: created, uriKey, noteThread: thread };
+        entry = {
+          thread: created,
+          uriKey,
+          noteThread: thread,
+          lines: target.lines,
+        };
         threadCache.set(thread.note.id, entry);
         threadNoteIds.set(created, thread.note.id);
       } else {
         entry.thread.range = range;
         entry.noteThread = thread;
+        entry.lines = target.lines;
       }
       styleThread(entry.thread, thread);
     }
@@ -369,6 +430,22 @@ export const createNoteCommentController = (
     if (entry !== undefined) {
       entry.thread.collapsibleState =
         vscode.CommentThreadCollapsibleState.Expanded;
+    }
+  };
+
+  // A note anchored past the end of its document would have nowhere to
+  // render; the range is only clampable once the document exists, so the
+  // extension calls this on every document open.
+  const reclampThreadsFor = (document: vscode.TextDocument): void => {
+    const uriKey = document.uri.toString();
+    for (const entry of threadCache.values()) {
+      if (entry.uriKey === uriKey) {
+        entry.thread.range = rangeFor(
+          entry.noteThread.note,
+          entry.lines,
+          document,
+        );
+      }
     }
   };
 
@@ -424,6 +501,9 @@ export const createNoteCommentController = (
         thread: pending,
         uriKey: uri.toString(),
         noteThread,
+        // A note is always created on the document the reviewer is looking
+        // at, so its anchor is already that document's current coordinates
+        lines: "current",
       });
       threadNoteIds.set(pending, note.id);
       pending.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
@@ -661,6 +741,8 @@ export const createNoteCommentController = (
   return {
     renderThreads,
     expandThread,
+    reclampThreadsFor,
+    noteIdForThread: (thread) => threadNoteIds.get(thread),
     addNote,
     editNoteTurn,
     saveNoteTurn,

@@ -8,7 +8,10 @@ import {
   loadClustersContract,
   resolveClusterModel,
 } from "./clusters";
-import { createNoteCommentController } from "./commentController";
+import {
+  createNoteCommentController,
+  OPEN_FULL_NOTE_COMMAND,
+} from "./commentController";
 import {
   createReviewBaseContentProvider,
   createReviewBaseUri,
@@ -25,14 +28,30 @@ import {
   ReviewModel,
 } from "./model";
 import type { ResponsesFile } from "./notes";
+import {
+  createNoteContentProvider,
+  createNoteDocumentUri,
+  NOTE_DOCUMENT_SCHEME,
+} from "./noteContentProvider";
+import {
+  noteAnchorLines,
+  noteTargetFor,
+  reviewDiffIsEmpty,
+} from "./noteTarget";
 import { mergeThreads, NoteThread } from "./noteThreads";
-import { notesCollapseKeyFor, NotesTreeProvider } from "./notesTreeProvider";
+import {
+  notesCollapseKeyFor,
+  NotesTreeElement,
+  NotesTreeProvider,
+} from "./notesTreeProvider";
 import {
   buildAnchorResolver,
+  deleteNote,
   deleteNotes,
   loadNotes,
   loadResponses,
   refreshDerived,
+  setResolved,
 } from "./notesStore";
 import {
   markReviewed,
@@ -216,6 +235,11 @@ export const activate = async (
   );
   statusBarItem.command = "deltaReview.focus";
 
+  // Full-note documents: the scrollable escape hatch from the diff's clipped
+  // comment widget. The getter closure runs long after currentNoteThreads is
+  // initialized below, so it always sees the live thread set.
+  const noteDocuments = createNoteContentProvider(() => currentNoteThreads);
+
   context.subscriptions.push(
     treeView,
     notesTreeView,
@@ -224,6 +248,11 @@ export const activate = async (
       REVIEW_BASE_SCHEME,
       createReviewBaseContentProvider(() => git),
     ),
+    vscode.workspace.registerTextDocumentContentProvider(
+      NOTE_DOCUMENT_SCHEME,
+      noteDocuments.provider,
+    ),
+    noteDocuments.onDidChangeEmitter,
     vscode.window.registerFileDecorationProvider(
       createReviewDecorationProvider(),
     ),
@@ -262,6 +291,12 @@ export const activate = async (
             tooltip: `${toHandle} review note${toHandle === 1 ? "" : "s"} to handle`,
           }
         : undefined;
+    // Refresh any open full-note tab so an agent reply lands there too
+    for (const document of vscode.workspace.textDocuments) {
+      if (document.uri.scheme === NOTE_DOCUMENT_SCHEME) {
+        noteDocuments.onDidChangeEmitter.fire(document.uri);
+      }
+    }
   };
 
   // Refreshes run concurrently (watcher bursts, repo switches); the generation
@@ -625,6 +660,27 @@ export const activate = async (
     return (model?.files ?? []).filter((file) => file.triage === "normal");
   };
 
+  // REVIEW NOTES row resolve/unresolve. Straight to the store, never through
+  // the comment controller: a note whose file is gone has no rendered thread
+  // to act on, and the row is the only affordance left.
+  const setNoteRowResolved = async (
+    element: NotesTreeElement | undefined,
+    resolved: boolean,
+  ): Promise<void> => {
+    if (git === undefined || model === undefined || element?.kind !== "note") {
+      return;
+    }
+    try {
+      await setResolved(git, model.branch, element.thread.note.id, resolved);
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Delta Review: failed to ${resolved ? "resolve" : "unresolve"} note (${error instanceof Error ? error.message : String(error)})`,
+      );
+      return;
+    }
+    await refresh();
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand("deltaReview.refresh", () => refresh()),
 
@@ -676,6 +732,30 @@ export const activate = async (
       (reply: vscode.CommentReply) => commentController.replyReopen(reply),
     ),
 
+    // Invoked from the thread title bar (a CommentThread) and from a
+    // truncated turn's command link (a note id); anything unresolvable is a
+    // no-op
+    vscode.commands.registerCommand(
+      OPEN_FULL_NOTE_COMMAND,
+      async (target?: vscode.CommentThread | string) => {
+        const noteId =
+          typeof target === "string"
+            ? target
+            : target === undefined
+              ? undefined
+              : commentController.noteIdForThread(target);
+        const thread = currentNoteThreads.find(
+          (candidate) => candidate.note.id === noteId,
+        );
+        if (noteId === undefined || thread === undefined) {
+          return;
+        }
+        await vscode.window.showTextDocument(
+          createNoteDocumentUri(noteId, thread.note.file),
+        );
+      },
+    ),
+
     vscode.commands.registerCommand(
       "deltaReview.markFileReviewed",
       async (element?: ReviewTreeElement) => {
@@ -725,8 +805,8 @@ export const activate = async (
     vscode.commands.registerCommand("deltaReview.openDiff", openDiff),
 
     // REVIEW NOTES row click: open the noted file's review diff with the
-    // cursor at the note's current line and the thread expanded; a file that
-    // left the review set falls back to the plain working file
+    // cursor at the note's current line and the thread expanded; a file with
+    // no usable diff falls back to the note's own target document
     vscode.commands.registerCommand(
       "deltaReview.openNoteInDiff",
       async (thread: NoteThread) => {
@@ -738,7 +818,7 @@ export const activate = async (
         const file = model?.files.find(
           (candidate) => candidate.path === thread.note.file,
         );
-        if (file !== undefined) {
+        if (file !== undefined && !reviewDiffIsEmpty(file)) {
           // vscode.diff applies the selection to the modified (right) side,
           // so for a base-side note the cursor line is an approximation —
           // the expanded thread on the left is the visible cue
@@ -750,23 +830,86 @@ export const activate = async (
           commentController.expandThread(thread.note.id);
           return;
         }
-        // Not in the review set — open the plain file at the note's line
+        // Either the file left the review set, or its diff is empty on both
+        // sides and so can hold no thread. Resolve the note's document
+        // through the same module the thread attaches through, so the click
+        // always lands where the thread renders. The content provider serves
+        // "" for an unreadable blob exactly as it does for a legitimately
+        // empty one, so a failed read is not detectable — the REVIEW NOTES
+        // row actions are what guarantee the note stays closable.
         const absolutePath = join(git.repoRoot, thread.note.file);
+        let onDisk = true;
         try {
           await access(absolutePath);
         } catch {
-          void vscode.window.showInformationMessage(
-            "Delta Review: file no longer exists; note kept.",
+          onDisk = false;
+        }
+        const target = noteTargetFor(model, thread.note, onDisk);
+        const { startLine } = noteAnchorLines(thread.note, target.lines);
+        const targetLine = Math.max(startLine - 1, 0);
+        await vscode.window.showTextDocument(
+          target.kind === "working"
+            ? vscode.Uri.file(join(git.repoRoot, target.path))
+            : createReviewBaseUri(target.path, target.sha),
+          { selection: new vscode.Range(targetLine, 0, targetLine, 0) },
+        );
+        // Working-side threads attach to the plain file URI and base-side
+        // ones to the base document, so whichever opened, the thread renders
+        // here
+        commentController.expandThread(thread.note.id);
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.resolveNoteRow",
+      (element?: NotesTreeElement) => setNoteRowResolved(element, true),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.unresolveNoteRow",
+      (element?: NotesTreeElement) => setNoteRowResolved(element, false),
+    ),
+
+    // Unlike the thread's trash icon — which sits inside an expanded thread —
+    // a tree row is an easy misclick, so this one confirms first
+    vscode.commands.registerCommand(
+      "deltaReview.deleteNoteRow",
+      async (element?: NotesTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          element?.kind !== "note"
+        ) {
+          return;
+        }
+        const choice = await vscode.window.showWarningMessage(
+          "Delete this review note and all its replies?",
+          { modal: true },
+          "Delete",
+        );
+        if (choice !== "Delete") {
+          return;
+        }
+        // A background refresh or a repo switch can land while the modal is
+        // open; TypeScript keeps the pre-await narrowing, so re-read both
+        const activeGit = git;
+        const activeModel = model;
+        if (activeGit === undefined || activeModel === undefined) {
+          return;
+        }
+        try {
+          await deleteNote(
+            activeGit,
+            activeModel.branch,
+            element.thread.note.id,
+          );
+        } catch (error) {
+          void vscode.window.showErrorMessage(
+            `Delta Review: failed to delete note (${error instanceof Error ? error.message : String(error)})`,
           );
           return;
         }
-        await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
-          selection,
-        });
-        // Working-side threads attach to the plain file URI, so the thread
-        // renders here too (base-side threads live on the base document —
-        // expanding is a harmless no-op for those)
-        commentController.expandThread(thread.note.id);
+        await refresh();
       },
     ),
 
@@ -1000,6 +1143,19 @@ export const activate = async (
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(scheduleRefresh),
+    // A thread's anchor can only be clamped into a document once that
+    // document exists, and nothing else re-renders on open. Deliberately not
+    // a refresh (git on every document open) and not renderThreads (it would
+    // dispose the thread addNote adopts before its refresh lands) — the
+    // controller's re-clamp touches ranges only.
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      if (
+        document.uri.scheme === "file" ||
+        document.uri.scheme === REVIEW_BASE_SCHEME
+      ) {
+        commentController.reclampThreadsFor(document);
+      }
+    }),
     vscode.window.onDidChangeWindowState((state) => {
       if (state.focused) {
         scheduleRefresh();
