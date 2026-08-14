@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { MoveDeclaration } from "./clusters";
 import {
   Git,
@@ -7,6 +7,12 @@ import {
   parseNameStatusOutput,
   splitNulTerminated,
 } from "./git";
+import {
+  HashCacheEntry,
+  partitionByCache,
+  statPaths,
+  updateCache,
+} from "./hashCache";
 import { DELETED_SENTINEL_CONTENT, readReviewState } from "./reviewState";
 import { computeTriage, Triage } from "./triage";
 
@@ -298,6 +304,113 @@ const resolveExternalBaseBlobs = async (
   return resolved;
 };
 
+// Pathspecs are sent in batches so a large review set cannot overflow the
+// command line
+const LS_TREE_BATCH_SIZE = 500;
+
+// A pathspec that escapes the repository makes git fail the whole call, and a
+// hand-written contract can name anything (an external origin is a donor-project
+// path by design), so only repo-relative paths are ever sent as pathspecs.
+const isRepoRelative = (path: string): boolean =>
+  !isAbsolute(path) && !path.split("/").includes("..");
+
+// Reads the merge-base blobs for exactly the paths the model can ask about:
+// the review set git computed, every rename/move origin, and every declared
+// destination. Listing the whole tree instead scales with the repository
+// rather than with the change under review.
+//
+// Each path goes out with `:(literal)` magic — a bare pathspec is
+// glob-interpreted, so a filename containing `*`, `?` or `[` would silently
+// match nothing and lose its blob. A pathspec naming a path that is not in the
+// tree is skipped silently, which is exactly what the lookups below want.
+const readMergeBaseBlobs = async (
+  git: Git,
+  mergeBase: string,
+  pathspecs: readonly string[],
+): Promise<Map<string, string>> => {
+  const blobs = new Map<string, string>();
+  for (let index = 0; index < pathspecs.length; index += LS_TREE_BATCH_SIZE) {
+    const batch = pathspecs.slice(index, index + LS_TREE_BATCH_SIZE);
+    const output = await git.run([
+      "ls-tree",
+      "-r",
+      "-z",
+      mergeBase,
+      "--",
+      ...batch.map((path) => `:(literal)${path}`),
+    ]);
+    for (const [path, sha] of parseLsTreeOutput(output)) {
+      blobs.set(path, sha);
+    }
+  }
+  return blobs;
+};
+
+// The sentinel blob's content is constant, so its sha is too — but only per
+// repository, since the object format decides the hash. Only resolved values
+// are memoized: caching a rejected lookup (a repo torn down mid-refresh) would
+// break every later refresh for the extension host's lifetime.
+const sentinelShaByRepoRoot = new Map<string, string>();
+
+const resolveSentinelSha = async (git: Git): Promise<string> => {
+  const memoized = sentinelShaByRepoRoot.get(git.repoRoot);
+  if (memoized !== undefined) {
+    return memoized;
+  }
+  const sha = (
+    await git.run(["hash-object", "--stdin"], {
+      stdin: DELETED_SENTINEL_CONTENT,
+    })
+  ).trim();
+  sentinelShaByRepoRoot.set(git.repoRoot, sha);
+  return sha;
+};
+
+// Working-tree content shas for the paths that exist on disk. With a cache in
+// hand only the paths whose size or mtime moved are hashed — content-hashing a
+// whole review set on every refresh is what makes a mark feel slow on large
+// changes. Without one, every path is hashed, as before.
+const hashWorkingTree = async (
+  git: Git,
+  paths: readonly string[],
+  cache: Map<string, HashCacheEntry> | undefined,
+): Promise<Map<string, string>> => {
+  const shaByPath = new Map<string, string>();
+  if (paths.length === 0) {
+    return shaByPath;
+  }
+  const hashBatch = async (
+    batch: readonly string[],
+  ): Promise<Map<string, string>> => {
+    const output = await git.run(["hash-object", "--stdin-paths"], {
+      stdin: batch.join("\n") + "\n",
+    });
+    // Output order matches input order, so it maps over the batch that was
+    // sent, never over the full path list
+    const shas = output.trim().split("\n");
+    return new Map(batch.map((path, index) => [path, shas[index]]));
+  };
+
+  if (cache === undefined) {
+    return await hashBatch(paths);
+  }
+  // A path with no stat vanished between the existence check and now; hashing
+  // it would fail the entire batch, so it is dropped here and reads as deleted
+  const stats = await statPaths(git.repoRoot, paths);
+  const { cached, toHash } = partitionByCache(stats, cache);
+  for (const [path, sha] of cached) {
+    shaByPath.set(path, sha);
+  }
+  if (toHash.length > 0) {
+    const hashed = await hashBatch(toHash);
+    for (const [path, sha] of hashed) {
+      shaByPath.set(path, sha);
+    }
+    updateCache(cache, stats, hashed);
+  }
+  return shaByPath;
+};
+
 // The branch a review is scoped to: HEAD's short name. Exported so a caller
 // that needs the branch before the model exists (to load the branch's
 // contract, say) can resolve it once and hand it back in.
@@ -316,6 +429,10 @@ export const computeReviewModel = async (
     // Skips the HEAD lookup when the caller already resolved the branch
     branch?: string;
     moves?: MoveDeclaration[];
+    // Working-tree content shas carried across refreshes, keyed by path and
+    // validated by stat. Owned and cleared by the caller; absent means every
+    // existing path is re-hashed.
+    hashCache?: Map<string, HashCacheEntry>;
   },
 ): Promise<ReviewModel> => {
   const branch = options?.branch ?? (await resolveBranch(git));
@@ -350,16 +467,37 @@ export const computeReviewModel = async (
 
   // The merge-base blobs and working-tree existence both feed the move
   // adjustment, and the adjusted set is what every downstream surface —
-  // starting with triage and the linguist-generated lookup — must see.
-  const baseBlobs = parseLsTreeOutput(
-    await git.run(["ls-tree", "-r", "-z", mergeBase]),
+  // starting with triage and the linguist-generated lookup — must see. The
+  // blob lookup is scoped to the paths that can be asked for: the raw review
+  // set (the adjusted set only ever adds a rename source to it), every rename
+  // or move origin, and every declared destination. A declaration outside the
+  // raw set is ignored by the adjustment below, so it is ignored here too.
+  const declaredMoves = options?.moves ?? [];
+  const rawPathSet = new Set(rawPaths);
+  const basePathspecs = new Set(rawPaths);
+  for (const from of movedFromByPath.values()) {
+    basePathspecs.add(from);
+  }
+  for (const move of declaredMoves) {
+    if (!rawPathSet.has(move.path)) {
+      continue;
+    }
+    basePathspecs.add(move.path);
+    if (move.origin === "repo") {
+      basePathspecs.add(move.from);
+    }
+  }
+  const baseBlobs = await readMergeBaseBlobs(
+    git,
+    mergeBase,
+    [...basePathspecs].filter(isRepoRelative),
   );
   const isDeletedFromWorkingTree = (path: string): boolean =>
     !existsSync(join(git.repoRoot, path));
   const { paths, movesByPath } = adjustReviewSetForMoves({
     paths: rawPaths,
     movedFromByPath,
-    moves: options?.moves ?? [],
+    moves: declaredMoves,
     mergeBasePaths: new Set(baseBlobs.keys()),
     isDeletedFromWorkingTree,
   });
@@ -376,23 +514,14 @@ export const computeReviewModel = async (
     git,
     movesByPath,
   );
-  const sentinelSha = (
-    await git.run(["hash-object", "--stdin"], {
-      stdin: DELETED_SENTINEL_CONTENT,
-    })
-  ).trim();
+  const sentinelSha = await resolveSentinelSha(git);
 
   const existingPaths = paths.filter((path) => !isDeletedFromWorkingTree(path));
-  const currentShaByPath = new Map<string, string>();
-  if (existingPaths.length > 0) {
-    const output = await git.run(["hash-object", "--stdin-paths"], {
-      stdin: existingPaths.join("\n") + "\n",
-    });
-    const shas = output.trim().split("\n");
-    existingPaths.forEach((path, index) =>
-      currentShaByPath.set(path, shas[index]),
-    );
-  }
+  const currentShaByPath = await hashWorkingTree(
+    git,
+    existingPaths,
+    options?.hashCache,
+  );
 
   const files = paths.map((path): ReviewFile => {
     const deleted = !currentShaByPath.has(path);

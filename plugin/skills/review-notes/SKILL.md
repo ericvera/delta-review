@@ -14,7 +14,7 @@ description: >-
 
 # Review Notes
 
-Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. Loop: the reviewer notes diff lines → you fix the code and append a response per note → the extension shows your reply, flips the note to **Addressed**, and relocates it via your anchor.
+Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. Loop: the reviewer notes diff lines → you handle one note and append its response → the extension shows your reply, flips the note to **Addressed**, and relocates it via your anchor.
 
 ## Contract
 
@@ -117,16 +117,27 @@ Any driver that responds to notes must compute the work set this way. A note is 
 
 Never trust `status` alone (the extension that refreshes it may not be running); the timestamp comparison is what prevents re-addressing a note you already answered.
 
+### Channel discipline
+
+Binds any driver that responds to notes. Read-only drivers (summarize, triage, discuss) are exempt.
+
+- The thread is the conversation. All substantive content is a response entry: what you changed and where, why, pushback or won't-fix rationale, a target you could not locate, and clarifying questions to the reviewer. The caller conversation never carries per-note outcomes, rationale, or fix lists.
+- Explain-only replies are legitimate: a response entry is one turn, with or without a code change.
+- A note needing a reviewer decision: append the question as a response entry, then skip that note for the rest of the pass. The reviewer's thread reply makes it actionable again on a later run (Work set).
+- The caller conversation carries exactly two things: a bare status line — counts (e.g. fixes vs replies/questions) and a pointer to Delta Review — and blockers the thread cannot carry: a missing or invalid notes file, a corrupt or unwritable responses file.
+- A pass that made no fixes because every actionable note got an in-thread question says exactly that in the status line (questions asked; reply in Delta Review and re-run), so it does not read as a stall.
+
 ### Schema changes
 
 Changing the schema requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version other than 1.
 
 ## Default workflow: addressing the notes
 
-The default when the user asks to address their review notes; other skills or instructions may drive different behavior on the same contract (summarize, triage, custom fix policies) — the Contract still governs all file access. Explain-only replies are legitimate: a response entry is just a turn, with or without a code change.
+The default when the user asks to address their review notes; other skills or instructions may drive different behavior on the same contract (summarize, triage, custom fix policies) — the Contract still governs all file access. One note per iteration: address, respond, re-read, repeat.
 
 1. **Locate and read the notes** per the Contract. Missing file or empty `notes` array → report "no review notes on this branch" and stop. Corrupt JSON → stop per the Contract.
-2. **Compute the work set** from both files per the Contract.
-3. **Address each actionable note**: read its whole thread (`turns` plus your prior responses, interleaved oldest → newest by `at`), locate the target per the Contract's reading semantics, and make the change the newest reviewer turn asks for, following project conventions.
-4. **Respond**: append one entry per note handled, per the Contract's entry conventions and write rules.
-5. **Report** minimally. Response entries are the record — the extension renders each inline and flips the note to **Addressed** — so don't repeat per-note outcomes (including skips) in chat. Say only how many notes you handled and to check Delta Review for the replies. Surface in chat only what the notes UI can't: a corrupt/blocked file, an unlocatable target, or a decision you need from the user.
+2. **Compute and order the work set** from both files per the Contract, excluding notes skipped earlier this pass per Channel discipline. Order: notes whose thread already holds your prior responses (reviewer follow-ups) first, then brand-new notes; within each class, existing file/line order. Empty → step 6.
+3. **Take the first note**: read its whole thread (`turns` plus your prior responses, interleaved oldest → newest by `at`), locate the target per the Contract's reading semantics, and make the change the newest reviewer turn asks for, following project conventions — or compose the reply or question that turn calls for, per Channel discipline.
+4. **Respond immediately**: append that one note's entry per the Contract's entry conventions and write rules, before moving on. Never batch responses.
+5. **Re-read the notes file** — the reviewer may have added notes or replied while you worked — and repeat from step 2.
+6. **Report** per Channel discipline.

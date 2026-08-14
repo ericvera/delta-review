@@ -20,6 +20,7 @@ import {
 import { createReviewDecorationProvider } from "./decorations";
 import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
+import type { HashCacheEntry } from "./hashCache";
 import {
   computeReviewModel,
   FileReviewStatus,
@@ -58,6 +59,8 @@ import {
   reviewRefForBranch,
   unmarkReviewed,
 } from "./reviewState";
+import { createSerialQueue } from "./serialQueue";
+import { fileElementFor } from "./treeParents";
 import {
   collapseKeyFor,
   isDefaultCollapsed,
@@ -302,6 +305,18 @@ export const activate = async (
   // Refreshes run concurrently (watcher bursts, repo switches); the generation
   // counter keeps a slow, older computation from overwriting a newer result
   let refreshGeneration = 0;
+  // Every write to refs/review/<branch> — user commands and the auto-mark
+  // pass below — goes through this one queue. Each mutation is a read of the
+  // ref, a change, then a write; two of them overlapping lose one side's
+  // paths. Only the mutation is queued: refresh() itself must never run
+  // inside it, since the auto-mark pass enqueues from within refresh() and
+  // would deadlock behind a slot the caller is still holding.
+  const reviewStateQueue = createSerialQueue();
+  // Working-tree content shas kept across refreshes so a refresh only hashes
+  // the files that actually moved. Entries are validated by size and mtime, so
+  // a branch switch needs no invalidation (content identity is not
+  // branch-scoped) — a repo switch does, and clears it in setActiveRepo.
+  const hashCache = new Map<string, HashCacheEntry>();
   const refresh = async (): Promise<void> => {
     const generation = ++refreshGeneration;
     if (git === undefined) {
@@ -345,6 +360,7 @@ export const activate = async (
         autoReviewGlobs,
         branch,
         moves,
+        hashCache,
       });
       if (generation !== refreshGeneration) {
         return;
@@ -363,14 +379,22 @@ export const activate = async (
           )
           .map((file) => file.path);
         if (autoPaths.length > 0) {
-          await markReviewed(git, computed.branch, autoPaths);
+          const gitForAutoMark = git;
+          const autoBranch = computed.branch;
+          await reviewStateQueue.run(() =>
+            markReviewed(gitForAutoMark, autoBranch, autoPaths),
+          );
           if (generation !== refreshGeneration) {
             return;
           }
+          // Same cache instance as the computation above: the auto-mark pass
+          // changes the ref, not the working tree, so this recomputation
+          // re-hashes nothing
           computed = await computeReviewModel(git, baseBranch, {
             autoReviewGlobs,
             branch,
             moves,
+            hashCache,
           });
           if (generation !== refreshGeneration) {
             return;
@@ -523,6 +547,31 @@ export const activate = async (
     }
   };
 
+  // Command-side wrapper for a review-state mutation: serialize the write,
+  // then refresh outside the queue. A failure anywhere (the git write or the
+  // refresh that follows) is the user's click going nowhere, so it always
+  // becomes a visible error rather than a rejected command promise. The view's
+  // built-in progress bar covers the whole thing — queue wait included — so a
+  // click issued while another mark is still running reads as busy rather than
+  // as dead.
+  const applyReviewStateChange = async (
+    action: string,
+    mutate: () => Promise<void>,
+  ): Promise<void> =>
+    vscode.window.withProgress(
+      { location: { viewId: "deltaReview" } },
+      async () => {
+        try {
+          await reviewStateQueue.run(mutate);
+          await refresh();
+        } catch (error) {
+          void vscode.window.showErrorMessage(
+            `Delta Review: failed to ${action} (${error instanceof Error ? error.message : String(error)})`,
+          );
+        }
+      },
+    );
+
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleRefresh = (): void => {
     if (refreshTimer !== undefined) {
@@ -594,6 +643,9 @@ export const activate = async (
     if (repoRoot === git?.repoRoot) {
       return;
     }
+    // Cached hashes are keyed by repo-relative path, so they mean nothing in
+    // another checkout
+    hashCache.clear();
     if (repoRoot === undefined) {
       git = undefined;
       disposeRepoWatcher();
@@ -637,6 +689,23 @@ export const activate = async (
       title,
       selection === undefined ? undefined : { selection },
     );
+  };
+
+  // Selection sync from REVIEW NOTES: put the noted file's row in DELTA
+  // REVIEW, expanding whatever ancestors are collapsed. Best effort — reveal
+  // rejects on a view that cannot be shown, and that must never fail the
+  // click that triggered it.
+  const revealFileRow = async (file: ReviewFile): Promise<void> => {
+    const element = fileElementFor(file, {
+      clusterModel,
+      viewMode,
+      grouped: groupedPreference && clusterModel !== undefined,
+    });
+    try {
+      await treeView.reveal(element, { select: true, focus: false });
+    } catch (error) {
+      console.warn("Delta Review: could not reveal file row", error);
+    }
   };
 
   // The visible file set a folder row subdivides: all files when scoped to
@@ -766,8 +835,14 @@ export const activate = async (
         ) {
           return;
         }
-        await markReviewed(git, model.branch, [element.file.path]);
-        await refresh();
+        // Read out of `git`/`model`/`element` before enqueueing: a refresh or
+        // repo switch can reassign them before the queued task runs
+        const activeGit = git;
+        const branch = model.branch;
+        const paths = [element.file.path];
+        await applyReviewStateChange("mark reviewed", () =>
+          markReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -781,8 +856,12 @@ export const activate = async (
         ) {
           return;
         }
-        await unmarkReviewed(git, model.branch, [element.file.path]);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        const paths = [element.file.path];
+        await applyReviewStateChange("unmark reviewed", () =>
+          unmarkReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -798,8 +877,11 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await unmarkReviewed(git, model.branch, paths);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        await applyReviewStateChange("unmark all files", () =>
+          unmarkReviewed(activeGit, branch, paths),
+        );
       },
     ),
     vscode.commands.registerCommand("deltaReview.openDiff", openDiff),
@@ -828,6 +910,7 @@ export const activate = async (
           // after the await, never a busy-wait
           await new Promise((resolve) => setTimeout(resolve, 0));
           commentController.expandThread(thread.note.id);
+          await revealFileRow(file);
           return;
         }
         // Either the file left the review set, or its diff is empty on both
@@ -857,6 +940,10 @@ export const activate = async (
         // ones to the base document, so whichever opened, the thread renders
         // here
         commentController.expandThread(thread.note.id);
+        // An empty-diff file is still in the review set, so it still syncs
+        if (file !== undefined) {
+          await revealFileRow(file);
+        }
       },
     ),
 
@@ -979,8 +1066,11 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await markReviewed(git, model.branch, paths);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        await applyReviewStateChange("mark folder reviewed", () =>
+          markReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -1004,8 +1094,11 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await unmarkReviewed(git, model.branch, paths);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        await applyReviewStateChange("unmark folder", () =>
+          unmarkReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -1026,8 +1119,11 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await markReviewed(git, model.branch, paths);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        await applyReviewStateChange("mark cluster reviewed", () =>
+          markReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -1048,8 +1144,11 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await unmarkReviewed(git, model.branch, paths);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        await applyReviewStateChange("unmark cluster", () =>
+          unmarkReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -1073,8 +1172,11 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await markReviewed(git, model.branch, paths);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        await applyReviewStateChange("mark auto files reviewed", () =>
+          markReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -1098,8 +1200,11 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await unmarkReviewed(git, model.branch, paths);
-        await refresh();
+        const activeGit = git;
+        const branch = model.branch;
+        await applyReviewStateChange("unmark auto files", () =>
+          unmarkReviewed(activeGit, branch, paths),
+        );
       },
     ),
 
@@ -1113,8 +1218,11 @@ export const activate = async (
       if (paths.length === 0) {
         return;
       }
-      await markReviewed(git, model.branch, paths);
-      await refresh();
+      const activeGit = git;
+      const branch = model.branch;
+      await applyReviewStateChange("mark all files reviewed", () =>
+        markReviewed(activeGit, branch, paths),
+      );
     }),
 
     vscode.commands.registerCommand(
@@ -1131,8 +1239,15 @@ export const activate = async (
         if (choice !== "Clear") {
           return;
         }
+        // Queued like every other review-state write: a clear that overtook a
+        // pending write would be undone by it, the ref reappearing moments
+        // after it was deleted
+        const activeGit = git;
+        const ref = reviewRefForBranch(model.branch);
         try {
-          await git.run(["update-ref", "-d", reviewRefForBranch(model.branch)]);
+          await reviewStateQueue.run(() =>
+            activeGit.run(["update-ref", "-d", ref]),
+          );
         } catch {
           // Ref did not exist — nothing to clear
         }

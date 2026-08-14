@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MoveDeclaration } from "./clusters";
 import type { Git } from "./git";
+import type { HashCacheEntry } from "./hashCache";
 import {
   adjustReviewSetForMoves,
   computeReviewModel,
@@ -481,11 +482,14 @@ describe("computeReviewModel", () => {
   let repoRoot: string;
   let checkAttrStdin: string[];
   let gitCalls: string[][];
+  // stdin of each `hash-object --stdin-paths` batch, in call order
+  let hashPathsStdin: string[];
 
   beforeEach(async () => {
     repoRoot = await mkdtemp(join(tmpdir(), "delta-review-model-"));
     checkAttrStdin = [];
     gitCalls = [];
+    hashPathsStdin = [];
   });
 
   afterEach(async () => {
@@ -529,7 +533,24 @@ describe("computeReviewModel", () => {
         }
         if (args[0] === "ls-tree") {
           if (args[3] === MERGE_BASE) {
-            return lsTreeOutput(full.baseBlobs);
+            const separator = args.indexOf("--");
+            if (separator === -1) {
+              return lsTreeOutput(full.baseBlobs);
+            }
+            // git reports only the entries the pathspecs name, so the stub
+            // does too: a path missing from them really does lose its blob
+            const wanted = new Set(
+              args
+                .slice(separator + 1)
+                .map((pathspec) => pathspec.replace(":(literal)", "")),
+            );
+            return lsTreeOutput(
+              Object.fromEntries(
+                Object.entries(full.baseBlobs).filter(([path]) =>
+                  wanted.has(path),
+                ),
+              ),
+            );
           }
           if (Object.keys(full.reviewState).length === 0) {
             throw new Error("fatal: not a valid object name");
@@ -551,6 +572,7 @@ describe("computeReviewModel", () => {
           return `${SENTINEL_SHA}\n`;
         }
         if (args[0] === "hash-object") {
+          hashPathsStdin.push(options?.stdin ?? "");
           return (
             (options?.stdin ?? "")
               .trim()
@@ -703,6 +725,174 @@ describe("computeReviewModel", () => {
       moveClassification: "verbatim",
       originContentUnavailable: false,
     });
+  });
+
+  it("scopes the merge-base lookup to the review set and its move origins", async () => {
+    const git = await setUp({
+      changes: [
+        ["M", "src/edited.ts"],
+        ["R100", "src/renamed-from.ts", "src/renamed.ts"],
+      ],
+      untracked: ["src/copied.ts"],
+      baseBlobs: {
+        "src/edited.ts": PATH_SHA,
+        "src/renamed-from.ts": ORIGIN_SHA,
+        "src/declared-from.ts": ORIGIN_SHA,
+      },
+      workingShas: {
+        "src/edited.ts": WORKING_SHA,
+        "src/renamed.ts": ORIGIN_SHA,
+        "src/copied.ts": WORKING_SHA,
+      },
+    });
+    await computeReviewModel(git, "main", {
+      moves: [
+        declaration("src/edited.ts", "src/declared-from.ts", "repo"),
+        declaration("src/copied.ts", "../donor/src/copied.ts", "external", {
+          donor: "donor-app",
+        }),
+        // Outside the review set: ignored by the adjustment, so it must not
+        // reach the pathspecs either
+        declaration("src/absent.ts", "src/never-asked.ts", "repo"),
+      ],
+    });
+    const lsTree = gitCalls.find(
+      (args) => args[0] === "ls-tree" && args[3] === MERGE_BASE,
+    );
+    expect(lsTree?.slice(0, 5)).toEqual([
+      "ls-tree",
+      "-r",
+      "-z",
+      MERGE_BASE,
+      "--",
+    ]);
+    // Literal magic on every pathspec, and the external origin's donor path —
+    // which escapes the repository — is never one of them
+    expect(new Set(lsTree?.slice(5))).toEqual(
+      new Set([
+        ":(literal)src/edited.ts",
+        ":(literal)src/renamed.ts",
+        ":(literal)src/renamed-from.ts",
+        ":(literal)src/copied.ts",
+        ":(literal)src/declared-from.ts",
+      ]),
+    );
+  });
+
+  it("splits a large pathspec list into batches and merges the results", async () => {
+    const paths = Array.from(
+      { length: 601 },
+      (_, index) => `src/f${String(index).padStart(4, "0")}.ts`,
+    );
+    const git = await setUp({
+      changes: paths.map((path) => ["M", path] as [string, string]),
+      baseBlobs: Object.fromEntries(paths.map((path) => [path, PATH_SHA])),
+      workingShas: Object.fromEntries(paths.map((path) => [path, WORKING_SHA])),
+    });
+    const model = await computeReviewModel(git, "main");
+    const lsTreeCalls = gitCalls.filter(
+      (args) => args[0] === "ls-tree" && args[3] === MERGE_BASE,
+    );
+    expect(lsTreeCalls.map((args) => args.length - 5)).toEqual([500, 101]);
+    // Every batch's blobs survive the merge
+    expect(model.files.length).toBe(601);
+    expect(model.files.every((file) => file.diffBaseSha === PATH_SHA)).toBe(
+      true,
+    );
+    expect(model.files.every((file) => file.existsInMergeBase)).toBe(true);
+  });
+
+  it("reuses cached working-tree hashes and re-hashes only what changed", async () => {
+    const git = await setUp({
+      changes: [
+        ["M", "src/a.ts"],
+        ["M", "src/b.ts"],
+      ],
+      baseBlobs: { "src/a.ts": PATH_SHA, "src/b.ts": PATH_SHA },
+      workingShas: { "src/a.ts": WORKING_SHA, "src/b.ts": ORIGIN_SHA },
+    });
+    const hashCache = new Map<string, HashCacheEntry>();
+    const cold = await computeReviewModel(git, "main", { hashCache });
+    expect(hashPathsStdin).toEqual(["src/a.ts\nsrc/b.ts\n"]);
+
+    hashPathsStdin = [];
+    const warm = await computeReviewModel(git, "main", { hashCache });
+    expect(hashPathsStdin).toEqual([]);
+    expect(warm).toEqual(cold);
+
+    // Rewriting one file changes its size, so exactly that path is re-hashed
+    await writeFile(join(repoRoot, "src/b.ts"), "content that is not the path");
+    hashPathsStdin = [];
+    const touched = await computeReviewModel(git, "main", { hashCache });
+    expect(hashPathsStdin).toEqual(["src/b.ts\n"]);
+    expect(touched).toEqual(cold);
+  });
+
+  it("keeps a file that left the working tree out of the hash batch and the cache", async () => {
+    const git = await setUp({
+      changes: [
+        ["M", "src/a.ts"],
+        ["M", "src/gone.ts"],
+      ],
+      baseBlobs: { "src/a.ts": PATH_SHA, "src/gone.ts": PATH_SHA },
+      workingShas: { "src/a.ts": WORKING_SHA, "src/gone.ts": WORKING_SHA },
+    });
+    const hashCache = new Map<string, HashCacheEntry>();
+    await computeReviewModel(git, "main", { hashCache });
+    expect(hashCache.has("src/gone.ts")).toBe(true);
+
+    await rm(join(repoRoot, "src/gone.ts"));
+    hashPathsStdin = [];
+    const model = await computeReviewModel(git, "main", { hashCache });
+    // A missing path in a `hash-object --stdin-paths` batch fails the whole
+    // batch, so it must never be sent — it reads as deleted instead
+    expect(hashPathsStdin).toEqual([]);
+    expect(model.files.map((file) => [file.path, file.deleted])).toEqual([
+      ["src/a.ts", false],
+      ["src/gone.ts", true],
+    ]);
+  });
+
+  it("computes the same model with and without a hash cache", async () => {
+    const repo: Partial<FakeRepo> = {
+      changes: [
+        ["R100", "src/old.ts", "src/moved.ts"],
+        ["M", "src/edited.ts"],
+        ["D", "src/removed.ts"],
+      ],
+      untracked: ["src/added.ts"],
+      baseBlobs: {
+        "src/old.ts": ORIGIN_SHA,
+        "src/edited.ts": PATH_SHA,
+        "src/removed.ts": PATH_SHA,
+      },
+      reviewState: { "src/edited.ts": REVIEWED_SHA },
+      workingShas: {
+        "src/moved.ts": ORIGIN_SHA,
+        "src/edited.ts": WORKING_SHA,
+        "src/added.ts": WORKING_SHA,
+      },
+    };
+    const plain = await computeReviewModel(await setUp(repo), "main");
+    const cachedFirst = await computeReviewModel(await setUp(repo), "main", {
+      hashCache: new Map(),
+    });
+    expect(cachedFirst).toEqual(plain);
+  });
+
+  it("asks git for the deleted-file sentinel sha once per repository", async () => {
+    const repo: Partial<FakeRepo> = {
+      changes: [["D", "src/removed.ts"]],
+      baseBlobs: { "src/removed.ts": PATH_SHA },
+    };
+    const git = await setUp(repo);
+    await computeReviewModel(git, "main");
+    await computeReviewModel(git, "main");
+    expect(
+      gitCalls.filter(
+        (args) => args[0] === "hash-object" && args[1] === "--stdin",
+      ).length,
+    ).toBe(1);
   });
 
   it("degrades an unreadable or non-blob external base blob without throwing", async () => {

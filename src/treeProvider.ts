@@ -17,21 +17,22 @@ import {
 import { escapeMarkdownText } from "./markdown";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
 import { buildRowDescription, buildTooltipOriginLine } from "./moveDisplay";
+import { parentOf } from "./treeParents";
 import { Triage } from "./triage";
 
 export type ViewMode = "list" | "tree";
 
-interface GroupElement {
+export interface GroupElement {
   kind: "group";
   status: FileReviewStatus;
 }
 
-interface AutoGroupElement {
+export interface AutoGroupElement {
   kind: "autoGroup";
   status: FileReviewStatus;
 }
 
-interface ClusterElement {
+export interface ClusterElement {
   kind: "cluster";
   // "c<index>" for real clusters, or the synthetic "unclustered" | "auto".
   // Files are re-resolved from getClusterModel() at render time — elements
@@ -41,18 +42,18 @@ interface ClusterElement {
 
 // A single informational row (e.g. inside an empty cluster); not collapsible,
 // not actionable
-interface MessageElement {
+export interface MessageElement {
   kind: "message";
   text: string;
 }
 
 // The grouped view's bottom bucket collecting every reviewed file (all
 // triages, all origins)
-interface ReviewedBucketElement {
+export interface ReviewedBucketElement {
   kind: "reviewedBucket";
 }
 
-interface FolderElement {
+export interface FolderElement {
   kind: "folder";
   // Exactly one scope is set: the status group whose non-auto files this
   // folder subdivides (ungrouped), the cluster whose needs-review files it
@@ -64,7 +65,7 @@ interface FolderElement {
   path: string;
 }
 
-interface FileElement {
+export interface FileElement {
   kind: "file";
   file: ReviewFile;
   // Set on children of flat-only containers (the Auto subgroup, the grouped
@@ -239,6 +240,19 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       });
     }
     return [];
+  }
+
+  // Required by TreeView.reveal, which walks this chain to expand ancestors
+  // and match rendered rows. Not memoized: reveal is rare, the model is not.
+  getParent(element: ReviewTreeElement): ReviewTreeElement | undefined {
+    if (this.model === undefined) {
+      return undefined;
+    }
+    return parentOf(element, {
+      clusterModel: this.getClusterModel(),
+      viewMode: this.getViewMode(),
+      grouped: this.isGrouped(),
+    });
   }
 
   private clusterChildren(clusterKey: string): ReviewTreeElement[] {
