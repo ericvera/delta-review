@@ -10,8 +10,9 @@
 // - an interior single space stays a plain space — the wrap point
 // Newlines become markdown hard line breaks (two trailing spaces), not
 // paragraph breaks: one <p> per note instead of one per line keeps the
-// rendered height close to the text's, which matters because VS Code clips a
-// comment thread's zone widget with no scrollbar. A source blank line becomes
+// rendered height close to the text's, which matters because the comment
+// thread widget expands to fit its content and pushes the diff down. A source
+// blank line becomes
 // a spaces-only line, still blank in CommonMark, so real paragraph breaks
 // survive. Joining lines into one paragraph is also what puts multi-line block
 // constructs within reach of note text — a setext heading (`=` under a line), a

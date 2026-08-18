@@ -192,12 +192,6 @@
         "category": "Delta Review"
       },
       {
-        "command": "deltaReview.openFullNote",
-        "title": "Open Full Note",
-        "icon": "$(open-preview)",
-        "category": "Delta Review"
-      },
-      {
         "command": "deltaReview.clearResolvedNotes",
         "title": "Clear Resolved Notes",
         "icon": "$(clear-all)",
@@ -426,11 +420,6 @@
           "command": "deltaReview.deleteNoteThread",
           "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|resolvedNote)$/",
           "group": "inline@2"
-        },
-        {
-          "command": "deltaReview.openFullNote",
-          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|resolvedNote)$/",
-          "group": "inline@3"
         }
       ],
       "comments/commentThread/context": [
@@ -532,10 +521,6 @@
           "when": "false"
         },
         {
-          "command": "deltaReview.openFullNote",
-          "when": "false"
-        },
-        {
           "command": "deltaReview.resolveNoteRow",
           "when": "false"
         },
@@ -548,6 +533,9 @@
           "when": "false"
         }
       ]
+    },
+    "configurationDefaults": {
+      "comments.maxHeight": false
     },
     "configuration": {
       "title": "Delta Review",

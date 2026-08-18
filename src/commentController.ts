@@ -5,7 +5,6 @@ import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
 import { Git } from "./git";
 import { escapeMarkdownText } from "./markdown";
 import { ReviewModel } from "./model";
-import { truncateTurnText, turnLineBudget } from "./noteBody";
 import { Note, NoteSide, NoteStatus } from "./notes";
 import {
   clampNoteRange,
@@ -30,10 +29,6 @@ import {
 // and the thread actions (edit/delete turns, delete thread, resolve/
 // unresolve, reply-to-reopen). Model/git access is injected as callbacks so
 // the controller always sees the extension's current state.
-
-// Opens the whole thread as a scrollable document; the only command a
-// comment body is trusted to link to
-export const OPEN_FULL_NOTE_COMMAND = "deltaReview.openFullNote";
 
 const statusLabels: Record<NoteStatus, string> = {
   open: "Open",
@@ -73,8 +68,6 @@ export interface NoteCommentController extends vscode.Disposable {
   // just opened — the clamp needs a line count, which only exists once the
   // document is open. Range only: no dispose, no create, no git, no store.
   reclampThreadsFor: (document: vscode.TextDocument) => void;
-  // Reverse lookup for thread-title commands, which receive a CommentThread
-  noteIdForThread: (thread: vscode.CommentThread) => string | undefined;
   // Handler for the deltaReview.addNote comment-input command
   addNote: (reply: vscode.CommentReply) => Promise<void>;
   // Comment-level actions on reviewer turns
@@ -190,36 +183,17 @@ export const createNoteCommentController = (
     );
   };
 
-  // A command link's arguments are a URI-encoded JSON array
-  const openFullNoteLink = (noteId: string): string =>
-    `\n\n[Show full note](command:${OPEN_FULL_NOTE_COMMAND}?${encodeURIComponent(
-      JSON.stringify([noteId]),
-    )})`;
-
   const commentsFor = (thread: NoteThread): NoteComment[] => {
     let reviewerTurnIndex = 0;
-    // Derived from the turn count, so a many-turn thread stays bounded too
-    const lineBudget = turnLineBudget(thread.turns.length);
     return thread.turns.map((turn, index) => {
       const body = new vscode.MarkdownString();
-      // Scoped, never blanket: the body also carries reviewer- and
-      // agent-authored text
-      body.isTrusted = { enabledCommands: [OPEN_FULL_NOTE_COMMAND] };
-      // The budget applies to the author's text, not to escape artifacts, so
-      // it is the raw turn text that is cut
-      const { text, truncated } = truncateTurnText(turn.text, lineBudget);
-      body.appendMarkdown(escapeMarkdownText(text));
+      body.appendMarkdown(escapeMarkdownText(turn.text));
       if (index === 0 && thread.note.outdated) {
         // Mock 4: a dimmed one-liner with the first anchored line's original
         // text (italic is the closest to dimmed a MarkdownString gets)
         body.appendMarkdown(
           `\n\n*line was: ${inlineCode(thread.note.snapshot[0] ?? "")}*`,
         );
-      }
-      if (truncated) {
-        // A link on a later turn can itself be clipped; the unconditional
-        // title-bar button is the escape hatch that never can
-        body.appendMarkdown(openFullNoteLink(thread.note.id));
       }
       const comment: NoteComment = {
         body,
@@ -742,7 +716,6 @@ export const createNoteCommentController = (
     renderThreads,
     expandThread,
     reclampThreadsFor,
-    noteIdForThread: (thread) => threadNoteIds.get(thread),
     addNote,
     editNoteTurn,
     saveNoteTurn,

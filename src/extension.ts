@@ -8,10 +8,7 @@ import {
   loadClustersContract,
   resolveClusterModel,
 } from "./clusters";
-import {
-  createNoteCommentController,
-  OPEN_FULL_NOTE_COMMAND,
-} from "./commentController";
+import { createNoteCommentController } from "./commentController";
 import {
   createReviewBaseContentProvider,
   createReviewBaseUri,
@@ -29,11 +26,6 @@ import {
   ReviewModel,
 } from "./model";
 import type { ResponsesFile } from "./notes";
-import {
-  createNoteContentProvider,
-  createNoteDocumentUri,
-  NOTE_DOCUMENT_SCHEME,
-} from "./noteContentProvider";
 import {
   noteAnchorLines,
   noteTargetFor,
@@ -238,11 +230,6 @@ export const activate = async (
   );
   statusBarItem.command = "deltaReview.focus";
 
-  // Full-note documents: the scrollable escape hatch from the diff's clipped
-  // comment widget. The getter closure runs long after currentNoteThreads is
-  // initialized below, so it always sees the live thread set.
-  const noteDocuments = createNoteContentProvider(() => currentNoteThreads);
-
   context.subscriptions.push(
     treeView,
     notesTreeView,
@@ -251,11 +238,6 @@ export const activate = async (
       REVIEW_BASE_SCHEME,
       createReviewBaseContentProvider(() => git),
     ),
-    vscode.workspace.registerTextDocumentContentProvider(
-      NOTE_DOCUMENT_SCHEME,
-      noteDocuments.provider,
-    ),
-    noteDocuments.onDidChangeEmitter,
     vscode.window.registerFileDecorationProvider(
       createReviewDecorationProvider(),
     ),
@@ -294,12 +276,6 @@ export const activate = async (
             tooltip: `${toHandle} review note${toHandle === 1 ? "" : "s"} to handle`,
           }
         : undefined;
-    // Refresh any open full-note tab so an agent reply lands there too
-    for (const document of vscode.workspace.textDocuments) {
-      if (document.uri.scheme === NOTE_DOCUMENT_SCHEME) {
-        noteDocuments.onDidChangeEmitter.fire(document.uri);
-      }
-    }
   };
 
   // Refreshes run concurrently (watcher bursts, repo switches); the generation
@@ -799,30 +775,6 @@ export const activate = async (
     vscode.commands.registerCommand(
       "deltaReview.replyReopen",
       (reply: vscode.CommentReply) => commentController.replyReopen(reply),
-    ),
-
-    // Invoked from the thread title bar (a CommentThread) and from a
-    // truncated turn's command link (a note id); anything unresolvable is a
-    // no-op
-    vscode.commands.registerCommand(
-      OPEN_FULL_NOTE_COMMAND,
-      async (target?: vscode.CommentThread | string) => {
-        const noteId =
-          typeof target === "string"
-            ? target
-            : target === undefined
-              ? undefined
-              : commentController.noteIdForThread(target);
-        const thread = currentNoteThreads.find(
-          (candidate) => candidate.note.id === noteId,
-        );
-        if (noteId === undefined || thread === undefined) {
-          return;
-        }
-        await vscode.window.showTextDocument(
-          createNoteDocumentUri(noteId, thread.note.file),
-        );
-      },
     ),
 
     vscode.commands.registerCommand(
