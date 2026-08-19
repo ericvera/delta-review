@@ -88,7 +88,7 @@ REVIEW NOTES view:
 
 - A sibling section in the Source Control sidebar lists every note, grouped by file with status icons.
 - Click a note to open its diff with the cursor on the noted line and the thread expanded.
-- The **Clear Resolved** title button deletes resolved notes; the badge counts notes still needing your attention.
+- The **Clear Resolved** title button clears resolved notes (they are archived to `.git/delta-review/archive-<branch>.json` for tooling); the badge counts notes still needing your attention.
 - Notes are per-branch, live inside `.git`, and are never pushed — like all Delta Review state.
 
 ## Settings

@@ -1,8 +1,11 @@
 import {
+  chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -10,9 +13,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createGit, Git } from "./git";
-import { Note, NotesFile, ResponseEntry, ResponsesFile } from "./notes";
+import {
+  ArchiveShell,
+  Note,
+  NotesFile,
+  parseArchiveFile,
+  ResponseEntry,
+  ResponsesFile,
+} from "./notes";
 import {
   anchorBlobs,
+  archiveNotes,
+  archiveWarning,
   buildAnchorResolver,
   appendReviewerTurn,
   createNote,
@@ -70,6 +82,31 @@ const draft = (overrides: Partial<NoteDraft> = {}): NoteDraft => ({
 
 const notesPath = (branch = "main"): string =>
   join(repoRoot, ".git", "delta-review", `notes-${branch}.json`);
+
+const contractDir = (): string => join(repoRoot, ".git", "delta-review");
+
+const archivePath = (branch = "main"): string =>
+  join(contractDir(), `archive-${branch}.json`);
+
+const readArchive = async (): Promise<ArchiveShell> => {
+  const parsed = parseArchiveFile(await readFile(archivePath(), "utf8"));
+  if (!parsed.ok) {
+    throw new Error(`expected a valid archive, got: ${parsed.error}`);
+  }
+  return parsed.file;
+};
+
+const archivedIds = async (): Promise<unknown[]> =>
+  (await readArchive()).notes.map((entry) => (entry as { id: unknown }).id);
+
+const archiveExists = async (): Promise<boolean> => {
+  try {
+    await readFile(archivePath(), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const writeResponseEntries = async (
   entries: Array<Partial<ResponseEntry> & { noteId: string }>,
@@ -392,15 +429,15 @@ describe("mutation helpers", () => {
       draft({ text: "remove b", content: fileContent + "eta\n" }),
     );
 
-    const deleted = await deleteNotes(git, "main", [
+    const result = await deleteNotes(git, "main", [
       removeA.id,
       removeB.id,
       "unknown-id",
     ]);
 
-    expect(deleted).toBe(2);
-    const result = await loadNotes(git, "main");
-    expect(result.state === "ok" && result.file.notes.map((n) => n.id)).toEqual(
+    expect(result.deleted).toBe(2);
+    const loaded = await loadNotes(git, "main");
+    expect(loaded.state === "ok" && loaded.file.notes.map((n) => n.id)).toEqual(
       [keep.id],
     );
     const tree = await git.run([
@@ -421,9 +458,10 @@ describe("mutation helpers", () => {
     ).trim();
 
     const spy = spyingGit();
-    const deleted = await deleteNotes(spy.git, "main", ["unknown-id"]);
+    const result = await deleteNotes(spy.git, "main", ["unknown-id"]);
 
-    expect(deleted).toBe(0);
+    expect(result).toEqual({ deleted: 0 });
+    expect(await archiveExists()).toBe(false);
     expect(spy.commands).not.toContain("update-ref");
     expect(spy.commands).not.toContain("commit-tree");
     expect(await readFile(notesPath(), "utf8")).toBe(fileBefore);
@@ -435,11 +473,11 @@ describe("mutation helpers", () => {
   it("deleteNotes deleting every note deletes the anchor ref", async () => {
     const a = await createNote(git, "main", draft({ text: "a" }));
     const b = await createNote(git, "main", draft({ text: "b" }));
-    const deleted = await deleteNotes(git, "main", [a.id, b.id]);
+    const result = await deleteNotes(git, "main", [a.id, b.id]);
 
-    expect(deleted).toBe(2);
-    const result = await loadNotes(git, "main");
-    expect(result.state === "ok" && result.file.notes).toEqual([]);
+    expect(result.deleted).toBe(2);
+    const loaded = await loadNotes(git, "main");
+    expect(loaded.state === "ok" && loaded.file.notes).toEqual([]);
     await expect(
       git.run(["rev-parse", "--verify", reviewNotesRefForBranch("main")]),
     ).rejects.toThrow();
@@ -452,6 +490,7 @@ describe("mutation helpers", () => {
       /will not be overwritten/,
     );
     expect(await readFile(notesPath(), "utf8")).toBe("{ not json");
+    expect(await archiveExists()).toBe(false);
   });
 
   it("anchorBlobs tolerates deleting an absent ref", async () => {
@@ -537,6 +576,285 @@ describe("setResolved", () => {
     await setResolved(git, "main", note.id, true);
     const updated = await setResolved(git, "main", note.id, false);
     expect(updated.status).toBe("open");
+  });
+});
+
+describe("archiving on deleteNotes", () => {
+  // Root ignores directory mode bits, so the chmod-based write failures
+  // cannot be provoked there
+  const skipAsRoot = process.getuid?.() === 0;
+  const rawNotes = async (): Promise<Array<Record<string, unknown>>> =>
+    (JSON.parse(await readFile(notesPath(), "utf8")) as NotesFile)
+      .notes as unknown as Array<Record<string, unknown>>;
+
+  it("appends every removed note exactly as it stood, with one deletedAt", async () => {
+    const keep = await createNote(git, "main", draft({ text: "keep" }));
+    const removeA = await createNote(
+      git,
+      "main",
+      draft({ text: "remove a", content: fileContent + "zeta\n" }),
+    );
+    const removeB = await createNote(
+      git,
+      "main",
+      draft({ text: "remove b", content: fileContent + "eta\n" }),
+    );
+    const onDisk = await rawNotes();
+    const removedOnDisk = onDisk.filter(
+      (note) => note.id === removeA.id || note.id === removeB.id,
+    );
+
+    const result = await deleteNotes(git, "main", [
+      removeA.id,
+      removeB.id,
+      "unknown-id",
+    ]);
+
+    expect(result.deleted).toBe(2);
+    expect(result.archive).toEqual({ state: "archived" });
+    const archive = await readArchive();
+    expect(archive.version).toBe(1);
+    const entries = archive.notes as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(2);
+    const deletedAt = entries[0].deletedAt as string;
+    expect(Number.isNaN(Date.parse(deletedAt))).toBe(false);
+    // Original file order, every field intact, one shared timestamp
+    expect(entries).toEqual(
+      removedOnDisk.map((note) => ({ ...note, deletedAt })),
+    );
+    expect(entries.map((entry) => entry.id)).toEqual([removeA.id, removeB.id]);
+
+    const loaded = await loadNotes(git, "main");
+    expect(loaded.state === "ok" && loaded.file.notes.map((n) => n.id)).toEqual(
+      [keep.id],
+    );
+    const tree = await git.run([
+      "ls-tree",
+      "-r",
+      reviewNotesRefForBranch("main"),
+    ]);
+    expect(tree).toContain(keep.id);
+    expect(tree).not.toContain(removeA.id);
+    expect(tree).not.toContain(removeB.id);
+  });
+
+  it("appends after existing entries and keeps foreign top-level keys", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeFile(
+      archivePath(),
+      JSON.stringify({ version: 1, notes: [{ id: "old" }], extra: true }),
+    );
+
+    const result = await deleteNotes(git, "main", [note.id]);
+
+    expect(result.archive).toEqual({ state: "archived" });
+    expect(await archivedIds()).toEqual(["old", note.id]);
+    expect((await readArchive()).extra).toBe(true);
+  });
+
+  it("serializes the archive like the notes file and leaves no temp file", async () => {
+    const note = await createNote(git, "main", draft());
+    await deleteNotes(git, "main", [note.id]);
+
+    const text = await readFile(archivePath(), "utf8");
+    // 2-space indent and a trailing newline, exactly like the notes file
+    expect(text.startsWith('{\n  "version": 1,\n  "notes": [\n    {\n')).toBe(
+      true,
+    );
+    expect(text.endsWith("}\n")).toBe(true);
+    expect(
+      (await readdir(contractDir())).filter((e) => e.endsWith(".tmp")),
+    ).toEqual([]);
+  });
+
+  it("moves a corrupt archive aside and starts a fresh one", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeFile(archivePath(), "{ nope");
+
+    const result = await deleteNotes(git, "main", [note.id]);
+
+    expect(result.deleted).toBe(1);
+    expect(result.archive?.state).toBe("moved-aside");
+    const asidePath =
+      result.archive?.state === "moved-aside" ? result.archive.asidePath : "";
+    expect(asidePath).toMatch(
+      /archive-main\.json\.corrupt-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z$/,
+    );
+    expect(await readFile(asidePath, "utf8")).toBe("{ nope");
+    expect(await archivedIds()).toEqual([note.id]);
+    const loaded = await loadNotes(git, "main");
+    expect(loaded.state === "ok" && loaded.file.notes).toEqual([]);
+  });
+
+  it("treats an unsupported archive version as corrupt", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeFile(archivePath(), JSON.stringify({ version: 2, notes: [] }));
+
+    const result = await deleteNotes(git, "main", [note.id]);
+
+    expect(result.archive?.state).toBe("moved-aside");
+    expect(await archivedIds()).toEqual([note.id]);
+  });
+
+  it("leaves an unreadable archive alone and still clears the notes", async () => {
+    const note = await createNote(git, "main", draft());
+    // A directory at the archive path makes readFile fail with EISDIR
+    await mkdir(archivePath());
+
+    const result = await deleteNotes(git, "main", [note.id]);
+
+    expect(result.deleted).toBe(1);
+    expect(result.archive?.state).toBe("failed");
+    if (result.archive?.state === "failed") {
+      expect(result.archive.error).not.toBe("");
+      expect(result.archive.asidePath).toBeUndefined();
+    }
+    const entries = await readdir(contractDir());
+    expect(entries.filter((e) => e.includes(".corrupt-"))).toEqual([]);
+    expect((await stat(archivePath())).isDirectory()).toBe(true);
+    const loaded = await loadNotes(git, "main");
+    expect(loaded.state === "ok" && loaded.file.notes).toEqual([]);
+    await expect(
+      git.run(["rev-parse", "--verify", reviewNotesRefForBranch("main")]),
+    ).rejects.toThrow();
+  });
+
+  it.skipIf(skipAsRoot)(
+    "reports a write failure without touching the archive",
+    async () => {
+      const note = await createNote(git, "main", draft());
+      const before = JSON.stringify({ version: 1, notes: [] }, null, 2) + "\n";
+      await writeFile(archivePath(), before);
+
+      await chmod(contractDir(), 0o555);
+      let outcome;
+      try {
+        outcome = await archiveNotes(
+          git,
+          "main",
+          [note],
+          "2026-08-19T15:30:00.123Z",
+        );
+      } finally {
+        await chmod(contractDir(), 0o755);
+      }
+
+      expect(outcome.state).toBe("failed");
+      if (outcome.state === "failed") {
+        expect(outcome.error).not.toBe("");
+        expect(outcome.asidePath).toBeUndefined();
+      }
+      expect(await readFile(archivePath(), "utf8")).toBe(before);
+      expect(
+        (await readdir(contractDir())).filter((e) => e.endsWith(".tmp")),
+      ).toEqual([]);
+    },
+  );
+
+  it.skipIf(skipAsRoot)(
+    "reports a failed move-aside with no aside path and the corrupt file intact",
+    async () => {
+      const note = await createNote(git, "main", draft());
+      await writeFile(archivePath(), "{ nope");
+
+      await chmod(contractDir(), 0o555);
+      let outcome;
+      try {
+        outcome = await archiveNotes(
+          git,
+          "main",
+          [note],
+          "2026-08-19T15:30:00.123Z",
+        );
+      } finally {
+        await chmod(contractDir(), 0o755);
+      }
+
+      expect(outcome.state).toBe("failed");
+      if (outcome.state === "failed") {
+        expect(outcome.asidePath).toBeUndefined();
+      }
+      expect(await readFile(archivePath(), "utf8")).toBe("{ nope");
+      expect(
+        (await readdir(contractDir())).filter((e) => e.includes(".corrupt-")),
+      ).toEqual([]);
+    },
+  );
+
+  it("deleteNote never archives", async () => {
+    const note = await createNote(git, "main", draft());
+    await deleteNote(git, "main", note.id);
+    expect(await archiveExists()).toBe(false);
+  });
+
+  it("deleteReviewerTurn never archives, only turn included", async () => {
+    const solo = await createNote(git, "main", draft());
+    expect(await deleteReviewerTurn(git, "main", solo.id, 0)).toBeUndefined();
+    expect(await archiveExists()).toBe(false);
+
+    const multi = await createNote(git, "main", draft({ text: "first" }));
+    await appendReviewerTurn(git, "main", multi.id, "second");
+    await deleteReviewerTurn(git, "main", multi.id, 1);
+    expect(await archiveExists()).toBe(false);
+  });
+
+  it("setResolved never archives", async () => {
+    const note = await createNote(git, "main", draft());
+    await setResolved(git, "main", note.id, true);
+    await setResolved(git, "main", note.id, false);
+    expect(await archiveExists()).toBe(false);
+  });
+});
+
+describe("archiveWarning", () => {
+  // Pure formatting: no repo, no fs — the temp repo from beforeEach is unused
+  const asidePath = "/repo/.git/delta-review/archive-main.json.corrupt-stamp";
+  const asideName = "archive-main.json.corrupt-stamp";
+
+  it("says nothing when there is nothing to report", () => {
+    expect(archiveWarning(undefined, 0)).toBeUndefined();
+    expect(archiveWarning({ state: "archived" }, 3)).toBeUndefined();
+  });
+
+  it("names only the aside file's basename when the archive was moved aside", () => {
+    const message = archiveWarning({ state: "moved-aside", asidePath }, 2);
+    expect(message).toBe(
+      `Delta Review: the review-note archive for this branch could not be parsed and was moved aside to ${asideName}; a fresh archive was started with the cleared notes.`,
+    );
+    // The reviewer gets a file name, not a path into the git dir
+    expect(message).not.toContain("/repo/.git");
+  });
+
+  it("carries the count and the error when the archive write failed", () => {
+    expect(
+      archiveWarning({ state: "failed", error: "EACCES: denied" }, 1),
+    ).toBe(
+      "Delta Review: cleared 1 resolved note, but could not archive them (EACCES: denied).",
+    );
+    expect(
+      archiveWarning({ state: "failed", error: "EACCES: denied" }, 4),
+    ).toBe(
+      "Delta Review: cleared 4 resolved notes, but could not archive them (EACCES: denied).",
+    );
+  });
+
+  it("names the aside file when a move-aside preceded the failure", () => {
+    expect(
+      archiveWarning({ state: "failed", error: "ENOSPC", asidePath }, 2),
+    ).toBe(
+      `Delta Review: cleared 2 resolved notes, but could not archive them (ENOSPC); the previous archive was moved aside to ${asideName}.`,
+    );
+  });
+
+  it("prefixes every message with the extension name", () => {
+    const messages = [
+      archiveWarning({ state: "moved-aside", asidePath }, 1),
+      archiveWarning({ state: "failed", error: "boom" }, 1),
+      archiveWarning({ state: "failed", error: "boom", asidePath }, 2),
+    ];
+    for (const message of messages) {
+      expect(message?.startsWith("Delta Review: ")).toBe(true);
+    }
   });
 });
 

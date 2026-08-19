@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   Note,
   ResponseEntry,
+  archiveFileName,
   notesFileName,
+  parseArchiveFile,
   parseNotesFile,
   parseResponsesFile,
   responsesFileName,
@@ -42,22 +44,35 @@ const responsesText = (responses: unknown[]): string =>
 const responseWith = (overrides: Record<string, unknown>): string =>
   responsesText([{ ...validResponse, ...overrides }]);
 
-describe("notesFileName / responsesFileName", () => {
+describe("notesFileName / responsesFileName / archiveFileName", () => {
   it("sanitizes the branch the same way clusters filenames do", () => {
     expect(notesFileName("feat/x")).toBe("notes-feat-x.json");
     expect(responsesFileName("feat/x")).toBe("responses-feat-x.json");
+    expect(archiveFileName("feature/x")).toBe("archive-feature-x.json");
   });
 
   it("keeps safe characters as-is", () => {
     expect(notesFileName("release-1.2_rc")).toBe("notes-release-1.2_rc.json");
+    expect(archiveFileName("release-1.2_rc")).toBe(
+      "archive-release-1.2_rc.json",
+    );
   });
 
   it("never collides with the clusters- prefix", () => {
     // A branch literally named "clusters-x" still gets a distinct prefix
     expect(notesFileName("clusters-x")).toBe("notes-clusters-x.json");
     expect(responsesFileName("clusters-x")).toBe("responses-clusters-x.json");
+    expect(archiveFileName("clusters-x")).toBe("archive-clusters-x.json");
     expect(notesFileName("main").startsWith("clusters-")).toBe(false);
     expect(responsesFileName("main").startsWith("clusters-")).toBe(false);
+    expect(archiveFileName("main").startsWith("clusters-")).toBe(false);
+  });
+
+  it("never collides with the notes- or responses- prefixes", () => {
+    expect(archiveFileName("notes-x")).toBe("archive-notes-x.json");
+    expect(archiveFileName("responses-x")).toBe("archive-responses-x.json");
+    expect(archiveFileName("main").startsWith("notes-")).toBe(false);
+    expect(archiveFileName("main").startsWith("responses-")).toBe(false);
   });
 });
 
@@ -522,5 +537,78 @@ describe("parseResponsesFile", () => {
       ok: false,
       error: "response 3 must be an object",
     });
+  });
+});
+
+describe("parseArchiveFile", () => {
+  const archiveText = (notes: unknown[]): string =>
+    JSON.stringify({ version: 1, notes });
+
+  it("accepts an empty archive", () => {
+    expect(parseArchiveFile(archiveText([]))).toEqual({
+      ok: true,
+      file: { version: 1, notes: [] },
+    });
+  });
+
+  it("carries over extra top-level keys", () => {
+    expect(
+      parseArchiveFile(JSON.stringify({ version: 1, notes: [1], extra: true })),
+    ).toEqual({ ok: true, file: { version: 1, notes: [1], extra: true } });
+  });
+
+  it("keeps entries opaque — nothing is validated as a note", () => {
+    // Entries are history: an archive written by a future version, or an
+    // entry that never matched the note schema, must still round-trip
+    const entries = [
+      { id: "gone", deletedAt: "2026-07-18T10:00:00Z", future: { a: [1] } },
+      "not even an object",
+      null,
+    ];
+    const result = parseArchiveFile(archiveText(entries));
+    expect(result.ok && result.file.notes).toEqual(entries);
+  });
+
+  it("rejects invalid JSON", () => {
+    const result = parseArchiveFile("{ nope");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("not valid JSON");
+    }
+  });
+
+  it.each([
+    ["null", "null"],
+    ["array", "[]"],
+    ["string", '"hi"'],
+  ])("rejects a non-object top level (%s)", (_name, text) => {
+    expect(parseArchiveFile(text)).toEqual({
+      ok: false,
+      error: "top level must be an object",
+    });
+  });
+
+  it("rejects a missing version", () => {
+    expect(parseArchiveFile(JSON.stringify({ notes: [] }))).toEqual({
+      ok: false,
+      error: 'missing "version" (extension supports 1)',
+    });
+  });
+
+  it.each([
+    [0, "unsupported version 0 (extension supports 1)"],
+    [2, "unsupported version 2 (extension supports 1)"],
+    ["1", 'unsupported version "1" (extension supports 1)'],
+  ])("rejects version %j", (version, error) => {
+    expect(parseArchiveFile(JSON.stringify({ version, notes: [] }))).toEqual({
+      ok: false,
+      error,
+    });
+  });
+
+  it("rejects non-array notes", () => {
+    expect(parseArchiveFile(JSON.stringify({ version: 1, notes: {} }))).toEqual(
+      { ok: false, error: '"notes" must be an array' },
+    );
   });
 });

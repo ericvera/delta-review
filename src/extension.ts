@@ -38,6 +38,7 @@ import {
   NotesTreeProvider,
 } from "./notesTreeProvider";
 import {
+  archiveWarning,
   buildAnchorResolver,
   deleteNote,
   deleteNotes,
@@ -953,8 +954,10 @@ export const activate = async (
     ),
 
     // Clear Resolved: batch-deletes every resolved note on the current
-    // branch. No confirmation modal — resolved notes were already confirmed
-    // twice (agent addressed, reviewer resolved).
+    // branch, archiving what it removes. No confirmation modal — resolved
+    // notes were already confirmed twice (agent addressed, reviewer
+    // resolved). Archive trouble only warns: the notes are gone either way,
+    // so failing the command would misreport what happened.
     vscode.commands.registerCommand(
       "deltaReview.clearResolvedNotes",
       async () => {
@@ -967,8 +970,10 @@ export const activate = async (
         if (resolvedIds.length === 0) {
           return;
         }
+        // Declared out here so the outcome survives the try block
+        let result: Awaited<ReturnType<typeof deleteNotes>>;
         try {
-          await deleteNotes(git, model.branch, resolvedIds);
+          result = await deleteNotes(git, model.branch, resolvedIds);
         } catch (error) {
           // E.g. an invalid on-disk notes file — the store refuses to
           // overwrite it; nothing changed, so nothing to refresh
@@ -976,6 +981,12 @@ export const activate = async (
             `Delta Review: failed to clear resolved notes (${error instanceof Error ? error.message : String(error)})`,
           );
           return;
+        }
+        const warning = archiveWarning(result.archive, result.deleted);
+        if (warning !== undefined) {
+          // Never awaited — that would hold the refresh until the toast is
+          // dismissed
+          void vscode.window.showWarningMessage(warning);
         }
         await refresh();
       },

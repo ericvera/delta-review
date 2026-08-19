@@ -1,17 +1,20 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import type { Git } from "./git";
 import { mapRangeThroughHunks, parseUnifiedDiffHunks } from "./noteAnchor";
 import { mergeThreads } from "./noteThreads";
 import {
+  archiveFileName,
   notesFileName,
+  parseArchiveFile,
   parseNotesFile,
   parseResponsesFile,
   responsesFileName,
 } from "./notes";
 import type {
+  ArchiveShell,
   LoadNotesResult,
   LoadResponsesResult,
   Note,
@@ -171,9 +174,31 @@ export const buildAnchorResolver = async (
 // the delta-review dir cannot enter a refresh→write→refresh loop.
 const lastWritten = new Map<string, string>();
 
-// Serializes and atomically writes the notes file (temp file in the same
-// directory, renamed over — same-dir keeps the rename atomic). Returns true
-// when a write happened, false when the guard skipped an identical save.
+// Writes one delta-review file whole: a uniquely named temp file in the
+// same directory, renamed over the target — same-dir so the rename is
+// atomic, and hidden plus random so concurrent writers never share it. A
+// reader therefore only ever sees a complete file.
+const writeAtomically = async (
+  dir: string,
+  fileName: string,
+  text: string,
+): Promise<void> => {
+  await mkdir(dir, { recursive: true });
+  const tempPath = join(
+    dir,
+    `.${fileName}.${randomBytes(6).toString("hex")}.tmp`,
+  );
+  try {
+    await writeFile(tempPath, text);
+    await rename(tempPath, join(dir, fileName));
+  } finally {
+    // Gone already after a successful rename; removes the orphan otherwise
+    await unlink(tempPath).catch(() => undefined);
+  }
+};
+
+// Serializes and atomically writes the notes file. Returns true when a
+// write happened, false when the guard skipped an identical save.
 export const saveNotes = async (
   git: Git,
   branch: string,
@@ -193,20 +218,97 @@ export const saveNotes = async (
   } catch {
     // Missing or unreadable — proceed to write
   }
-  await mkdir(dir, { recursive: true });
-  const tempPath = join(
-    dir,
-    `.${notesFileName(branch)}.${randomBytes(6).toString("hex")}.tmp`,
-  );
-  try {
-    await writeFile(tempPath, text);
-    await rename(tempPath, path);
-  } finally {
-    // Gone already after a successful rename; removes the orphan otherwise
-    await unlink(tempPath).catch(() => undefined);
-  }
+  await writeAtomically(dir, notesFileName(branch), text);
   lastWritten.set(path, text);
   return true;
+};
+
+export type ArchiveOutcome =
+  | { state: "archived" }
+  | { state: "moved-aside"; asidePath: string }
+  | { state: "failed"; error: string; asidePath?: string };
+
+// The reviewer-facing text for an archive outcome, undefined when there is
+// nothing to say (no archive attempted, or it went through). It lives next to
+// the outcome rather than in the command so it is unit-testable — the
+// extension only decides where to show it. An aside file is named whenever one
+// was made, since that file is the only copy of what the archive held.
+export const archiveWarning = (
+  outcome: ArchiveOutcome | undefined,
+  deleted: number,
+): string | undefined => {
+  if (outcome === undefined || outcome.state === "archived") {
+    return undefined;
+  }
+  if (outcome.state === "moved-aside") {
+    return `Delta Review: the review-note archive for this branch could not be parsed and was moved aside to ${basename(outcome.asidePath)}; a fresh archive was started with the cleared notes.`;
+  }
+  const aside =
+    outcome.asidePath === undefined
+      ? ""
+      : `; the previous archive was moved aside to ${basename(outcome.asidePath)}`;
+  return `Delta Review: cleared ${deleted} resolved note${deleted === 1 ? "" : "s"}, but could not archive them (${outcome.error})${aside}.`;
+};
+
+// Appends the notes a batch delete removed to the branch's archive — the
+// append-only history Clear Resolved leaves behind for external tools. The
+// read here is only the read half of that append; nothing in the extension
+// consults the archive for behavior of its own.
+//
+// A present-but-unparsable archive is renamed aside rather than repaired or
+// overwritten, so nothing already recorded is lost; an archive that cannot
+// be read for any other reason is left strictly alone, since splitting a
+// possibly valid file across two would be worse than not archiving. Every
+// failure comes back as a value — this never throws — because the caller's
+// notes file is already rewritten by the time it runs and a throw would
+// skip the re-anchoring that follows.
+export const archiveNotes = async (
+  git: Git,
+  branch: string,
+  notes: readonly Note[],
+  deletedAt: string,
+): Promise<ArchiveOutcome> => {
+  let asidePath: string | undefined;
+  try {
+    const dir = await deltaReviewDir(git);
+    const fileName = archiveFileName(branch);
+    const path = join(dir, fileName);
+    let text: string | undefined;
+    try {
+      text = await readFile(path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    let shell: ArchiveShell = { version: 1, notes: [] };
+    if (text !== undefined) {
+      const parsed = parseArchiveFile(text);
+      if (parsed.ok) {
+        shell = parsed.file;
+      } else {
+        // ':' is not portable in file names, and the aside must not end in
+        // .json — the extension watches the dir for that glob
+        const candidate = `${path}.corrupt-${deletedAt.replace(/:/g, "-")}`;
+        await rename(path, candidate);
+        asidePath = candidate;
+      }
+    }
+    // Spread, never mutate: these are the loaded notes file's own objects
+    shell.notes = [
+      ...shell.notes,
+      ...notes.map((note) => ({ ...note, deletedAt })),
+    ];
+    await writeAtomically(dir, fileName, JSON.stringify(shell, null, 2) + "\n");
+    return asidePath === undefined
+      ? { state: "archived" }
+      : { state: "moved-aside", asidePath };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return asidePath === undefined
+      ? { state: "failed", error: message }
+      : { state: "failed", error: message, asidePath };
+  }
 };
 
 // Hashes content into the object database. Always -w: every sha that may be
@@ -468,24 +570,34 @@ export const deleteNote = async (
 // Batch delete (Clear Resolved): one load→save→anchor pass no matter how
 // many notes go, instead of rewriting the file once per note. Unknown ids
 // are ignored. With nothing matched it returns early — neither the notes
-// file nor the anchor ref is touched, so an idempotent re-run cannot
-// trigger the watcher. Returns the number of notes deleted.
+// file, the archive, nor the anchor ref is touched, so an idempotent re-run
+// cannot trigger the watcher. Everything it removes is archived, after the
+// rewrite (a failed rewrite must not leave history for still-live notes)
+// and before but independently of anchoring (an anchor failure must not
+// cost the history). The outcome rides back with the count so the caller
+// can report an archive that did not take; the deletion stands either way.
 export const deleteNotes = async (
   git: Git,
   branch: string,
   noteIds: readonly string[],
-): Promise<number> => {
+): Promise<{ deleted: number; archive?: ArchiveOutcome }> => {
   const file = await loadNotesForMutation(git, branch);
   const ids = new Set(noteIds);
+  const removed = file.notes.filter((note) => ids.has(note.id));
   const remaining = file.notes.filter((note) => !ids.has(note.id));
-  const deleted = file.notes.length - remaining.length;
-  if (deleted === 0) {
-    return 0;
+  if (removed.length === 0) {
+    return { deleted: 0 };
   }
   file.notes = remaining;
   await saveNotes(git, branch, file);
+  const archive = await archiveNotes(
+    git,
+    branch,
+    removed,
+    new Date().toISOString(),
+  );
   await anchorBlobs(git, branch, file.notes);
-  return deleted;
+  return { deleted: removed.length, archive };
 };
 
 // Resolve sets the sticky "resolved" status; unresolve recomputes the

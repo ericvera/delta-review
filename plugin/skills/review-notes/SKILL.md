@@ -14,7 +14,7 @@ description: >-
 
 # Review Notes
 
-Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. Loop: the reviewer notes diff lines → you handle one note and append its response → the extension shows your reply, flips the note to **Addressed**, and relocates it via your anchor.
+Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. A third file, the **archive**, is history the extension writes when the reviewer clears resolved notes and nobody in this loop reads. Loop: the reviewer notes diff lines → you handle one note and append its response → the extension shows your reply, flips the note to **Addressed**, and relocates it via your anchor.
 
 ## Contract
 
@@ -33,8 +33,9 @@ Sanitize the branch for filenames with regex `[^A-Za-z0-9._-]` → `-` (`feature
 
 - Notes: `<COMMON_DIR>/delta-review/notes-<sanitized-branch>.json`
 - Responses: `<COMMON_DIR>/delta-review/responses-<sanitized-branch>.json`
+- Archive: `<COMMON_DIR>/delta-review/archive-<sanitized-branch>.json` — read-only history (see Archive file)
 
-Files are keyed by branch only — no base branch or VS Code settings needed. Never commit, push, or stage either file; they live under the git directory, invisible to `git status`, and must stay that way.
+Files are keyed by branch only — no base branch or VS Code settings needed. Never commit, push, or stage any of them; they live under the git directory, invisible to `git status`, and must stay that way.
 
 ### Notes file (read-only)
 
@@ -108,6 +109,12 @@ Silent failures — not rejected, so you must get these right:
 
 Entry conventions: `response` is concise — what you changed and where, written for a human reading a comment thread. Include `anchor` whenever the addressed code has a clear location (working-tree coordinates); omit it only when there is none (code deleted, change spans many places).
 
+### Archive file (read-only history)
+
+- Written by the extension when the reviewer runs Clear Resolved: every note it removes, appended as the note object exactly as it stood in the notes file plus `deletedAt`, the removal time (ISO-8601 UTC); shape `{ "version": 1, "notes": [ … ] }`; append-only. Explicit deletes (thread trash icon, row Delete, deleting a note's only turn) are not archived.
+- Never write, repair, or reorder it; never count it toward the work set — archived notes are closed. Missing means nothing has been cleared yet; unparsable → ignore it (the extension moves it aside on its next append).
+- Agent replies for an archived note stay in the responses file keyed by `noteId` — join by id. An archived note's `contentBlob` may no longer resolve; its `snapshot` is the text record.
+
 ### Work set
 
 Any driver that responds to notes must compute the work set this way. A note is **actionable** iff:
@@ -129,7 +136,7 @@ Binds any driver that responds to notes. Read-only drivers (summarize, triage, d
 
 ### Schema changes
 
-Changing the schema requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version other than 1.
+Changing the schema requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version other than 1. `src/notes.ts` also owns the archive's parser, which validates only `version` and `notes`.
 
 ## Default workflow: addressing the notes
 

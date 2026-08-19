@@ -1,10 +1,13 @@
 import { sanitizeBranchForFilename } from "./clusters";
 
-// The notes contract: two versioned JSON files per branch under
+// The notes contract: three versioned JSON files per branch under
 // <git common dir>/delta-review/. The notes file is extension-owned (review
 // notes written from the diff editor); the responses file is agent-owned (a
-// Claude Code agent writes its replies there). This module is the pure
-// contract layer — types, parsing, validation — with no fs and no vscode.
+// Claude Code agent writes its replies there); the archive file is
+// extension-written history of the notes Clear Resolved removed, which the
+// extension never reads back for behavior of its own. This module is the
+// pure contract layer — types, parsing, validation — with no fs and no
+// vscode.
 
 export type NoteSide = "base" | "working";
 
@@ -67,11 +70,25 @@ export interface ResponsesFile {
   responses: ResponseEntry[];
 }
 
+// The archive file, validated at the top level only: its entries are
+// history (a removed note plus `deletedAt`) that no reader here re-checks
+// against the note schema, and the index signature carries over any other
+// top-level key a future writer added, so a read-modify-write append never
+// drops what it does not understand.
+export interface ArchiveShell {
+  version: 1;
+  notes: unknown[];
+  [key: string]: unknown;
+}
+
 export type ParseNotesResult =
   { ok: true; file: NotesFile } | { ok: false; error: string };
 
 export type ParseResponsesResult =
   { ok: true; file: ResponsesFile } | { ok: false; error: string };
+
+export type ParseArchiveResult =
+  { ok: true; file: ArchiveShell } | { ok: false; error: string };
 
 export type LoadNotesResult =
   | { state: "missing" }
@@ -84,12 +101,15 @@ export type LoadResponsesResult =
   | { state: "ok"; file: ResponsesFile };
 
 // File names live next to clusters-<branch>.json in the delta-review dir;
-// the notes-/responses- prefixes must never collide with clusters-.
+// the notes-/responses-/archive- prefixes must never collide with clusters-.
 export const notesFileName = (branch: string): string =>
   `notes-${sanitizeBranchForFilename(branch)}.json`;
 
 export const responsesFileName = (branch: string): string =>
   `responses-${sanitizeBranchForFilename(branch)}.json`;
+
+export const archiveFileName = (branch: string): string =>
+  `archive-${sanitizeBranchForFilename(branch)}.json`;
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
@@ -266,10 +286,14 @@ const parseResponseEntry = (
 
 // Shared top-level validation: JSON.parse, non-array object, version 1, and
 // the entries key present as an array. Errors are one-line and user-facing.
+// The validated record rides along for callers that must preserve keys they
+// do not model.
 const parseVersionedFile = (
   text: string,
   entriesKey: "notes" | "responses",
-): { ok: true; entries: unknown[] } | { ok: false; error: string } => {
+):
+  | { ok: true; entries: unknown[]; record: Record<string, unknown> }
+  | { ok: false; error: string } => {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -294,7 +318,7 @@ const parseVersionedFile = (
   if (!Array.isArray(data[entriesKey])) {
     return { ok: false, error: `"${entriesKey}" must be an array` };
   }
-  return { ok: true, entries: data[entriesKey] };
+  return { ok: true, entries: data[entriesKey], record: data };
 };
 
 // Parses and validates notes-file text. Unknown extra keys are ignored
@@ -332,4 +356,18 @@ export const parseResponsesFile = (text: string): ParseResponsesResult => {
     responses.push(result.entry);
   }
   return { ok: true, file: { version: 1, responses } };
+};
+
+// Parses archive-file text. Only the shell is checked — archived entries
+// are opaque history, so a single unrecognized entry must not cost the file
+// — and unknown top-level keys survive into the returned shell.
+export const parseArchiveFile = (text: string): ParseArchiveResult => {
+  const top = parseVersionedFile(text, "notes");
+  if (!top.ok) {
+    return top;
+  }
+  return {
+    ok: true,
+    file: { ...top.record, version: 1, notes: top.entries },
+  };
 };
