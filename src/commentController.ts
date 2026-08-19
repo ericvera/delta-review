@@ -22,6 +22,12 @@ import {
   editReviewerTurn,
   setResolved,
 } from "./notesStore";
+import {
+  canReplyFor,
+  sameCommentDisplays,
+  shouldRecreateThread,
+} from "./threadRender";
+import type { CommentDisplay } from "./threadRender";
 
 // Inline review notes in the diff editor, built on the VS Code Comments API:
 // the `+` commenting gutter on both diff sides, the add-note flow persisting
@@ -212,6 +218,25 @@ export const createNoteCommentController = (
     });
   };
 
+  const displayFor = (comment: NoteComment): CommentDisplay => ({
+    authorName: comment.author.name,
+    bodyText:
+      typeof comment.body === "string" ? comment.body : comment.body.value,
+    bodyIsMarkdown: typeof comment.body !== "string",
+    mode: comment.mode,
+    timestampMs: comment.timestamp?.getTime(),
+    contextValue: comment.contextValue,
+    noteId: comment.noteId,
+    turnAt: comment.turnAt,
+    turnText: comment.turnText,
+    reviewerTurnIndex: comment.reviewerTurnIndex,
+  });
+
+  // Applies a display thread to a rendered thread, writing only the fields
+  // that actually changed: the ext-host setters always emit an update, and an
+  // update landing on a reply form that is still initializing is what
+  // duplicates its reply button. canReply is exempt (the ext host dedupes it)
+  // — see restyle for the invariant that keeps it from flipping false→true.
   const styleThread = (
     commentThread: vscode.CommentThread,
     thread: NoteThread,
@@ -230,7 +255,12 @@ export const createNoteCommentController = (
         editing.set(noteComment.turnAt, noteComment);
       }
     }
-    commentThread.comments = commentsFor(thread).map((comment) => {
+    // Snapshot what VS Code was last sent before the carry-over below remaps
+    // reviewerTurnIndex on the very objects the current array holds
+    const previousDisplays = commentThread.comments.map((existing) =>
+      displayFor(existing as NoteComment),
+    );
+    const comments = commentsFor(thread).map((comment) => {
       const carried =
         comment.reviewerTurnIndex === undefined
           ? undefined
@@ -242,17 +272,30 @@ export const createNoteCommentController = (
       carried.reviewerTurnIndex = comment.reviewerTurnIndex;
       return carried;
     });
-    commentThread.label =
+    if (!sameCommentDisplays(previousDisplays, comments.map(displayFor))) {
+      commentThread.comments = comments;
+    }
+    const label =
       statusLabels[thread.status] + (thread.note.outdated ? " • Outdated" : "");
-    commentThread.contextValue = statusContextValues[thread.status];
-    commentThread.state =
+    if (commentThread.label !== label) {
+      commentThread.label = label;
+    }
+    const contextValue = statusContextValues[thread.status];
+    if (commentThread.contextValue !== contextValue) {
+      commentThread.contextValue = contextValue;
+    }
+    const state =
       thread.status === "resolved"
         ? vscode.CommentThreadState.Resolved
         : vscode.CommentThreadState.Unresolved;
-    // The reply box doubles as the reopen affordance and only exists on
-    // addressed threads: on open threads the reviewer edits their own turns
-    // instead, and resolved threads must be unresolved first
-    commentThread.canReply = thread.status === "addressed";
+    if (commentThread.state !== state) {
+      commentThread.state = state;
+    }
+    // Invariant: this never flips a live thread false→true — VS Code would
+    // then build a second reply button. The reply box appears only on a
+    // freshly created thread (see restyle); here it only ever goes true→false
+    // as an addressed note reopens or resolves.
+    commentThread.canReply = canReplyFor(thread.status);
   };
 
   // A CommentThread renders only on an exactly matching URI. The decision of
@@ -302,15 +345,13 @@ export const createNoteCommentController = (
   // last rendered display thread — action handlers restyle from it eagerly
   // before the authoritative refresh re-render lands. lines is the target's
   // coordinate choice, cached so a re-clamp needs no model or fs access.
-  const threadCache = new Map<
-    string,
-    {
-      thread: vscode.CommentThread;
-      uriKey: string;
-      noteThread: NoteThread;
-      lines: NoteLineSource;
-    }
-  >();
+  interface ThreadEntry {
+    thread: vscode.CommentThread;
+    uriKey: string;
+    noteThread: NoteThread;
+    lines: NoteLineSource;
+  }
+  const threadCache = new Map<string, ThreadEntry>();
   // Reverse lookup for the thread-level handlers, which receive a
   // CommentThread and must find its note id
   const threadNoteIds = new Map<vscode.CommentThread, string>();
@@ -323,6 +364,53 @@ export const createNoteCommentController = (
     threadNoteIds.delete(entry.thread);
     entry.thread.dispose();
     threadCache.delete(noteId);
+  };
+
+  // Swaps a cached entry's rendered thread for a fresh one at the given
+  // uri/range, created with its comments so VS Code builds the widget's reply
+  // form once, at display. The entry object is mutated in place, never
+  // replaced: saveNoteTurn captures it before its await and restyles it
+  // after, so a swapped-out entry would leave it styling a disposed thread.
+  const replaceThread = (
+    entry: ThreadEntry,
+    noteId: string,
+    uri: vscode.Uri,
+    range: vscode.Range,
+    comments: NoteComment[],
+  ): void => {
+    const collapsibleState = entry.thread.collapsibleState;
+    threadNoteIds.delete(entry.thread);
+    entry.thread.dispose();
+    const created = controller.createCommentThread(uri, range, comments);
+    created.collapsibleState = collapsibleState;
+    entry.thread = created;
+    entry.uriKey = uri.toString();
+    // Thread-menu commands look their note up by the live CommentThread
+    threadNoteIds.set(created, noteId);
+  };
+
+  // The single restyle entry point for a cached thread: a reply box may only
+  // appear on a newly created thread, so a not-yet-replyable thread going
+  // addressed is recreated rather than flipped in place. The recreate drops an
+  // in-progress turn edit on that thread (the typed text lives in the disposed
+  // widget either way). It never recurses — the fresh thread is replyable.
+  const restyle = (entry: ThreadEntry, noteThread: NoteThread): void => {
+    if (
+      shouldRecreateThread(entry.thread.canReply !== false, noteThread.status)
+    ) {
+      const uri = entry.thread.uri;
+      const range =
+        entry.thread.range ??
+        rangeFor(entry.noteThread.note, entry.lines, openDocumentFor(uri));
+      replaceThread(
+        entry,
+        noteThread.note.id,
+        uri,
+        range,
+        commentsFor(noteThread),
+      );
+    }
+    styleThread(entry.thread, noteThread);
   };
 
   // The merged-turns index of the reviewer turn with the given note.turns
@@ -361,36 +449,39 @@ export const createNoteCommentController = (
       const uri = uriForTarget(git, target);
       const uriKey = uri.toString();
       const range = rangeFor(thread.note, target.lines, openDocumentFor(uri));
-      let entry = threadCache.get(thread.note.id);
-      // Thread URIs are immutable: relocation (anchor application, base-sha
-      // progression) means dispose + recreate, keeping the collapse state
-      let carriedCollapsibleState:
-        vscode.CommentThreadCollapsibleState | undefined;
-      if (entry !== undefined && entry.uriKey !== uriKey) {
-        carriedCollapsibleState = entry.thread.collapsibleState;
-        threadNoteIds.delete(entry.thread);
-        entry.thread.dispose();
-        entry = undefined;
-      }
+      const entry = threadCache.get(thread.note.id);
       if (entry === undefined) {
-        const created = controller.createCommentThread(uri, range, []);
+        const created = controller.createCommentThread(
+          uri,
+          range,
+          commentsFor(thread),
+        );
         created.collapsibleState =
-          carriedCollapsibleState ??
           vscode.CommentThreadCollapsibleState.Expanded;
-        entry = {
+        const fresh: ThreadEntry = {
           thread: created,
           uriKey,
           noteThread: thread,
           lines: target.lines,
         };
-        threadCache.set(thread.note.id, entry);
+        threadCache.set(thread.note.id, fresh);
         threadNoteIds.set(created, thread.note.id);
-      } else {
-        entry.thread.range = range;
-        entry.noteThread = thread;
-        entry.lines = target.lines;
+        styleThread(created, thread);
+        continue;
       }
-      styleThread(entry.thread, thread);
+      entry.noteThread = thread;
+      entry.lines = target.lines;
+      // Thread URIs are immutable: relocation (anchor application, base-sha
+      // progression) means dispose + recreate, keeping the collapse state
+      if (entry.uriKey !== uriKey) {
+        replaceThread(entry, thread.note.id, uri, range, commentsFor(thread));
+        styleThread(entry.thread, thread);
+        continue;
+      }
+      // Before the range write: restyle may dispose this thread, and a range
+      // written to a disposed thread is wasted
+      restyle(entry, thread);
+      entry.thread.range = range;
     }
     for (const noteId of threadCache.keys()) {
       if (!rendered.has(noteId)) {
@@ -551,7 +642,7 @@ export const createNoteCommentController = (
       if (mergedTurn !== undefined) {
         mergedTurn.text = text;
       }
-      styleThread(entry.thread, entry.noteThread);
+      restyle(entry, entry.noteThread);
       onDidChangeNotes();
     } catch (error) {
       // Stay in Editing mode so the typed text is not lost
@@ -568,7 +659,7 @@ export const createNoteCommentController = (
     // Leave Editing mode before restyling — styleThread deliberately carries
     // Editing comments over, and this one is being discarded
     noteComment.mode = vscode.CommentMode.Preview;
-    styleThread(entry.thread, entry.noteThread);
+    restyle(entry, entry.noteThread);
   };
 
   const deleteNoteTurn = async (comment: vscode.Comment): Promise<void> => {
@@ -605,7 +696,7 @@ export const createNoteCommentController = (
           entry.noteThread.note.turns.splice(turnIndex, 1);
           entry.noteThread.status = remaining.status;
           entry.noteThread.note.status = remaining.status;
-          styleThread(entry.thread, entry.noteThread);
+          restyle(entry, entry.noteThread);
         }
       }
       onDidChangeNotes();
@@ -662,7 +753,7 @@ export const createNoteCommentController = (
       if (entry !== undefined) {
         entry.noteThread.status = note.status;
         entry.noteThread.note.status = note.status;
-        styleThread(entry.thread, entry.noteThread);
+        restyle(entry, entry.noteThread);
       }
       onDidChangeNotes();
     } catch (error) {
@@ -704,7 +795,7 @@ export const createNoteCommentController = (
         });
         entry.noteThread.status = note.status;
         entry.noteThread.note.status = note.status;
-        styleThread(entry.thread, entry.noteThread);
+        restyle(entry, entry.noteThread);
       }
       onDidChangeNotes();
     } catch (error) {
