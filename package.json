@@ -2,11 +2,11 @@
   "name": "delta-review",
   "displayName": "Delta Review",
   "description": "Incremental local code review: mark files reviewed and see only the delta since your last review.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "eric",
   "private": true,
   "engines": {
-    "vscode": "^1.125.0"
+    "vscode": "^1.134.0"
   },
   "categories": [
     "SCM Providers"
@@ -575,7 +575,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.3",
     "@types/picomatch": "^4.0.3",
-    "@types/vscode": "^1.125.0",
+    "@types/vscode": "^1.134.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.2",
     "eslint": "^10.8.1",

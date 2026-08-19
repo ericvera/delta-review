@@ -938,10 +938,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/vscode@npm:^1.125.0":
-  version: 1.125.0
-  resolution: "@types/vscode@npm:1.125.0"
-  checksum: 8d84e402cce6ab456a3390cf4b2162173ca04628fbc496ae5e1704c30b1933f81061441835ebaad503b509d4f16b229b8dc6a5597f132cc0275b73e3ad81892f
+"@types/vscode@npm:^1.134.0":
+  version: 1.134.0
+  resolution: "@types/vscode@npm:1.134.0"
+  checksum: db7a8c4b878a3cb483ea51eec3fb99b98366c6466c972893c77d9f43a56b0ab33e40f40effd9adb6f125022a5a33fedef5641b3304d88b8564b2ad6df673a1b9
   languageName: node
   linkType: hard
 
@@ -1804,7 +1804,7 @@ __metadata:
     "@eslint/js": ^10.0.1
     "@types/node": ^24.13.3
     "@types/picomatch": ^4.0.3
-    "@types/vscode": ^1.125.0
+    "@types/vscode": ^1.134.0
     "@vscode/vsce": ^3.9.2
     esbuild: ^0.28.2
     eslint: ^10.8.1
