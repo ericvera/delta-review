@@ -2,7 +2,11 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import picomatch from "picomatch";
 import type { Git } from "./git";
-import { FileReviewStatus, type ReviewFile } from "./model";
+import {
+  FileReviewStatus,
+  hasAnyReviewSnapshot,
+  type ReviewFile,
+} from "./model";
 
 // The clusters contract: written by an external tool (e.g. a Claude Code
 // skill) to <git common dir>/delta-review/clusters-<sanitized branch>.json.
@@ -113,11 +117,16 @@ export const clusterBodyState = (
     : "all-reviewed";
 };
 
-// Context value for a cluster-kind tree row, driving which bulk action its
-// row offers: ✓ while anything still needs review, − when all reviewed,
-// nothing when the bucket is empty.
+// Context value for a cluster-kind tree row, driving which bulk actions its
+// row offers: ✓ while anything still needs review, − when the bucket holds a
+// snapshot (all reviewed, or a member whose content diverged from its
+// snapshot), nothing when the bucket is empty. Scope is the cluster's full
+// membership, the same scope its counts and its bulk actions already use.
 export type ClusterContextValue =
-  "clusterNeedsReview" | "clusterReviewed" | "clusterEmpty";
+  | "clusterNeedsReview"
+  | "clusterNeedsReviewSnapshot"
+  | "clusterReviewed"
+  | "clusterEmpty";
 
 export const clusterContextValue = (
   files: readonly ReviewFile[],
@@ -125,9 +134,12 @@ export const clusterContextValue = (
   if (files.length === 0) {
     return "clusterEmpty";
   }
-  return files.some((file) => file.status === FileReviewStatus.NeedsReview)
-    ? "clusterNeedsReview"
-    : "clusterReviewed";
+  if (files.some((file) => file.status === FileReviewStatus.NeedsReview)) {
+    return hasAnyReviewSnapshot(files)
+      ? "clusterNeedsReviewSnapshot"
+      : "clusterNeedsReview";
+  }
+  return "clusterReviewed";
 };
 
 // Header count text. Clusters and Unclustered always show reviewed/total;

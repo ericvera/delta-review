@@ -21,6 +21,7 @@ import type { HashCacheEntry } from "./hashCache";
 import {
   computeReviewModel,
   FileReviewStatus,
+  pathsWithReviewSnapshot,
   resolveBranch,
   ReviewFile,
   ReviewModel,
@@ -48,6 +49,7 @@ import {
   setResolved,
 } from "./notesStore";
 import {
+  clearAllReviewSnapshots,
   markReviewed,
   reviewRefForBranch,
   unmarkReviewed,
@@ -706,6 +708,27 @@ export const activate = async (
     return (model?.files ?? []).filter((file) => file.triage === "normal");
   };
 
+  // `folderScopeFiles` narrowed to the rows the folder actually renders: the
+  // Reviewed bucket shows reviewed files, a cluster body shows only its
+  // needs-review files, and a status-scoped folder shows that status. A bulk
+  // action must never reach a file rendered under the other group.
+  const renderedFolderFiles = (element: {
+    status?: FileReviewStatus;
+    clusterKey?: string;
+    inReviewedBucket?: true;
+  }): ReviewFile[] => {
+    const scope = folderScopeFiles(element);
+    if (element.inReviewedBucket === true) {
+      return scope.filter((file) => file.status === FileReviewStatus.Reviewed);
+    }
+    if (element.clusterKey !== undefined) {
+      return scope.filter(
+        (file) => file.status === FileReviewStatus.NeedsReview,
+      );
+    }
+    return scope.filter((file) => file.status === element.status);
+  };
+
   // REVIEW NOTES row resolve/unresolve. Straight to the store, never through
   // the comment controller: a note whose file is gone has no rendered thread
   // to act on, and the row is the only affordance left.
@@ -805,7 +828,10 @@ export const activate = async (
         if (
           git === undefined ||
           model === undefined ||
-          element?.kind !== "file"
+          element?.kind !== "file" ||
+          // Without a snapshot there is nothing to drop, and the write would
+          // be a no-op state commit
+          !element.file.hasReviewSnapshot
         ) {
           return;
         }
@@ -824,16 +850,13 @@ export const activate = async (
         if (git === undefined || model === undefined) {
           return;
         }
-        const paths = model.files
-          .filter((file) => file.status === FileReviewStatus.Reviewed)
-          .map((file) => file.path);
-        if (paths.length === 0) {
-          return;
-        }
         const activeGit = git;
         const branch = model.branch;
+        // Scoped to the branch, not to the review set: a snapshot for a path
+        // that no longer shows up would survive a path list and keep acting
+        // as that path's diff base if it came back
         await applyReviewStateChange("unmark all files", () =>
-          unmarkReviewed(activeGit, branch, paths),
+          clearAllReviewSnapshots(activeGit, branch),
         );
       },
     ),
@@ -1019,7 +1042,7 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = folderScopeFiles(element)
+        const paths = renderedFolderFiles(element)
           .filter(
             (file) =>
               file.status === FileReviewStatus.NeedsReview &&
@@ -1047,13 +1070,11 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = folderScopeFiles(element)
-          .filter(
-            (file) =>
-              file.status === FileReviewStatus.Reviewed &&
-              file.path.startsWith(`${element.path}/`),
-          )
-          .map((file) => file.path);
+        const paths = pathsWithReviewSnapshot(
+          renderedFolderFiles(element).filter((file) =>
+            file.path.startsWith(`${element.path}/`),
+          ),
+        );
         if (paths.length === 0) {
           return;
         }
@@ -1101,9 +1122,10 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = clusterFilesForKey(clusterModel, element.clusterKey)
-          .filter((file) => file.status === FileReviewStatus.Reviewed)
-          .map((file) => file.path);
+        // Full membership, matching the counts the cluster header shows
+        const paths = pathsWithReviewSnapshot(
+          clusterFilesForKey(clusterModel, element.clusterKey),
+        );
         if (paths.length === 0) {
           return;
         }
@@ -1153,13 +1175,13 @@ export const activate = async (
         ) {
           return;
         }
-        const paths = model.files
-          .filter(
-            (file) =>
-              file.triage === "auto" &&
-              file.status === FileReviewStatus.Reviewed,
-          )
-          .map((file) => file.path);
+        // One Auto subgroup exists per status group, so the press must stay
+        // inside the pressed group's rows
+        const paths = pathsWithReviewSnapshot(
+          model.files.filter(
+            (file) => file.triage === "auto" && file.status === element.status,
+          ),
+        );
         if (paths.length === 0) {
           return;
         }

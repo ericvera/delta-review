@@ -14,6 +14,7 @@ const file = (
   deleted: false,
   existsInMergeBase: true,
   diffBaseIsReviewedSnapshot: false,
+  hasReviewSnapshot: false,
   diffBaseSha: undefined,
   diffBasePath: path,
   movedFrom: undefined,
@@ -25,8 +26,10 @@ const file = (
   triage: options.triage ?? "normal",
 });
 
-const reviewed = (path: string, triage: Triage = "normal"): ReviewFile =>
-  file(path, { status: FileReviewStatus.Reviewed, triage });
+const reviewed = (path: string, triage: Triage = "normal"): ReviewFile => ({
+  ...file(path, { status: FileReviewStatus.Reviewed, triage }),
+  hasReviewSnapshot: true,
+});
 
 const clusterModel = (
   clusters: ReviewFile[][],

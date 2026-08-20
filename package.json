@@ -2,7 +2,7 @@
   "name": "delta-review",
   "displayName": "Delta Review",
   "description": "Incremental local code review: mark files reviewed and see only the delta since your last review.",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "publisher": "eric",
   "private": true,
   "engines": {
@@ -252,12 +252,12 @@
       "view/item/context": [
         {
           "command": "deltaReview.openFile",
-          "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)$/",
+          "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)(Snapshot)?$/",
           "group": "inline@1"
         },
         {
           "command": "deltaReview.openFile",
-          "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)$/",
+          "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)(Snapshot)?$/",
           "group": "navigation"
         },
         {
@@ -272,72 +272,72 @@
         },
         {
           "command": "deltaReview.unmarkFileReviewed",
-          "when": "view == deltaReview && viewItem =~ /^reviewedFile/",
-          "group": "inline@2"
+          "when": "view == deltaReview && viewItem =~ /^reviewedFile|^needsReviewFile(Deleted)?Snapshot$/",
+          "group": "inline@3"
         },
         {
           "command": "deltaReview.unmarkFileReviewed",
-          "when": "view == deltaReview && viewItem =~ /^reviewedFile/",
+          "when": "view == deltaReview && viewItem =~ /^reviewedFile|^needsReviewFile(Deleted)?Snapshot$/",
           "group": "navigation"
         },
         {
           "command": "deltaReview.markFolderReviewed",
-          "when": "view == deltaReview && viewItem == needsReviewFolder",
+          "when": "view == deltaReview && viewItem =~ /^needsReviewFolder/",
           "group": "inline@2"
         },
         {
           "command": "deltaReview.markFolderReviewed",
-          "when": "view == deltaReview && viewItem == needsReviewFolder",
+          "when": "view == deltaReview && viewItem =~ /^needsReviewFolder/",
           "group": "navigation"
         },
         {
           "command": "deltaReview.unmarkFolderReviewed",
-          "when": "view == deltaReview && viewItem == reviewedFolder",
-          "group": "inline@2"
+          "when": "view == deltaReview && viewItem =~ /^(reviewedFolder|needsReviewFolderSnapshot)$/",
+          "group": "inline@3"
         },
         {
           "command": "deltaReview.unmarkFolderReviewed",
-          "when": "view == deltaReview && viewItem == reviewedFolder",
+          "when": "view == deltaReview && viewItem =~ /^(reviewedFolder|needsReviewFolderSnapshot)$/",
           "group": "navigation"
         },
         {
           "command": "deltaReview.markAutoReviewed",
-          "when": "view == deltaReview && viewItem == needsReviewAutoGroup",
-          "group": "inline"
+          "when": "view == deltaReview && viewItem =~ /^needsReviewAutoGroup/",
+          "group": "inline@2"
         },
         {
           "command": "deltaReview.markAutoReviewed",
-          "when": "view == deltaReview && viewItem == needsReviewAutoGroup",
+          "when": "view == deltaReview && viewItem =~ /^needsReviewAutoGroup/",
           "group": "navigation"
         },
         {
           "command": "deltaReview.unmarkAutoReviewed",
-          "when": "view == deltaReview && viewItem == reviewedAutoGroup",
-          "group": "inline"
+          "when": "view == deltaReview && viewItem =~ /^(reviewedAutoGroup|needsReviewAutoGroupSnapshot)$/",
+          "group": "inline@3"
         },
         {
           "command": "deltaReview.unmarkAutoReviewed",
-          "when": "view == deltaReview && viewItem == reviewedAutoGroup",
+          "when": "view == deltaReview && viewItem =~ /^(reviewedAutoGroup|needsReviewAutoGroupSnapshot)$/",
           "group": "navigation"
         },
         {
           "command": "deltaReview.markClusterReviewed",
-          "when": "view == deltaReview && viewItem == clusterNeedsReview",
+          "when": "view == deltaReview && viewItem =~ /^clusterNeedsReview/",
           "group": "inline@2"
         },
         {
           "command": "deltaReview.markClusterReviewed",
-          "when": "view == deltaReview && viewItem == clusterNeedsReview",
+          "when": "view == deltaReview && viewItem =~ /^clusterNeedsReview/",
           "group": "navigation"
         },
         {
           "command": "deltaReview.unmarkClusterReviewed",
-          "when": "view == deltaReview && viewItem == clusterReviewed",
-          "group": "inline@2"
+          "when": "view == deltaReview && viewItem =~ /^(clusterReviewed|clusterNeedsReviewSnapshot)$/",
+          "group": "inline@3"
         },
         {
           "command": "deltaReview.unmarkClusterReviewed",
-          "when": "view == deltaReview && viewItem == clusterReviewed",
+          "when": "view == deltaReview && viewItem =~ /^(clusterReviewed|clusterNeedsReviewSnapshot)$/",
           "group": "navigation"
         },
         {

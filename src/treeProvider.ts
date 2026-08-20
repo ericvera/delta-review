@@ -17,6 +17,11 @@ import {
 import { escapeMarkdownText } from "./markdown";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
 import { buildRowDescription, buildTooltipOriginLine } from "./moveDisplay";
+import {
+  autoGroupContextValue,
+  fileContextValue,
+  folderContextValue,
+} from "./rowContext";
 import { parentOf } from "./treeParents";
 import { Triage } from "./triage";
 
@@ -123,6 +128,13 @@ export const collapseKeyFor = (element: CollapsibleElement): string => {
 export const isDefaultCollapsed = (element: CollapsibleElement): boolean =>
   element.kind === "autoGroup" ||
   (element.kind === "cluster" && element.clusterKey === "auto");
+
+// The header − reaches further than the count beside it: the count is the
+// reviewed files, the press clears every snapshot on the branch. Shared by
+// the ungrouped Reviewed group and the grouped Reviewed bucket, which are one
+// row to the reviewer.
+const REVIEWED_HEADER_TOOLTIP =
+  "− clears all review state on this branch, including files that changed since you reviewed them.";
 
 export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeElement> {
   private model: ReviewModel | undefined;
@@ -380,6 +392,9 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
         element.status === FileReviewStatus.NeedsReview
           ? "needsReviewGroup"
           : "reviewedGroup";
+      if (element.status === FileReviewStatus.Reviewed) {
+        item.tooltip = REVIEWED_HEADER_TOOLTIP;
+      }
       return item;
     }
 
@@ -397,10 +412,10 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
         this.filesWithStatus(element.status, "auto").length,
       );
       item.id = `autoGroup:${element.status}`;
-      item.contextValue =
-        element.status === FileReviewStatus.NeedsReview
-          ? "needsReviewAutoGroup"
-          : "reviewedAutoGroup";
+      item.contextValue = autoGroupContextValue(
+        this.filesWithStatus(element.status, "auto"),
+        element.status,
+      );
       item.tooltip =
         "Files matching deltaReview.autoReview.globs or marked linguist-generated in .gitattributes";
       return item;
@@ -428,6 +443,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       // Reuses the ungrouped Reviewed group's context value so its bulk
       // unmark inline action applies unchanged
       item.contextValue = "reviewedGroup";
+      item.tooltip = REVIEWED_HEADER_TOOLTIP;
       return item;
     }
 
@@ -452,18 +468,20 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       // Same scope discriminator as the collapse key, so grouped, bucket,
       // and ungrouped folders for one path stay distinct rows
       item.id = collapseKeyFor(element);
-      if (element.clusterKey !== undefined) {
-        // Cluster folders only exist while a needs-review descendant does
-        item.contextValue = "needsReviewFolder";
-      } else if (element.inReviewedBucket === true) {
-        // Every descendant is reviewed by construction
-        item.contextValue = "reviewedFolder";
-      } else {
-        item.contextValue =
-          element.status === FileReviewStatus.NeedsReview
-            ? "needsReviewFolder"
-            : "reviewedFolder";
-      }
+      // A cluster folder renders needs-review descendants only; the grouped
+      // bucket and the ungrouped Reviewed group render reviewed ones
+      const reviewedScope =
+        element.clusterKey === undefined &&
+        (element.inReviewedBucket === true ||
+          element.status === FileReviewStatus.Reviewed);
+      // Scoped to what this row actually renders, so a needs-review folder
+      // never reports on the same paths shown under the Reviewed group
+      item.contextValue = folderContextValue(
+        this.folderScopeFiles(element).filter((file) =>
+          file.path.startsWith(`${element.path}/`),
+        ),
+        reviewedScope,
+      );
       item.tooltip = element.path;
       return item;
     }
@@ -473,13 +491,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     // decoration provider (M/A/D letters + colors) applies, not git's
     const item = new vscode.TreeItem(createReviewItemUri(file));
     item.id = `file:${file.path}`;
-    // Context value encodes status (drives the +/− inline action) and a
-    // Deleted suffix (hides Open File, which prefix matches ignore)
-    const statusValue =
-      file.status === FileReviewStatus.NeedsReview
-        ? "needsReviewFile"
-        : "reviewedFile";
-    item.contextValue = file.deleted ? `${statusValue}Deleted` : statusValue;
+    item.contextValue = fileContextValue(file);
 
     // In tree mode the hierarchy already conveys the directory; deletion is
     // conveyed by the D decoration. Flat-only rows (Auto subgroup, grouped

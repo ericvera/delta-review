@@ -15,6 +15,7 @@ const file = (
   deleted: false,
   existsInMergeBase: true,
   diffBaseIsReviewedSnapshot: false,
+  hasReviewSnapshot: false,
   diffBaseSha: undefined,
   diffBasePath: overrides.path,
   movedFrom: undefined,
@@ -176,6 +177,7 @@ describe("noteTargetFor", () => {
         path: "src/app.ts",
         status: FileReviewStatus.Reviewed,
         diffBaseIsReviewedSnapshot: true,
+        hasReviewSnapshot: true,
         diffBaseSha: "newer",
       }),
     ]);

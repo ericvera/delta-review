@@ -130,3 +130,19 @@ export const unmarkReviewed = async (
   }
   await writeReviewState(git, branch, state);
 };
+
+// Drops every snapshot on the branch, including snapshots for paths that are
+// no longer in the review set — leaving those behind is what makes a diff open
+// against a stale base. Committing an empty tree rather than deleting the ref
+// keeps the history browsable and keeps the superseded blobs anchored against
+// `git gc`; deleting the ref outright is the palette command's job.
+export const clearAllReviewSnapshots = async (
+  git: Git,
+  branch: string,
+): Promise<void> => {
+  const state = await readReviewState(git, branch);
+  if (state.size === 0) {
+    return;
+  }
+  await writeReviewState(git, branch, new Map());
+};

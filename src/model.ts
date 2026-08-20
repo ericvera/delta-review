@@ -38,6 +38,9 @@ export interface ReviewFile {
   // True when the diff base is the last-reviewed snapshot rather than the
   // merge base — i.e. the diff shows only the delta since the last review
   diffBaseIsReviewedSnapshot: boolean;
+  // True when a snapshot exists for this path in `refs/review/<branch>`,
+  // whatever the file's current status
+  hasReviewSnapshot: boolean;
   // Blob sha for the left side of the diff; undefined renders as empty (new file)
   diffBaseSha: string | undefined;
   // Repo-relative path identifying the document the base side actually shows.
@@ -70,6 +73,19 @@ export interface ReviewModel {
   mergeBase: string;
   files: ReviewFile[];
 }
+
+// The scope an unmark acts on: every path holding a snapshot, whether or not
+// its row currently reads as Reviewed. A file whose content diverged from its
+// snapshot (a rebase, a big edit) still diffs against that snapshot, so it is
+// exactly what an unmark has to reach.
+export const pathsWithReviewSnapshot = (
+  files: readonly ReviewFile[],
+): string[] =>
+  files.filter((file) => file.hasReviewSnapshot).map((file) => file.path);
+
+// Whether an unmark affordance has anything to act on in this scope
+export const hasAnyReviewSnapshot = (files: readonly ReviewFile[]): boolean =>
+  files.some((file) => file.hasReviewSnapshot);
 
 // Parses `git check-attr -z` output — a flat NUL-separated sequence of
 // <path, attr, value> triplets — into the set of paths whose value is "set"
@@ -552,6 +568,7 @@ export const computeReviewModel = async (
       deleted,
       existsInMergeBase: baseBlobs.has(path),
       diffBaseIsReviewedSnapshot: useSnapshotBase,
+      hasReviewSnapshot: reviewedSha !== undefined,
       diffBaseSha: base.diffBaseSha,
       diffBasePath: base.diffBasePath,
       movedFrom: move?.from,

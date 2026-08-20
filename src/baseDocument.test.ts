@@ -9,6 +9,7 @@ const file = (
   deleted: false,
   existsInMergeBase: true,
   diffBaseIsReviewedSnapshot: false,
+  hasReviewSnapshot: false,
   diffBaseSha: undefined,
   diffBasePath: overrides.path,
   movedFrom: undefined,
@@ -33,6 +34,7 @@ describe("baseBlobForNote", () => {
     path: "src/reviewed.ts",
     status: FileReviewStatus.Reviewed,
     diffBaseIsReviewedSnapshot: true,
+    hasReviewSnapshot: true,
     diffBaseSha: "bbb",
   });
   // A repo origin's blob: the base document is identified by the old path
@@ -111,6 +113,7 @@ describe("baseBlobForNote", () => {
         path: "src/app.ts",
         status: FileReviewStatus.Reviewed,
         diffBaseIsReviewedSnapshot: true,
+        hasReviewSnapshot: true,
         diffBaseSha: "newer",
       }),
     ]);

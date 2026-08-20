@@ -26,7 +26,8 @@ The **Delta Review** panel lives in the Source Control sidebar:
 - Click a file to open its review diff — against the merge base, or against your last-reviewed version if you've reviewed it before.
 - Moved files show as one row at the new path saying where they came from — `← src/old`, or `← [donor-app] src/telemetry` when the file was ported in from another project — with the full origin in the row's tooltip.
 - `verbatim` or `adapted` on that row tells you whether the file changed on the way in, and — while the original content is still reachable — the diff opens against it, so a copied-and-tweaked file shows only the tweak.
-- Hover a row: `+` marks reviewed, `−` unmarks. Group headers and folders (in tree mode) mark/unmark everything inside.
+- Hover a row: `+` marks reviewed; `−` clears the review snapshot for everything in its scope, so those files diff against the base branch again. Group headers, folders (in tree mode) and cluster headers cover everything inside, and `−` shows wherever the scope still holds a snapshot — including a file that changed since you reviewed it and is back under Needs Review.
+- `−` on the **Reviewed** header clears all review state on the branch, snapshots for files no longer in the review set included.
 - The Source Control icon badge and the status bar (`Review 7/23`) show how many files are left.
 - Command palette: `Delta Review: Clear Review State`.
 - Multi-repo / worktrees: follows the repository selected in Source Control; state is per-branch and travels across worktrees.

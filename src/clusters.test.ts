@@ -28,6 +28,7 @@ const file = (path: string, triage: Triage = "normal"): ReviewFile => ({
   deleted: false,
   existsInMergeBase: true,
   diffBaseIsReviewedSnapshot: false,
+  hasReviewSnapshot: false,
   diffBaseSha: undefined,
   diffBasePath: path,
   movedFrom: undefined,
@@ -42,6 +43,7 @@ const file = (path: string, triage: Triage = "normal"): ReviewFile => ({
 const reviewedFile = (path: string, triage: Triage = "normal"): ReviewFile => ({
   ...file(path, triage),
   status: FileReviewStatus.Reviewed,
+  hasReviewSnapshot: true,
 });
 
 const contract = (
@@ -836,11 +838,23 @@ describe("clusterContextValue", () => {
     expect(clusterContextValue([])).toBe("clusterEmpty");
   });
 
-  it("is clusterNeedsReview when any file still needs review", () => {
-    expect(clusterContextValue([reviewedFile("a.ts"), file("b.ts")])).toBe(
+  it("is clusterNeedsReview when a needs-review bucket holds no snapshot", () => {
+    expect(clusterContextValue([file("a.ts"), file("b.ts")])).toBe(
       "clusterNeedsReview",
     );
     expect(clusterContextValue([file("b.ts")])).toBe("clusterNeedsReview");
+  });
+
+  it("is clusterNeedsReviewSnapshot when a needs-review bucket holds one", () => {
+    expect(clusterContextValue([reviewedFile("a.ts"), file("b.ts")])).toBe(
+      "clusterNeedsReviewSnapshot",
+    );
+    expect(
+      clusterContextValue([
+        file("a.ts"),
+        { ...file("b.ts"), hasReviewSnapshot: true },
+      ]),
+    ).toBe("clusterNeedsReviewSnapshot");
   });
 
   it("is clusterReviewed when every file is reviewed", () => {

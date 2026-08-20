@@ -9,10 +9,13 @@ import {
   adjustReviewSetForMoves,
   computeReviewModel,
   FileReviewStatus,
+  hasAnyReviewSnapshot,
   parseCheckAttrOutput,
+  pathsWithReviewSnapshot,
   ResolvedMove,
   resolveBranch,
   resolveFileBase,
+  ReviewFile,
 } from "./model";
 
 // Builds `git check-attr -z` output: <path NUL attr NUL value NUL> per entry
@@ -895,6 +898,46 @@ describe("computeReviewModel", () => {
     ).toBe(1);
   });
 
+  it("keeps the snapshot of a file whose content diverged from it", async () => {
+    const git = await setUp({
+      changes: [["M", "src/edited.ts"]],
+      baseBlobs: { "src/edited.ts": PATH_SHA },
+      // Marked reviewed at REVIEWED_SHA, then rebased or edited to WORKING_SHA
+      reviewState: { "src/edited.ts": REVIEWED_SHA },
+      workingShas: { "src/edited.ts": WORKING_SHA },
+    });
+    const model = await computeReviewModel(git, "main");
+    expect(model.files[0]).toMatchObject({
+      path: "src/edited.ts",
+      status: FileReviewStatus.NeedsReview,
+      diffBaseIsReviewedSnapshot: true,
+      hasReviewSnapshot: true,
+      diffBaseSha: REVIEWED_SHA,
+    });
+    // The status filter this replaced skipped exactly this file
+    expect(pathsWithReviewSnapshot(model.files)).toEqual(["src/edited.ts"]);
+  });
+
+  it("reports a snapshot on a recreated file whose snapshot is the deleted sentinel", async () => {
+    const git = await setUp({
+      changes: [["M", "src/recreated.ts"]],
+      baseBlobs: { "src/recreated.ts": PATH_SHA },
+      reviewState: { "src/recreated.ts": SENTINEL_SHA },
+      workingShas: { "src/recreated.ts": WORKING_SHA },
+    });
+    const model = await computeReviewModel(git, "main");
+    // The sentinel is no usable diff base, so the merge base wins — but the
+    // ref entry is there and an unmark has to drop it
+    expect(model.files[0]).toMatchObject({
+      path: "src/recreated.ts",
+      status: FileReviewStatus.NeedsReview,
+      diffBaseIsReviewedSnapshot: false,
+      hasReviewSnapshot: true,
+      diffBaseSha: PATH_SHA,
+    });
+    expect(pathsWithReviewSnapshot(model.files)).toEqual(["src/recreated.ts"]);
+  });
+
   it("degrades an unreadable or non-blob external base blob without throwing", async () => {
     const missing = await setUp({
       changes: [["A", "src/copied.ts"]],
@@ -921,5 +964,74 @@ describe("computeReviewModel", () => {
         originContentUnavailable: true,
       });
     }
+  });
+});
+
+const reviewFile = (
+  path: string,
+  overrides: Partial<ReviewFile> = {},
+): ReviewFile => ({
+  path,
+  status: FileReviewStatus.NeedsReview,
+  deleted: false,
+  existsInMergeBase: true,
+  diffBaseIsReviewedSnapshot: false,
+  hasReviewSnapshot: false,
+  diffBaseSha: undefined,
+  diffBasePath: path,
+  movedFrom: undefined,
+  moveOrigin: undefined,
+  donor: undefined,
+  moveNote: undefined,
+  moveClassification: undefined,
+  originContentUnavailable: false,
+  triage: "normal",
+  ...overrides,
+});
+
+const mixedScope: ReviewFile[] = [
+  reviewFile("src/reviewed.ts", {
+    status: FileReviewStatus.Reviewed,
+    hasReviewSnapshot: true,
+  }),
+  reviewFile("src/never-reviewed.ts"),
+  // Diverged from its snapshot: needs review, still diffing against it
+  reviewFile("src/diverged.ts", {
+    diffBaseIsReviewedSnapshot: true,
+    hasReviewSnapshot: true,
+  }),
+  // Reviewed while deleted, then recreated: the sentinel snapshot is no
+  // diff base, but it is still an entry in the ref
+  reviewFile("src/recreated.ts", { hasReviewSnapshot: true }),
+];
+
+describe("pathsWithReviewSnapshot", () => {
+  it("takes every file holding a snapshot, whatever its status, in order", () => {
+    expect(pathsWithReviewSnapshot(mixedScope)).toEqual([
+      "src/reviewed.ts",
+      "src/diverged.ts",
+      "src/recreated.ts",
+    ]);
+  });
+
+  it("is empty when nothing in the scope holds a snapshot", () => {
+    expect(pathsWithReviewSnapshot([reviewFile("src/a.ts")])).toEqual([]);
+    expect(pathsWithReviewSnapshot([])).toEqual([]);
+  });
+});
+
+describe("hasAnyReviewSnapshot", () => {
+  it("is true as soon as one file holds a snapshot", () => {
+    expect(hasAnyReviewSnapshot(mixedScope)).toBe(true);
+    expect(
+      hasAnyReviewSnapshot([
+        reviewFile("src/recreated.ts", { hasReviewSnapshot: true }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is false for a scope with no snapshots", () => {
+    expect(hasAnyReviewSnapshot([reviewFile("src/a.ts")])).toBe(false);
+    expect(hasAnyReviewSnapshot([])).toBe(false);
   });
 });
