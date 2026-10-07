@@ -155,8 +155,13 @@ The default when the user asks to address their review notes; other skills or in
 
 Entered when invoked with `watch` (`/delta:review-notes watch`, "watch my review notes"), when the user replies `watch` to the step 6 offer, or when `${user_config.always_watch}` reads `true` (any other value, including the unsubstituted placeholder, is off). Runs until the user interrupts; no idle timeout.
 
-1. Each time you read the notes file (step 1, step 5, each wake), first record its hash as `START` (`h` below).
-2. Run the steps above; at step 6 — or at step 1's missing-file or empty-`notes` stop — instead of ending, wait: run this until-loop through the Monitor tool (read-only; `NOTES` is the notes path per Files):
+1. Each time you read the notes file (step 1, step 5, each wake), first record its hash as `START` with this Bash command — the same definition as `h` below:
+
+   ```bash
+   NOTES="<notes path>"; if [ -f "$NOTES" ]; then git hash-object "$NOTES"; else echo absent; fi
+   ```
+
+2. Run the steps above; at step 6 — or at step 1's missing-file or empty-`notes` stop — instead of ending, wait: run this until-loop through the Monitor tool with `timeout_ms` at its maximum (`1800000`) (read-only; `NOTES` is the notes path per Files):
 
    ```bash
    NOTES="<notes path>"; START="<recorded hash>"
@@ -164,6 +169,7 @@ Entered when invoked with `watch` (`/delta:review-notes watch`, "watch my review
    until [ "$(h)" != "$START" ]; do sleep 3; done
    ```
 
-3. On wake: re-read per the Contract and recompute the Work set. Empty → wait again (extension write-backs of derived fields wake the loop without adding work). Otherwise run steps 2–5, report per Channel discipline, and wait again.
+3. Monitor expiry with no hash change is not a wake and not an end: re-arm the same loop with the same `START` — no re-read, no report.
+4. On wake: re-read per the Contract and recompute the Work set. Empty → wait again (extension write-backs of derived fields wake the loop without adding work). Otherwise run steps 2–5, report per Channel discipline, and wait again.
 
 Monitor tool unavailable → run one normal pass and say watch mode is unavailable.
