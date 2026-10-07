@@ -6,7 +6,7 @@
     "goals": "done",
     "spec": "skipped",
     "critic": "skipped",
-    "execute": null,
+    "execute": "done",
     "review": null,
     "gate": null
   },
