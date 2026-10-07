@@ -86,6 +86,7 @@ Agent loop:
 
 - Install the `/delta:review-notes` skill (same plugin install as [clusters](#cluster-with-claude-code)), then ask Claude Code to "address my review notes".
 - The agent reads your notes, edits the code, and replies with what it changed; replies appear live in the thread and the note relocates to where the fix landed.
+- Say "watch my review notes" (or `/delta:review-notes watch`) to keep the agent picking up new notes and replies until you interrupt it; _Always watch_ in `/plugin configure` makes it the default.
 
 REVIEW NOTES view:
 

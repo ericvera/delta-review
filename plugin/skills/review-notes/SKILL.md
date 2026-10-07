@@ -5,11 +5,12 @@ description: >-
   Code extension. Default behavior: address them — read the notes contract,
   fix the code each note asks about, and reply through the responses contract
   file. Use when the user asks to address my review notes, handle my diff
-  comments, respond to review notes, or otherwise act on Delta Review notes —
-  and as the contract reference whenever any task or skill needs to read from
-  or respond to Delta Review notes files for any purpose (summarizing,
-  triaging, discussing, driving fixes). Requires a git repository with a
-  feature branch.
+  comments, respond to review notes, watch my review notes, keep watching for
+  review notes, /delta:review-notes watch, or otherwise act on Delta Review
+  notes — and as the contract reference whenever any task or skill needs to
+  read from or respond to Delta Review notes files for any purpose
+  (summarizing, triaging, discussing, driving fixes). Requires a git
+  repository with a feature branch.
 ---
 
 # Review Notes
@@ -132,7 +133,8 @@ Binds any driver that responds to notes. Read-only drivers (summarize, triage, d
 - Explain-only replies are legitimate: a response entry is one turn, with or without a code change.
 - A note needing a reviewer decision: append the question as a response entry, then skip that note for the rest of the pass. The reviewer's thread reply makes it actionable again on a later run (Work set).
 - The caller conversation carries exactly two things: a bare status line — counts (e.g. fixes vs replies/questions) and a pointer to Delta Review — and blockers the thread cannot carry: a missing or invalid notes file, a corrupt or unwritable responses file.
-- A pass that made no fixes because every actionable note got an in-thread question says exactly that in the status line (questions asked; reply in Delta Review and re-run), so it does not read as a stall.
+- A pass that made no fixes because every actionable note got an in-thread question says exactly that in the status line (questions asked; reply in Delta Review — plus "and re-run" only when the pass ends), so it does not read as a stall.
+- A driver that keeps running across rounds emits one status line per round that did work, none for rounds with no work, and blockers as they arise.
 
 ### Schema changes
 
@@ -147,4 +149,21 @@ The default when the user asks to address their review notes; other skills or in
 3. **Take the first note**: read its whole thread (`turns` plus your prior responses, interleaved oldest → newest by `at`), locate the target per the Contract's reading semantics, and make the change the newest reviewer turn asks for, following project conventions — or compose the reply or question that turn calls for, per Channel discipline.
 4. **Respond immediately**: append that one note's entry per the Contract's entry conventions and write rules, before moving on. Never batch responses.
 5. **Re-read the notes file** — the reviewer may have added notes or replied while you worked — and repeat from step 2.
-6. **Report** per Channel discipline.
+6. **Report** per Channel discipline. Unless watching, end with: "Reply `watch` to keep watching — or turn on _Always watch_ in `/plugin configure`."
+
+### Watch mode
+
+Entered when invoked with `watch` (`/delta:review-notes watch`, "watch my review notes"), when the user replies `watch` to the step 6 offer, or when `${user_config.always_watch}` reads `true` (any other value, including the unsubstituted placeholder, is off). Runs until the user interrupts; no idle timeout.
+
+1. Each time you read the notes file (step 1, step 5, each wake), first record its hash as `START` (`h` below).
+2. Run the steps above; at step 6 — or at step 1's missing-file or empty-`notes` stop — instead of ending, wait: run this until-loop through the Monitor tool (read-only; `NOTES` is the notes path per Files):
+
+   ```bash
+   NOTES="<notes path>"; START="<recorded hash>"
+   h() { if [ -f "$NOTES" ]; then git hash-object "$NOTES"; else echo absent; fi; }
+   until [ "$(h)" != "$START" ]; do sleep 3; done
+   ```
+
+3. On wake: re-read per the Contract and recompute the Work set. Empty → wait again (extension write-backs of derived fields wake the loop without adding work). Otherwise run steps 2–5, report per Channel discipline, and wait again.
+
+Monitor tool unavailable → run one normal pass and say watch mode is unavailable.
