@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,6 +18,7 @@ import {
   resolveFileBase,
   ReviewFile,
 } from "./model";
+import type { OriginBase, SliceIo } from "./originSlice";
 
 // Builds `git check-attr -z` output: <path NUL attr NUL value NUL> per entry
 const checkAttrOutput = (entries: [path: string, value: string][]): string =>
@@ -69,12 +71,18 @@ const declaration = (
   ...optional,
 });
 
-const repoMove = (from: string): ResolvedMove => ({
+const repoMove = (
+  from: string,
+  overrides: Partial<ResolvedMove> = {},
+): ResolvedMove => ({
   from,
   origin: "repo",
   donor: undefined,
   baseBlob: undefined,
+  fromLines: undefined,
+  declared: false,
   note: undefined,
+  ...overrides,
 });
 
 const adjust = (input: {
@@ -123,11 +131,13 @@ describe("adjustReviewSetForMoves", () => {
       origin: "external",
       donor: "donor",
       baseBlob: "a".repeat(40),
+      fromLines: undefined,
+      declared: true,
       note: "renamed on the way in",
     });
   });
 
-  it("produces the same result as detection alone when a declaration agrees with it", () => {
+  it("changes nothing but the declared flag when a declaration agrees with detection", () => {
     const detected = adjust({
       paths: ["src/new.ts"],
       movedFrom: [["src/new.ts", "src/old.ts"]],
@@ -137,7 +147,13 @@ describe("adjustReviewSetForMoves", () => {
       movedFrom: [["src/new.ts", "src/old.ts"]],
       moves: [declaration("src/new.ts", "src/old.ts", "repo")],
     });
-    expect(declared).toEqual(detected);
+    expect(detected.movesByPath.get("src/new.ts")?.declared).toBe(false);
+    expect(declared).toEqual({
+      ...detected,
+      movesByPath: new Map([
+        ["src/new.ts", repoMove("src/old.ts", { declared: true })],
+      ]),
+    });
   });
 
   it("re-inserts a displaced rename source as a deleted file", () => {
@@ -183,7 +199,7 @@ describe("adjustReviewSetForMoves", () => {
     });
     expect(result.paths).toEqual(["src/new.ts"]);
     expect(result.movesByPath).toEqual(
-      new Map([["src/new.ts", repoMove("src/old.ts")]]),
+      new Map([["src/new.ts", repoMove("src/old.ts", { declared: true })]]),
     );
   });
 
@@ -246,6 +262,27 @@ const PATH_SHA = "2".repeat(40);
 const WORKING_SHA = "3".repeat(40);
 const REVIEWED_SHA = "4".repeat(40);
 const EXTERNAL_SHA = "5".repeat(40);
+const SLICE_SHA = "6".repeat(40);
+
+const externalMove = (baseBlob: string | undefined): ResolvedMove => ({
+  from: "../donor/src/thing.ts",
+  origin: "external",
+  donor: "donor",
+  baseBlob,
+  fromLines: undefined,
+  declared: true,
+  note: undefined,
+});
+
+const originBase = (
+  sha: string,
+  overrides: Partial<OriginBase> = {},
+): OriginBase => ({
+  sha,
+  lines: undefined,
+  linesOutOfRange: false,
+  ...overrides,
+});
 
 const resolve = (input: {
   path?: string;
@@ -255,7 +292,7 @@ const resolve = (input: {
   reviewedSha?: string;
   useSnapshotBase?: boolean;
   mergeBaseBlobs?: [path: string, sha: string][];
-  externalBaseShaByPath?: [path: string, sha: string][];
+  originBaseByPath?: [path: string, base: OriginBase][];
 }) =>
   resolveFileBase({
     path: input.path ?? "src/new.ts",
@@ -266,7 +303,7 @@ const resolve = (input: {
     reviewedSha: input.reviewedSha,
     useSnapshotBase: input.useSnapshotBase ?? false,
     mergeBaseBlobs: new Map(input.mergeBaseBlobs ?? []),
-    externalBaseShaByPath: new Map(input.externalBaseShaByPath ?? []),
+    originBaseByPath: new Map(input.originBaseByPath ?? []),
   });
 
 describe("resolveFileBase", () => {
@@ -276,6 +313,8 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/new.ts",
       moveClassification: undefined,
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -285,6 +324,8 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/new.ts",
       moveClassification: undefined,
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -299,6 +340,8 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/old.ts",
       moveClassification: "adapted",
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -326,6 +369,8 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/new.ts",
       moveClassification: "adapted",
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -345,6 +390,8 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/new.ts",
       moveClassification: "adapted",
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -362,45 +409,39 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/new.ts",
       moveClassification: "verbatim",
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
   it("names the file's own path for an external origin's blob", () => {
     expect(
       resolve({
-        move: {
-          from: "../donor/src/thing.ts",
-          origin: "external",
-          donor: "donor",
-          baseBlob: EXTERNAL_SHA,
-          note: undefined,
-        },
-        externalBaseShaByPath: [["src/new.ts", EXTERNAL_SHA]],
+        move: externalMove(EXTERNAL_SHA),
+        originBaseByPath: [["src/new.ts", originBase(EXTERNAL_SHA)]],
       }),
     ).toEqual({
       diffBaseSha: EXTERNAL_SHA,
       diffBasePath: "src/new.ts",
       moveClassification: "adapted",
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
   it("degrades an unusable external base blob to unknown with no base", () => {
     expect(
       resolve({
-        move: {
-          from: "../donor/src/thing.ts",
-          origin: "external",
-          donor: "donor",
-          baseBlob: EXTERNAL_SHA,
-          note: undefined,
-        },
+        move: externalMove(EXTERNAL_SHA),
       }),
     ).toEqual({
       diffBaseSha: undefined,
       diffBasePath: "src/new.ts",
       moveClassification: "unknown",
       originContentUnavailable: true,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -410,6 +451,8 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/new.ts",
       moveClassification: "unknown",
       originContentUnavailable: true,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -425,6 +468,8 @@ describe("resolveFileBase", () => {
       diffBasePath: "src/old.ts",
       moveClassification: "unknown",
       originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: false,
     });
   });
 
@@ -441,6 +486,113 @@ describe("resolveFileBase", () => {
       reviewedSha: REVIEWED_SHA,
     });
     expect(snapshotted.originContentUnavailable).toBe(false);
+  });
+
+  it("prefers a resolved origin base over the origin's own merge-base blob", () => {
+    expect(
+      resolve({
+        move: repoMove("src/old.ts", { declared: true, fromLines: [[2, 4]] }),
+        originBaseByPath: [
+          ["src/new.ts", originBase(SLICE_SHA, { lines: [[2, 4]] })],
+        ],
+        mergeBaseBlobs: [["src/old.ts", ORIGIN_SHA]],
+      }),
+    ).toEqual({
+      diffBaseSha: SLICE_SHA,
+      // A slice stands in for the origin document, so it keeps the origin path
+      diffBasePath: "src/old.ts",
+      moveClassification: "adapted",
+      originContentUnavailable: false,
+      originLines: [[2, 4]],
+      originLinesOutOfRange: false,
+    });
+  });
+
+  it("classifies an extraction against the slice, not against the whole origin", () => {
+    const extracted = {
+      move: repoMove("src/old.ts", { declared: true, fromLines: [[2, 4]] }),
+      originBaseByPath: [["src/new.ts", originBase(SLICE_SHA)]] as [
+        string,
+        OriginBase,
+      ][],
+      mergeBaseBlobs: [["src/old.ts", ORIGIN_SHA]] as [string, string][],
+    };
+    expect(
+      resolve({ ...extracted, workingSha: SLICE_SHA }).moveClassification,
+    ).toBe("verbatim");
+    expect(
+      resolve({ ...extracted, workingSha: ORIGIN_SHA }).moveClassification,
+    ).toBe("adapted");
+  });
+
+  it("keeps the destination's own blob as the base while classifying against the slice", () => {
+    expect(
+      resolve({
+        move: repoMove("src/old.ts", { declared: true, fromLines: [[2, 4]] }),
+        workingSha: SLICE_SHA,
+        originBaseByPath: [
+          ["src/new.ts", originBase(SLICE_SHA, { lines: [[2, 4]] })],
+        ],
+        mergeBaseBlobs: [
+          ["src/new.ts", PATH_SHA],
+          ["src/old.ts", ORIGIN_SHA],
+        ],
+      }),
+    ).toEqual({
+      diffBaseSha: PATH_SHA,
+      diffBasePath: "src/new.ts",
+      moveClassification: "verbatim",
+      originContentUnavailable: false,
+      // Still where the file came from, whatever the diff shows
+      originLines: [[2, 4]],
+      originLinesOutOfRange: false,
+    });
+  });
+
+  it("reports the origin lines of the base that won behind a reviewed snapshot", () => {
+    expect(
+      resolve({
+        move: repoMove("src/old.ts", { declared: true, fromLines: [[2, 4]] }),
+        useSnapshotBase: true,
+        reviewedSha: REVIEWED_SHA,
+        originBaseByPath: [
+          ["src/new.ts", originBase(SLICE_SHA, { lines: [[2, 4]] })],
+        ],
+      }).originLines,
+    ).toEqual([[2, 4]]);
+  });
+
+  it("warns about out-of-range origin lines only where the origin decides the base", () => {
+    const move = repoMove("src/old.ts", {
+      declared: true,
+      fromLines: [[2, 400]],
+    });
+    const originBaseByPath: [string, OriginBase][] = [
+      ["src/new.ts", originBase(ORIGIN_SHA, { linesOutOfRange: true })],
+    ];
+    expect(resolve({ move, originBaseByPath })).toEqual({
+      diffBaseSha: ORIGIN_SHA,
+      diffBasePath: "src/old.ts",
+      moveClassification: "adapted",
+      originContentUnavailable: false,
+      originLines: undefined,
+      originLinesOutOfRange: true,
+    });
+    expect(
+      resolve({
+        move,
+        originBaseByPath,
+        mergeBaseBlobs: [["src/new.ts", PATH_SHA]],
+      }).originLinesOutOfRange,
+    ).toBe(false);
+    expect(
+      resolve({
+        move,
+        originBaseByPath,
+        useSnapshotBase: true,
+        reviewedSha: REVIEWED_SHA,
+      }).originLinesOutOfRange,
+    ).toBe(false);
   });
 });
 
@@ -459,6 +611,44 @@ interface FakeRepo {
   workingShas: Record<string, string>;
   objectTypes: Record<string, string>;
 }
+
+// Object ids the fake database hands out. Content-derived like git's own, so
+// a test can name the slice it expects without running git.
+const fakeSha = (content: string): string =>
+  createHash("sha1").update(content).digest("hex");
+
+interface FakeSliceIo extends SliceIo {
+  // One `<method>:<sha>` entry per call, in call order
+  calls: string[];
+}
+
+const fakeSliceIo = (contents: string[]): FakeSliceIo => {
+  const store = new Map<string, Buffer>(
+    contents.map((content) => [fakeSha(content), Buffer.from(content)]),
+  );
+  const calls: string[] = [];
+  return {
+    calls,
+    readBlob: async (sha) => {
+      calls.push(`readBlob:${sha}`);
+      const bytes = store.get(sha);
+      if (bytes === undefined) {
+        throw new Error(`fatal: Not a valid object name ${sha}`);
+      }
+      return bytes;
+    },
+    writeBlob: async (bytes) => {
+      const sha = fakeSha(bytes.toString());
+      calls.push(`writeBlob:${sha}`);
+      store.set(sha, bytes);
+      return sha;
+    },
+    blobExists: async (sha) => {
+      calls.push(`blobExists:${sha}`);
+      return store.has(sha);
+    },
+  };
+};
 
 const MERGE_BASE = "abcdef0";
 const SENTINEL_SHA = "9".repeat(40);
@@ -965,6 +1155,177 @@ describe("computeReviewModel", () => {
       });
     }
   });
+
+  const ORIGIN_CONTENT = "one\ntwo\nthree\nfour\n";
+  const EXTRACTED_CONTENT = "two\nthree\n";
+
+  // The origin is edited in place and the extraction is a new untracked file,
+  // which is what an extraction looks like to the review set
+  const extractionRepo = (): Partial<FakeRepo> => ({
+    changes: [["M", "src/origin.ts"]],
+    untracked: ["src/extracted.ts"],
+    baseBlobs: { "src/origin.ts": fakeSha(ORIGIN_CONTENT) },
+    workingShas: {
+      "src/origin.ts": WORKING_SHA,
+      "src/extracted.ts": fakeSha(EXTRACTED_CONTENT),
+    },
+  });
+
+  const extractionMoves = (): MoveDeclaration[] => [
+    declaration("src/extracted.ts", "src/origin.ts", "repo", {
+      fromLines: [[2, 3]],
+      baseBlob: fakeSha(EXTRACTED_CONTENT),
+    }),
+  ];
+
+  it("diffs a declared extraction against a slice of its origin", async () => {
+    const git = await setUp(extractionRepo());
+    const model = await computeReviewModel(git, "main", {
+      moves: extractionMoves(),
+      sliceIo: fakeSliceIo([ORIGIN_CONTENT]),
+    });
+    // The origin was extracted from, not emptied, so it keeps its own row
+    expect(model.files.map((file) => file.path)).toEqual([
+      "src/extracted.ts",
+      "src/origin.ts",
+    ]);
+    expect(model.files[0]).toMatchObject({
+      diffBaseSha: fakeSha(EXTRACTED_CONTENT),
+      diffBasePath: "src/origin.ts",
+      movedFrom: "src/origin.ts",
+      moveDeclared: true,
+      moveClassification: "verbatim",
+      originLines: [[2, 3]],
+      originLinesOutOfRange: false,
+    });
+    expect(model.sliceShas).toEqual([fakeSha(EXTRACTED_CONTENT)]);
+  });
+
+  it("resolves two extractions from one origin independently", async () => {
+    const head = "one\ntwo\n";
+    const tail = "three\nfour\n";
+    const git = await setUp({
+      changes: [["M", "src/origin.ts"]],
+      untracked: ["src/head.ts", "src/tail.ts"],
+      baseBlobs: { "src/origin.ts": fakeSha(ORIGIN_CONTENT) },
+      workingShas: {
+        "src/origin.ts": WORKING_SHA,
+        "src/head.ts": fakeSha(head),
+        "src/tail.ts": WORKING_SHA,
+      },
+    });
+    const model = await computeReviewModel(git, "main", {
+      moves: [
+        declaration("src/head.ts", "src/origin.ts", "repo", {
+          fromLines: [[1, 2]],
+          baseBlob: fakeSha(head),
+        }),
+        declaration("src/tail.ts", "src/origin.ts", "repo", {
+          fromLines: [[3, 4]],
+          baseBlob: fakeSha(tail),
+        }),
+      ],
+      sliceIo: fakeSliceIo([ORIGIN_CONTENT]),
+    });
+    expect(
+      model.files.map((file) => [
+        file.path,
+        file.diffBaseSha,
+        file.originLines,
+        file.moveClassification,
+      ]),
+    ).toEqual([
+      ["src/head.ts", fakeSha(head), [[1, 2]], "verbatim"],
+      ["src/origin.ts", fakeSha(ORIGIN_CONTENT), undefined, undefined],
+      ["src/tail.ts", fakeSha(tail), [[3, 4]], "adapted"],
+    ]);
+    expect(new Set(model.sliceShas)).toEqual(
+      new Set([fakeSha(head), fakeSha(tail)]),
+    );
+  });
+
+  it("writes a slice once and reuses it from the cache on the next refresh", async () => {
+    const git = await setUp(extractionRepo());
+    const io = fakeSliceIo([ORIGIN_CONTENT]);
+    const sliceCache = new Map<string, string>();
+    const cold = await computeReviewModel(git, "main", {
+      moves: extractionMoves(),
+      sliceIo: io,
+      sliceCache,
+    });
+    expect(io.calls.filter((call) => call.startsWith("writeBlob"))).toEqual([
+      `writeBlob:${fakeSha(EXTRACTED_CONTENT)}`,
+    ]);
+
+    io.calls.length = 0;
+    const warm = await computeReviewModel(git, "main", {
+      moves: extractionMoves(),
+      sliceIo: io,
+      sliceCache,
+    });
+    expect(io.calls.some((call) => call.startsWith("writeBlob"))).toBe(false);
+    expect(warm).toEqual(cold);
+  });
+
+  it("leaves a repo move that declares no extraction to the merge base", async () => {
+    const git = await setUp({
+      changes: [
+        ["R100", "src/renamed-from.ts", "src/renamed.ts"],
+        ["A", "src/moved.ts"],
+      ],
+      baseBlobs: {
+        "src/renamed-from.ts": ORIGIN_SHA,
+        "src/origin.ts": PATH_SHA,
+      },
+      workingShas: {
+        "src/renamed.ts": WORKING_SHA,
+        "src/moved.ts": WORKING_SHA,
+      },
+    });
+    const io = fakeSliceIo([]);
+    const model = await computeReviewModel(git, "main", {
+      moves: [declaration("src/moved.ts", "src/origin.ts", "repo")],
+      sliceIo: io,
+    });
+    expect(
+      model.files.map((file) => [
+        file.path,
+        file.diffBaseSha,
+        file.diffBasePath,
+        file.moveDeclared,
+      ]),
+    ).toEqual([
+      ["src/moved.ts", PATH_SHA, "src/origin.ts", true],
+      ["src/renamed.ts", ORIGIN_SHA, "src/renamed-from.ts", false],
+    ]);
+    // Nothing to resolve means nothing to ask the object database
+    expect(io.calls).toEqual([]);
+    expect(model.sliceShas).toEqual([]);
+  });
+
+  it("attaches a contract note to the file it names and drops the rest", async () => {
+    const git = await setUp({
+      changes: [
+        ["M", "src/edited.ts"],
+        ["M", "src/plain.ts"],
+      ],
+      baseBlobs: { "src/edited.ts": PATH_SHA, "src/plain.ts": PATH_SHA },
+      workingShas: {
+        "src/edited.ts": WORKING_SHA,
+        "src/plain.ts": WORKING_SHA,
+      },
+    });
+    const model = await computeReviewModel(git, "main", {
+      notes: new Map([
+        ["src/edited.ts", "rewritten around the new parser"],
+        ["src/absent.ts", "not in the review set"],
+      ]),
+    });
+    expect(model.files.map((file) => [file.path, file.fileNote])).toEqual([
+      ["src/edited.ts", "rewritten around the new parser"],
+      ["src/plain.ts", undefined],
+    ]);
+  });
 });
 
 const reviewFile = (
@@ -981,8 +1342,10 @@ const reviewFile = (
   diffBasePath: path,
   movedFrom: undefined,
   moveOrigin: undefined,
+  moveDeclared: false,
   donor: undefined,
   moveNote: undefined,
+  originLinesOutOfRange: false,
   moveClassification: undefined,
   originContentUnavailable: false,
   triage: "normal",

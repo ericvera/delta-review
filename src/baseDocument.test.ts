@@ -14,8 +14,10 @@ const file = (
   diffBasePath: overrides.path,
   movedFrom: undefined,
   moveOrigin: undefined,
+  moveDeclared: false,
   donor: undefined,
   moveNote: undefined,
+  originLinesOutOfRange: false,
   moveClassification: undefined,
   originContentUnavailable: false,
   triage: "normal",
@@ -26,6 +28,7 @@ const model = (files: ReviewFile[]): ReviewModel => ({
   branch: "feat/moves",
   mergeBase: "abc123",
   files,
+  sliceShas: [],
 });
 
 describe("baseBlobForNote", () => {

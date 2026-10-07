@@ -20,8 +20,10 @@ const file = (
   diffBasePath: overrides.path,
   movedFrom: undefined,
   moveOrigin: undefined,
+  moveDeclared: false,
   donor: undefined,
   moveNote: undefined,
+  originLinesOutOfRange: false,
   moveClassification: undefined,
   originContentUnavailable: false,
   triage: "normal",
@@ -32,6 +34,7 @@ const model = (files: ReviewFile[]): ReviewModel => ({
   branch: "fix/deleted-file-notes",
   mergeBase: "abc123",
   files,
+  sliceShas: [],
 });
 
 const note = (overrides: Partial<Note> = {}): Note => ({

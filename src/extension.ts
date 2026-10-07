@@ -26,6 +26,7 @@ import {
   ReviewFile,
   ReviewModel,
 } from "./model";
+import { buildDiffTitle, buildRowDescription } from "./moveDisplay";
 import type { ResponsesFile } from "./notes";
 import {
   noteAnchorLines,
@@ -48,6 +49,7 @@ import {
   refreshDerived,
   setResolved,
 } from "./notesStore";
+import { provenanceEntriesFor } from "./provenance";
 import {
   clearAllReviewSnapshots,
   markReviewed,
@@ -55,6 +57,11 @@ import {
   unmarkReviewed,
 } from "./reviewState";
 import { createSerialQueue } from "./serialQueue";
+import {
+  anchorSlices,
+  anchorSlicesIntoCache,
+  deleteSliceRef,
+} from "./sliceAnchor";
 import { fileElementFor } from "./treeParents";
 import {
   collapseKeyFor,
@@ -296,6 +303,11 @@ export const activate = async (
   // a branch switch needs no invalidation (content identity is not
   // branch-scoped) — a repo switch does, and clears it in setActiveRepo.
   const hashCache = new Map<string, HashCacheEntry>();
+  // Origin slices written for declared extractions, kept across refreshes so a
+  // refresh re-slices only what the merge base actually moved. Keyed by origin
+  // blob and declared lines, so it too is invalidated by content rather than by
+  // branch — and cleared alongside the hash cache on a repo switch.
+  const sliceCache = new Map<string, string>();
   const refresh = async (): Promise<void> => {
     const generation = ++refreshGeneration;
     if (git === undefined) {
@@ -308,6 +320,7 @@ export const activate = async (
         "Open a folder inside a git repository to start reviewing.";
       statusBarItem.hide();
       renderNoteThreads([]);
+      commentController.renderProvenanceThreads([]);
       return;
     }
     const configuration = vscode.workspace.getConfiguration("deltaReview");
@@ -335,11 +348,21 @@ export const activate = async (
       }
       const moves =
         contractResult.state === "ok" ? contractResult.contract.moves : [];
+      const notes =
+        contractResult.state === "ok"
+          ? contractResult.contract.notes
+          : new Map<string, string>();
+      // Slices this refresh writes go into its own copy and reach the shared
+      // cache only once anchored, so a refresh superseded midway leaves no
+      // unanchored sha behind for a later one to reuse
+      const refreshSliceCache = new Map(sliceCache);
       let computed = await computeReviewModel(git, baseBranch, {
         autoReviewGlobs,
         branch,
         moves,
+        notes,
         hashCache,
+        sliceCache: refreshSliceCache,
       });
       if (generation !== refreshGeneration) {
         return;
@@ -373,13 +396,41 @@ export const activate = async (
             autoReviewGlobs,
             branch,
             moves,
+            notes,
             hashCache,
+            sliceCache: refreshSliceCache,
           });
           if (generation !== refreshGeneration) {
             return;
           }
         }
       }
+      // The slices this model diffs against exist only as loose objects until
+      // something points at them, so they are anchored before the model that
+      // names them is published — after the auto-mark recomputation, whose
+      // slice set is the one that counts. Every refresh still current at its
+      // queue slot anchors: an unchanged set costs a temp index and no commit,
+      // and a ref deleted outside the extension comes back here.
+      const gitForAnchor = git;
+      const anchorBranch = computed.branch;
+      const anchorShas = computed.sliceShas;
+      try {
+        await reviewStateQueue.run(() =>
+          anchorSlicesIntoCache({
+            anchor: (shas) => anchorSlices(gitForAnchor, anchorBranch, shas),
+            isCurrent: () => generation === refreshGeneration,
+            shas: anchorShas,
+            candidates: refreshSliceCache,
+            cache: sliceCache,
+          }),
+        );
+      } catch (error) {
+        console.warn("Delta Review: could not anchor origin slices", error);
+      }
+      if (generation !== refreshGeneration) {
+        return;
+      }
+
       let contractWarning: string | undefined;
       if (contractResult.state === "ok") {
         clusterModel = resolveClusterModel(
@@ -396,6 +447,10 @@ export const activate = async (
 
       model = computed;
       treeProvider.setModel(model);
+      // Rebuilt from the model beside the tree, not inside renderNoteThreads:
+      // provenance comes from the clusters contract, so it must survive a
+      // notes file that fails to load below.
+      commentController.renderProvenanceThreads(provenanceEntriesFor(model));
       treeView.message = contractWarning;
 
       const reviewedCount = model.files.filter(
@@ -523,6 +578,7 @@ export const activate = async (
       treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
       renderNoteThreads([]);
+      commentController.renderProvenanceThreads([]);
     }
   };
 
@@ -622,9 +678,10 @@ export const activate = async (
     if (repoRoot === git?.repoRoot) {
       return;
     }
-    // Cached hashes are keyed by repo-relative path, so they mean nothing in
-    // another checkout
+    // Cached hashes are keyed by repo-relative path, and cached slices name
+    // objects in this checkout's database, so neither means anything in another
     hashCache.clear();
+    sliceCache.clear();
     if (repoRoot === undefined) {
       git = undefined;
       disposeRepoWatcher();
@@ -655,10 +712,15 @@ export const activate = async (
       ? "last reviewed"
       : "merge base";
     const workingLabel = file.deleted ? "deleted" : "working tree";
-    const title =
-      file.movedFrom === undefined
-        ? `${basename(file.path)} (${baseLabel} ↔ ${workingLabel})`
-        : `${basename(file.path)} (moved from ${file.movedFrom} — ${baseLabel} ↔ ${workingLabel})`;
+    // Assembled by the display module, which owns the move wording the
+    // tooltip uses too
+    const title = buildDiffTitle({
+      path: file.path,
+      movedFrom: file.movedFrom,
+      originLines: file.originLines,
+      baseLabel,
+      workingLabel,
+    });
     // The TextDocumentShowOptions must be the positional 4th argument —
     // folding it into the title silently breaks the command
     await vscode.commands.executeCommand(
@@ -1228,14 +1290,21 @@ export const activate = async (
         // pending write would be undone by it, the ref reappearing moments
         // after it was deleted
         const activeGit = git;
-        const ref = reviewRefForBranch(model.branch);
-        try {
-          await reviewStateQueue.run(() =>
-            activeGit.run(["update-ref", "-d", ref]),
-          );
-        } catch {
-          // Ref did not exist — nothing to clear
-        }
+        const clearedBranch = model.branch;
+        const ref = reviewRefForBranch(clearedBranch);
+        await reviewStateQueue.run(async () => {
+          try {
+            await activeGit.run(["update-ref", "-d", ref]);
+          } catch {
+            // Ref did not exist — nothing to clear
+          }
+          // The slice anchor goes with it: its blobs are review state too.
+          // refs/review-notes/<branch> deliberately does not.
+          await deleteSliceRef(activeGit, clearedBranch);
+        });
+        // Those slices are unanchored now, so the cache may not hand them to
+        // the refresh below — it writes them, and the ref, again
+        sliceCache.clear();
         await refresh();
       },
     ),
@@ -1267,6 +1336,39 @@ export const activate = async (
       }
     }),
   );
+
+  // Test hook for the scripted extension-host check. Rendered comment threads
+  // and tree row descriptions cannot be read back through the public API, so
+  // the check reads them from here. Registered only under
+  // DELTA_REVIEW_TEST=1 and deliberately absent from package.json's
+  // contributes.commands, so no shipped build exposes it.
+  if (process.env.DELTA_REVIEW_TEST === "1") {
+    context.subscriptions.push(
+      vscode.commands.registerCommand("deltaReview.__inspect", () => {
+        const files = model?.files ?? [];
+        return {
+          files,
+          threads: commentController.provenanceThreads(),
+          // Row text as tree mode renders it (no directory text), by path
+          rows: Object.fromEntries(
+            files.map((file) => [
+              file.path,
+              buildRowDescription({
+                path: file.path,
+                directoryText: undefined,
+                movedFrom: file.movedFrom,
+                moveOrigin: file.moveOrigin,
+                donor: file.donor,
+                moveClassification: file.moveClassification,
+                originLines: file.originLines,
+              }),
+            ]),
+          ),
+          notesBadge: notesTreeView.badge,
+        };
+      }),
+    );
+  }
 
   const gitApi = await getGitApi();
   if (gitApi !== undefined) {

@@ -8,36 +8,61 @@ export interface Git {
   ) => Promise<string>;
 }
 
-// Runs git with the given arguments in the repo root and resolves with stdout.
-// Rejections carry git's stderr in the error message.
+// Runs git in `cwd` and resolves with raw stdout. Buffer mode is the shared
+// primitive because blob content has no encoding of its own: `run` decodes to
+// UTF-8 itself, while the blob helpers must keep every byte. Rejections carry
+// git's stderr in the error message.
+const runGit = (
+  cwd: string,
+  args: string[],
+  options?: { stdin?: string | Buffer; env?: NodeJS.ProcessEnv },
+): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    const child = execFile(
+      "git",
+      args,
+      {
+        cwd,
+        maxBuffer: 256 * 1024 * 1024,
+        encoding: "buffer",
+        env: { ...process.env, ...options?.env },
+      },
+      (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+    if (child.stdin) {
+      if (options?.stdin !== undefined) {
+        child.stdin.write(options.stdin);
+      }
+      child.stdin.end();
+    }
+  });
+
 export const createGit = (repoRoot: string): Git => ({
   repoRoot,
-  run: (args, options) =>
-    new Promise((resolve, reject) => {
-      const child = execFile(
-        "git",
-        args,
-        {
-          cwd: repoRoot,
-          maxBuffer: 256 * 1024 * 1024,
-          env: { ...process.env, ...options?.env },
-        },
-        (error, stdout) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve(stdout);
-        },
-      );
-      if (child.stdin) {
-        if (options?.stdin !== undefined) {
-          child.stdin.write(options.stdin);
-        }
-        child.stdin.end();
-      }
-    }),
+  run: async (args, options) =>
+    (await runGit(repoRoot, args, options)).toString("utf8"),
 });
+
+// Reads a blob's content as bytes. Callers slice and re-hash this content and
+// the resulting object ids must match git's own, which a UTF-8 round-trip
+// through a string would not survive.
+export const readBlobBytes = (repoRoot: string, sha: string): Promise<Buffer> =>
+  runGit(repoRoot, ["cat-file", "blob", sha]);
+
+// Writes bytes into the object database as a loose blob and resolves its id.
+export const writeBlobBytes = async (
+  repoRoot: string,
+  bytes: Buffer,
+): Promise<string> =>
+  (await runGit(repoRoot, ["hash-object", "-w", "--stdin"], { stdin: bytes }))
+    .toString("utf8")
+    .trim();
 
 export const splitNulTerminated = (output: string): string[] =>
   output.split("\0").filter((entry) => entry !== "");

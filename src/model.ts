@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import type { MoveDeclaration } from "./clusters";
+import type { LineRange, MoveDeclaration } from "./clusters";
 import {
   Git,
   parseLsTreeOutput,
@@ -13,6 +13,12 @@ import {
   statPaths,
   updateCache,
 } from "./hashCache";
+import {
+  createSliceIo,
+  resolveDeclaredOriginBases,
+  type OriginBase,
+  type SliceIo,
+} from "./originSlice";
 import { DELETED_SENTINEL_CONTENT, readReviewState } from "./reviewState";
 import { computeTriage, Triage } from "./triage";
 
@@ -53,16 +59,28 @@ export interface ReviewFile {
   movedFrom: string | undefined;
   // Origin kind of the move; undefined when the file is not a move
   moveOrigin?: MoveOrigin;
+  // True when the move was declared in the contract rather than detected by
+  // git; false for every file that is not a move
+  moveDeclared: boolean;
   // Donor project display name from an external declaration
   donor?: string;
   // The declaration's free-text note about the move
   moveNote?: string;
+  // Origin lines the base side holds, when the move resolved to a slice of
+  // its origin rather than to a whole file
+  originLines?: LineRange[];
+  // True when the declared origin lines no longer fit the origin file and the
+  // whole origin stands in for them. Gated like `originContentUnavailable`:
+  // when another rule supplies the base there is nothing to warn about
+  originLinesOutOfRange: boolean;
   // Content comparison against the origin base — never read from the
   // contract; undefined when the file is not a move
   moveClassification?: MoveClassification;
   // True when the diff falls back to an empty left side because the move's
   // origin base could not be resolved
   originContentUnavailable: boolean;
+  // The contract's one-line remark about this file, for the reviewer
+  fileNote?: string;
   // "auto" when the file is mechanical (matches an auto-review glob or is
   // linguist-generated); "normal" otherwise
   triage: Triage;
@@ -72,6 +90,9 @@ export interface ReviewModel {
   branch: string;
   mergeBase: string;
   files: ReviewFile[];
+  // Object ids of the origin slices these files diff against, so the caller
+  // can anchor them against garbage collection
+  sliceShas: string[];
 }
 
 // The scope an unmark acts on: every path holding a snapshot, whether or not
@@ -114,9 +135,14 @@ export interface ResolvedMove {
   from: string;
   origin: MoveOrigin;
   donor: string | undefined;
-  // Declared object id of the origin's content — external origins only, and
-  // not yet checked against the object database
+  // Declared object id of the content this file came from, repo or external
+  // origin alike; not yet checked against the object database
   baseBlob: string | undefined;
+  // Declared origin lines this file was extracted from; undefined when the
+  // move names no extraction
+  fromLines: LineRange[] | undefined;
+  // True for a contract declaration, false for a rename git detected
+  declared: boolean;
   note: string | undefined;
 }
 
@@ -149,13 +175,15 @@ export const adjustReviewSetForMoves = (input: {
   const gitPaths = new Set(input.paths);
   const movesByPath = new Map<string, ResolvedMove>();
   for (const [path, from] of input.movedFromByPath) {
-    // A detected rename is a repo-origin move, indistinguishable from a
-    // declared one
+    // A detected rename is a repo-origin move; `declared` is the only thing
+    // that tells it apart from a declaration downstream
     movesByPath.set(path, {
       from,
       origin: "repo",
       donor: undefined,
       baseBlob: undefined,
+      fromLines: undefined,
+      declared: false,
       note: undefined,
     });
   }
@@ -178,6 +206,8 @@ export const adjustReviewSetForMoves = (input: {
       origin: move.origin,
       donor: move.donor,
       baseBlob: move.baseBlob,
+      fromLines: move.fromLines,
+      declared: true,
       note: move.note,
     });
   }
@@ -207,6 +237,8 @@ export interface FileBaseResolution {
   diffBasePath: string;
   moveClassification: MoveClassification | undefined;
   originContentUnavailable: boolean;
+  originLines: LineRange[] | undefined;
+  originLinesOutOfRange: boolean;
 }
 
 // Selects one file's diff base, the path identifying it, and — for a move —
@@ -226,16 +258,21 @@ export const resolveFileBase = (input: {
   useSnapshotBase: boolean;
   // Merge-base path -> blob sha
   mergeBaseBlobs: ReadonlyMap<string, string>;
-  // File path -> the external origin blob, already checked to be readable
-  externalBaseShaByPath: ReadonlyMap<string, string>;
+  // File path -> the origin base a declaration resolved to: a slice of the
+  // origin, a declared blob, or the whole origin file
+  originBaseByPath: ReadonlyMap<string, OriginBase>;
 }): FileBaseResolution => {
   const { move, path } = input;
+  const originBase = input.originBaseByPath.get(path);
+  // A repo move that declared nothing to resolve came from the whole origin
+  // file as it stood at the merge base
   const originBaseSha =
     move === undefined
       ? undefined
-      : move.origin === "repo"
-        ? input.mergeBaseBlobs.get(move.from)
-        : input.externalBaseShaByPath.get(path);
+      : (originBase?.sha ??
+        (move.origin === "repo"
+          ? input.mergeBaseBlobs.get(move.from)
+          : undefined));
   const existsInMergeBase = input.mergeBaseBlobs.has(path);
 
   let diffBaseSha: string | undefined;
@@ -262,15 +299,20 @@ export const resolveFileBase = (input: {
           ? "verbatim"
           : "adapted";
 
+  // Nothing else can supply a base, so an origin-side shortfall is what the
+  // reviewer actually ends up looking at
+  const originDecidesBase = !input.useSnapshotBase && !existsInMergeBase;
+
   return {
     diffBaseSha,
     diffBasePath,
     moveClassification,
     originContentUnavailable:
-      move !== undefined &&
-      originBaseSha === undefined &&
-      !input.useSnapshotBase &&
-      !existsInMergeBase,
+      move !== undefined && originBaseSha === undefined && originDecidesBase,
+    // Reported whichever base won: the row still says where the file came from
+    originLines: originBase?.lines,
+    originLinesOutOfRange:
+      originBase?.linesOutOfRange === true && originDecidesBase,
   };
 };
 
@@ -293,31 +335,6 @@ const fetchGeneratedPaths = async (
   } catch {
     return new Set();
   }
-};
-
-// Checks each external origin's declared `baseBlob` against the object
-// database and returns file path -> blob sha for the usable ones. An object
-// that is missing, unreadable, or not a blob is simply left out: the file
-// degrades to no origin base rather than failing the refresh.
-const resolveExternalBaseBlobs = async (
-  git: Git,
-  movesByPath: ReadonlyMap<string, ResolvedMove>,
-): Promise<Map<string, string>> => {
-  const resolved = new Map<string, string>();
-  for (const [path, move] of movesByPath) {
-    if (move.origin !== "external" || move.baseBlob === undefined) {
-      continue;
-    }
-    try {
-      const type = (await git.run(["cat-file", "-t", move.baseBlob])).trim();
-      if (type === "blob") {
-        resolved.set(path, move.baseBlob);
-      }
-    } catch {
-      // Unreadable or garbage-collected object — no origin base
-    }
-  }
-  return resolved;
 };
 
 // Pathspecs are sent in batches so a large review set cannot overflow the
@@ -445,10 +462,20 @@ export const computeReviewModel = async (
     // Skips the HEAD lookup when the caller already resolved the branch
     branch?: string;
     moves?: MoveDeclaration[];
+    // The contract's per-file remarks, keyed by the file's current path; a key
+    // naming no file in the review set is ignored
+    notes?: ReadonlyMap<string, string>;
     // Working-tree content shas carried across refreshes, keyed by path and
     // validated by stat. Owned and cleared by the caller; absent means every
     // existing path is re-hashed.
     hashCache?: Map<string, HashCacheEntry>;
+    // Object-database access for origin slicing; the repository's own unless a
+    // caller (a test) injects another
+    sliceIo?: SliceIo;
+    // Origin slice ids carried across refreshes, keyed by origin blob and
+    // declared lines. Owned and cleared by the caller, like `hashCache`;
+    // absent means every declared extraction is re-sliced.
+    sliceCache?: Map<string, string>;
   },
 ): Promise<ReviewModel> => {
   const branch = options?.branch ?? (await resolveBranch(git));
@@ -526,10 +553,13 @@ export const computeReviewModel = async (
   );
 
   const reviewState = await readReviewState(git, branch);
-  const externalBaseShaByPath = await resolveExternalBaseBlobs(
-    git,
-    movesByPath,
-  );
+  const { bases: originBaseByPath, sliceShas } =
+    await resolveDeclaredOriginBases(
+      options?.sliceIo ?? createSliceIo(git),
+      movesByPath,
+      baseBlobs,
+      options?.sliceCache ?? new Map(),
+    );
   const sentinelSha = await resolveSentinelSha(git);
 
   const existingPaths = paths.filter((path) => !isDeletedFromWorkingTree(path));
@@ -558,7 +588,7 @@ export const computeReviewModel = async (
       reviewedSha,
       useSnapshotBase,
       mergeBaseBlobs: baseBlobs,
-      externalBaseShaByPath,
+      originBaseByPath,
     });
     return {
       path,
@@ -573,13 +603,17 @@ export const computeReviewModel = async (
       diffBasePath: base.diffBasePath,
       movedFrom: move?.from,
       moveOrigin: move?.origin,
+      moveDeclared: move?.declared ?? false,
       donor: move?.donor,
       moveNote: move?.note,
+      originLines: base.originLines,
+      originLinesOutOfRange: base.originLinesOutOfRange,
       moveClassification: base.moveClassification,
       originContentUnavailable: base.originContentUnavailable,
+      fileNote: options?.notes?.get(path),
       triage: triageByPath.get(path) ?? "normal",
     };
   });
 
-  return { branch, mergeBase, files };
+  return { branch, mergeBase, files, sliceShas };
 };

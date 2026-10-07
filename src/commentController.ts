@@ -22,6 +22,7 @@ import {
   editReviewerTurn,
   setResolved,
 } from "./notesStore";
+import type { ProvenanceEntry } from "./provenance";
 import {
   canReplyFor,
   sameCommentDisplays,
@@ -64,9 +65,30 @@ interface NoteComment extends vscode.Comment {
   turnText: string;
 }
 
+// A rendered provenance thread as an inspection-only value: the scripted
+// extension-host check in the repo's test runner reads these, since a live
+// CommentThread cannot leave the extension host. Nothing in the extension
+// itself consumes it.
+export interface ProvenanceThreadSnapshot {
+  path: string;
+  uri: string;
+  // undefined is the file-level placement — a line range would mean the
+  // thread had been pinned to a line like a note
+  range: undefined | { startLine: number; endLine: number };
+  canReply: boolean;
+  contextValue: string | undefined;
+  body: string;
+}
+
 export interface NoteCommentController extends vscode.Disposable {
   // Reconciles rendered comment threads with the given display threads
   renderThreads: (threads: NoteThread[]) => void;
+  // Reconciles the read-only file-level provenance threads with the given
+  // entries. Independent of renderThreads: provenance comes from the review
+  // model, not the notes file, so a broken notes file leaves it standing.
+  renderProvenanceThreads: (entries: ProvenanceEntry[]) => void;
+  // Inspection accessor for the scripted extension-host check
+  provenanceThreads: () => ProvenanceThreadSnapshot[];
   // Expands a note's rendered thread — the reveal approximation for
   // click-to-navigate (VS Code 1.90 has no stable thread.reveal())
   expandThread: (noteId: string) => void;
@@ -431,6 +453,106 @@ export const createNoteCommentController = (
     return -1;
   };
 
+  // Provenance threads by repo-relative path. Deliberately a second cache
+  // rather than a flag on ThreadEntry: these threads are not notes, so no
+  // note-side code path — sweep, restyle, re-clamp, threadNoteIds lookup —
+  // may ever reach one. uriKey detects a file becoming deleted, which moves
+  // its thread onto the empty base document; body detects contract edits.
+  interface ProvenanceThreadEntry {
+    thread: vscode.CommentThread;
+    uriKey: string;
+    body: string;
+  }
+  const provenanceCache = new Map<string, ProvenanceThreadEntry>();
+
+  const provenanceCommentsFor = (body: string): vscode.Comment[] => [
+    // No contextValue: the comment menus key on "reviewerTurn" and would
+    // otherwise hang edit/delete actions off a thread nobody can edit
+    {
+      body: new vscode.MarkdownString(body),
+      mode: vscode.CommentMode.Preview,
+      author: { name: "Delta Review" },
+    },
+  ];
+
+  // Mirrors openDiff's right-side choice, so the thread lands on the document
+  // the diff actually shows: the working file, or the empty base document
+  // standing in for a deleted file's missing right side
+  const provenanceUri = (git: Git, entry: ProvenanceEntry): vscode.Uri =>
+    entry.deleted
+      ? createReviewBaseUri(entry.path, undefined)
+      : vscode.Uri.file(join(git.repoRoot, entry.path));
+
+  const clearProvenanceThreads = (): void => {
+    for (const entry of provenanceCache.values()) {
+      entry.thread.dispose();
+    }
+    provenanceCache.clear();
+  };
+
+  const renderProvenanceThreads = (entries: ProvenanceEntry[]): void => {
+    const git = getGit();
+    if (git === undefined) {
+      clearProvenanceThreads();
+      return;
+    }
+    const rendered = new Set<string>();
+    for (const entry of entries) {
+      rendered.add(entry.path);
+      const uri = provenanceUri(git, entry);
+      const uriKey = uri.toString();
+      const cached = provenanceCache.get(entry.path);
+      // Thread URIs are immutable, so a relocated thread is disposed and
+      // rebuilt rather than moved
+      if (cached === undefined || cached.uriKey !== uriKey) {
+        cached?.thread.dispose();
+        const thread = controller.createCommentThread(
+          uri,
+          // The typings demand a range at creation; clearing it afterwards is
+          // what pins the thread above line 1 as a file-level thread
+          new vscode.Range(0, 0, 0, 0),
+          provenanceCommentsFor(entry.body),
+        );
+        thread.range = undefined;
+        // The API default is true, and the controller-wide placeholder would
+        // otherwise offer a reply box on a thread that takes no replies
+        thread.canReply = false;
+        thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+        provenanceCache.set(entry.path, { thread, uriKey, body: entry.body });
+        continue;
+      }
+      if (cached.body !== entry.body) {
+        cached.thread.comments = provenanceCommentsFor(entry.body);
+        cached.body = entry.body;
+      }
+    }
+    for (const [path, entry] of provenanceCache) {
+      if (!rendered.has(path)) {
+        entry.thread.dispose();
+        provenanceCache.delete(path);
+      }
+    }
+  };
+
+  const provenanceThreads = (): ProvenanceThreadSnapshot[] =>
+    [...provenanceCache].map(([path, entry]) => {
+      const range = entry.thread.range;
+      const body = entry.thread.comments[0]?.body ?? "";
+      return {
+        path,
+        uri: entry.thread.uri.toString(),
+        range:
+          range === undefined
+            ? undefined
+            : { startLine: range.start.line, endLine: range.end.line },
+        // The typings widened canReply to boolean | CommentAuthorInformation;
+        // anything but an explicit false means the thread takes replies
+        canReply: entry.thread.canReply !== false,
+        contextValue: entry.thread.contextValue,
+        body: typeof body === "string" ? body : body.value,
+      };
+    });
+
   const renderThreads = (threads: NoteThread[]): void => {
     const git = getGit();
     if (git === undefined) {
@@ -439,6 +561,9 @@ export const createNoteCommentController = (
       }
       threadCache.clear();
       threadNoteIds.clear();
+      // No repo means no paths to resolve provenance URIs against, so those
+      // threads go with the notes
+      clearProvenanceThreads();
       return;
     }
     const model = getModel();
@@ -805,6 +930,8 @@ export const createNoteCommentController = (
 
   return {
     renderThreads,
+    renderProvenanceThreads,
+    provenanceThreads,
     expandThread,
     reclampThreadsFor,
     addNote,
@@ -820,6 +947,7 @@ export const createNoteCommentController = (
       // Disposing the controller disposes its threads
       threadCache.clear();
       threadNoteIds.clear();
+      clearProvenanceThreads();
       controller.dispose();
     },
   };

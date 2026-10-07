@@ -1,5 +1,7 @@
+import type { LineRange } from "./clusters";
 import { escapeMarkdownText } from "./markdown";
 import type { MoveClassification, MoveOrigin } from "./model";
+import { formatLineRanges } from "./originSlice";
 
 // Character count above which the assembled description is shortened. A
 // tuning constant matched to a ~300px sidebar, not a contract.
@@ -12,6 +14,9 @@ export interface TooltipOriginInput {
   // Origin path, declared or detected; undefined when the file is not a move
   movedFrom: string | undefined;
   donor: string | undefined;
+  // Origin lines the base side holds; undefined unless the move resolved to a
+  // slice of its origin, which only a declared extraction does
+  originLines?: LineRange[];
 }
 
 export interface RowDescriptionInput {
@@ -25,12 +30,23 @@ export interface RowDescriptionInput {
   moveOrigin: MoveOrigin | undefined;
   donor: string | undefined;
   moveClassification: MoveClassification | undefined;
+  // Origin lines the base side holds; undefined unless the move resolved to a
+  // slice of its origin, which only a declared extraction does
+  originLines?: LineRange[];
 }
 
 // Splits a path into non-empty segments, so a leading "/" or "../" never
 // yields an empty segment that could match an empty donor name
 const splitSegments = (path: string): string[] =>
   path.split("/").filter((segment) => segment !== "");
+
+// The origin's filename. Line numbers only mean something against one file,
+// so the directories above it are noise on an extraction row. Falls back to
+// the whole path when it has no segments to take.
+const lastSegment = (path: string): string => {
+  const segments = splitSegments(path);
+  return segments[segments.length - 1] ?? path;
+};
 
 // Reduces an external origin to its portion within the donor project: the
 // segments following the last whole segment equal to the donor name. With no
@@ -123,9 +139,24 @@ export const buildRowDescription = ({
   moveOrigin,
   donor,
   moveClassification,
+  originLines,
 }: RowDescriptionInput): string | undefined => {
   if (movedFrom === undefined || movedFrom === "") {
     return directoryText;
+  }
+
+  // An extraction names the origin file and the lines it took, skipping every
+  // reduction below: shared-suffix stripping would leave the line numbers
+  // hanging off a directory, and the threshold does not apply — the numbers
+  // are the point, and the tooltip carries the full path and every range.
+  // Extraction is repo-only, so no donor can appear here.
+  if (originLines !== undefined) {
+    return joinParts([
+      directoryText,
+      "←",
+      `${lastSegment(movedFrom)}:${formatLineRanges(originLines, "row")}`,
+      classificationText(moveClassification),
+    ]);
   }
 
   // Brackets mean "another project"; their absence means nothing in
@@ -189,9 +220,17 @@ const escapeOriginText = (text: string): string =>
 export const buildTooltipOriginLine = ({
   movedFrom,
   donor,
+  originLines,
 }: TooltipOriginInput): string | undefined => {
   if (movedFrom === undefined || movedFrom === "") {
     return undefined;
+  }
+  // Every range spelled out, where the row had room for only the first
+  if (originLines !== undefined) {
+    return `Extracted from ${escapeOriginText(movedFrom)} lines ${formatLineRanges(
+      originLines,
+      "prose",
+    )}`;
   }
   const line = `Moved from ${escapeOriginText(movedFrom)}`;
   if (
@@ -202,4 +241,82 @@ export const buildTooltipOriginLine = ({
     return line;
   }
   return `${line} (donor: ${escapeOriginText(donor)})`;
+};
+
+export interface DiffTitleInput {
+  // Current repo-relative path of the file
+  path: string;
+  // Origin path, declared or detected; undefined when the file is not a move
+  movedFrom: string | undefined;
+  // Origin lines the base side holds; undefined unless the move resolved to a
+  // slice of its origin, which only a declared extraction does
+  originLines?: LineRange[];
+  // What the diff's left and right sides are, already worded by the caller
+  baseLabel: string;
+  workingLabel: string;
+}
+
+// The diff editor's tab title. Shares its move vocabulary with the tooltip
+// origin line above, so the two never drift apart.
+export const buildDiffTitle = ({
+  path,
+  movedFrom,
+  originLines,
+  baseLabel,
+  workingLabel,
+}: DiffTitleInput): string => {
+  const sides = `${baseLabel} ↔ ${workingLabel}`;
+  if (movedFrom === undefined || movedFrom === "") {
+    return `${lastSegment(path)} (${sides})`;
+  }
+  // A tab title has more room than a row, so every range is spelled out; the
+  // comma-separated form keeps it to one word
+  const origin =
+    originLines === undefined
+      ? `moved from ${movedFrom}`
+      : `extracted from ${movedFrom}:${formatLineRanges(originLines, "title")}`;
+  return `${lastSegment(path)} (${origin} — ${sides})`;
+};
+
+export interface TooltipStatusInput {
+  moveClassification: MoveClassification | undefined;
+  // Origin lines the base side holds; undefined unless the move resolved to a
+  // slice of its origin, which only a declared extraction does
+  originLines?: LineRange[];
+  originContentUnavailable: boolean;
+  originLinesOutOfRange: boolean;
+}
+
+// The tooltip lines describing what the diff is actually taken against: what
+// the reviewer got, then why they did not get what was declared. A file can
+// match the whole origin that stood in for out-of-range lines, so the
+// out-of-range warning follows the verbatim line rather than yielding to it —
+// otherwise the tooltip would hide a warning the provenance thread shows. The
+// unavailable warning cannot follow it: verbatim needs an origin base. Several
+// lines come back as separate markdown paragraphs, the tooltip's line form.
+// Returns undefined when there is nothing to say.
+export const buildTooltipStatusLine = ({
+  moveClassification,
+  originLines,
+  originContentUnavailable,
+  originLinesOutOfRange,
+}: TooltipStatusInput): string | undefined => {
+  const lines: string[] = [];
+  if (moveClassification === "verbatim") {
+    lines.push(
+      originLines === undefined
+        ? "Identical to the origin"
+        : "Identical to the extracted lines",
+    );
+  }
+  if (originLinesOutOfRange) {
+    lines.push(
+      "Declared lines are outside the origin. Showing the whole file.",
+    );
+  } else if (originContentUnavailable && lines.length === 0) {
+    lines.push(
+      "Origin content is no longer available — showing the whole file.",
+    );
+  }
+  return lines.length === 0 ? undefined : lines.join("\n\n");
 };

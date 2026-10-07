@@ -21,6 +21,9 @@ export interface ClusterDefinition {
   patterns: string[];
 }
 
+// A 1-based, inclusive line span of the origin file.
+export type LineRange = [start: number, end: number];
+
 // A file the writer moved into its current location, declared because git
 // cannot see the move: it came from another repository, or was rewritten
 // heavily enough that rename detection misses it.
@@ -28,17 +31,24 @@ export interface MoveDeclaration {
   path: string;
   from: string;
   origin: "repo" | "external";
-  // Donor project name and the origin's blob id — external origins only
+  // Donor project name — external origins only
   donor?: string;
+  // Blob id of the content this file came from
   baseBlob?: string;
+  // The origin's line spans this file was extracted from — repo origins on a
+  // version 3 contract only
+  fromLines?: LineRange[];
   note?: string;
 }
 
 export interface ClustersContract {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   clusters: ClusterDefinition[];
   // Always present; a version 1 contract normalizes to an empty list
   moves: MoveDeclaration[];
+  // Repo-relative path → one-line remark. Always present; empty below
+  // version 3
+  notes: Map<string, string>;
 }
 
 export interface ClusterBucket {
@@ -172,7 +182,8 @@ const isNonEmptyString = (value: unknown): value is string =>
 
 const isContractVersion = (
   value: unknown,
-): value is ClustersContract["version"] => value === 1 || value === 2;
+): value is ClustersContract["version"] =>
+  value === 1 || value === 2 || value === 3;
 
 const isMoveOrigin = (value: unknown): value is MoveDeclaration["origin"] =>
   value === "repo" || value === "external";
@@ -180,6 +191,31 @@ const isMoveOrigin = (value: unknown): value is MoveDeclaration["origin"] =>
 // Anchored: the value reaches `git cat-file blob <value>`, so a leading "-"
 // must never be accepted as it would be read as a command-line option.
 const BASE_BLOB_PATTERN = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/;
+
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+
+// Ascending, non-overlapping, 1-based inclusive spans. `previousEnd` starts
+// at 0 so the first pair's start also has to clear the 1-based floor.
+const isLineRangeList = (value: unknown): value is LineRange[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+  let previousEnd = 0;
+  for (const range of value) {
+    if (!Array.isArray(range) || range.length !== 2) {
+      return false;
+    }
+    const [start, end]: unknown[] = range;
+    if (!isInteger(start) || !isInteger(end)) {
+      return false;
+    }
+    if (start <= previousEnd || end < start) {
+      return false;
+    }
+    previousEnd = end;
+  }
+  return true;
+};
 
 // Validates one raw cluster entry; returns the normalized definition or a
 // user-facing error string.
@@ -223,6 +259,7 @@ const parseCluster = (
 const parseMove = (
   value: unknown,
   index: number,
+  allowsExtraction: boolean,
 ): { move: MoveDeclaration | undefined } | { error: string } => {
   const where = `move ${index + 1}`;
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -230,11 +267,17 @@ const parseMove = (
   }
   const entry = value as Record<string, unknown>;
   const isRepoOrigin = entry.origin === "repo";
-  // donor/baseBlob are meaningless for a repo origin: drop them whatever
-  // their type, so a harmless extra field never costs the reviewer their
-  // clustering.
+  // donor is meaningless for a repo origin, fromLines for an external one,
+  // and baseBlob for a repo origin before extraction existed: drop each
+  // whatever its type, so a harmless extra field never costs the reviewer
+  // their clustering.
   const rawDonor = isRepoOrigin ? undefined : entry.donor;
-  const rawBaseBlob = isRepoOrigin ? undefined : entry.baseBlob;
+  const rawBaseBlob =
+    isRepoOrigin && !allowsExtraction ? undefined : entry.baseBlob;
+  const rawFromLines =
+    allowsExtraction && entry.origin !== "external"
+      ? entry.fromLines
+      : undefined;
   // A repo move onto its own path declares nothing. Skip it before
   // validation and before dedup, so it can neither reject the contract nor
   // shadow a real declaration for the same path. Both keys must be non-empty
@@ -275,6 +318,15 @@ const parseMove = (
     }
     baseBlob = rawBaseBlob;
   }
+  let fromLines: LineRange[] | undefined;
+  if (rawFromLines !== undefined) {
+    if (!isLineRangeList(rawFromLines)) {
+      return {
+        error: `${where2}: "fromLines" must be a non-empty array of ascending, non-overlapping [start, end] line pairs`,
+      };
+    }
+    fromLines = rawFromLines;
+  }
   let note: string | undefined;
   if (entry.note !== undefined) {
     if (typeof entry.note !== "string") {
@@ -289,6 +341,7 @@ const parseMove = (
       origin: entry.origin,
       donor,
       baseBlob,
+      ...(fromLines !== undefined ? { fromLines } : {}),
       note,
     },
   };
@@ -314,13 +367,13 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
   if (version === undefined) {
     return {
       ok: false,
-      error: 'missing "version" (extension supports 1 and 2)',
+      error: 'missing "version" (extension supports 1, 2 and 3)',
     };
   }
   if (!isContractVersion(version)) {
     return {
       ok: false,
-      error: `unsupported version ${JSON.stringify(version)} (extension supports 1 and 2)`,
+      error: `unsupported version ${JSON.stringify(version)} (extension supports 1, 2 and 3)`,
     };
   }
   if (!Array.isArray(record.clusters)) {
@@ -337,13 +390,13 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
   // `moves` arrived in version 2; inside a version 1 contract it is just an
   // unknown extra key and stays ignored.
   const moves: MoveDeclaration[] = [];
-  if (version === 2 && record.moves !== undefined) {
+  if (version >= 2 && record.moves !== undefined) {
     if (!Array.isArray(record.moves)) {
       return { ok: false, error: '"moves" must be an array' };
     }
     const declared = new Set<string>();
     for (let index = 0; index < record.moves.length; index++) {
-      const result = parseMove(record.moves[index], index);
+      const result = parseMove(record.moves[index], index, version === 3);
       if ("error" in result) {
         return { ok: false, error: result.error };
       }
@@ -356,7 +409,30 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
       moves.push(result.move);
     }
   }
-  return { ok: true, contract: { version, clusters, moves } };
+  // `notes` arrived in version 3; below it the key is unknown and ignored,
+  // so an older contract can carry one without being validated against it.
+  const notes = new Map<string, string>();
+  if (version === 3 && record.notes !== undefined) {
+    const rawNotes = record.notes;
+    if (
+      typeof rawNotes !== "object" ||
+      rawNotes === null ||
+      Array.isArray(rawNotes)
+    ) {
+      return { ok: false, error: '"notes" must be an object' };
+    }
+    for (const [path, note] of Object.entries(rawNotes)) {
+      if (typeof note !== "string") {
+        return { ok: false, error: `notes["${path}"] must be a string` };
+      }
+      // An empty remark is no remark; keep it out of the map so consumers
+      // never have to test for one.
+      if (note.length > 0) {
+        notes.set(path, note);
+      }
+    }
+  }
+  return { ok: true, contract: { version, clusters, moves, notes } };
 };
 
 // Resolves review-set membership into cluster buckets. Rules, in order:

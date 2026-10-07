@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { parseNameStatusOutput } from "./git";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  createGit,
+  Git,
+  parseNameStatusOutput,
+  readBlobBytes,
+  writeBlobBytes,
+} from "./git";
+import { sliceLines } from "./originSlice";
 
 // Builds `git diff --name-status -z` output from records of NUL-terminated
 // fields, e.g. ["M", "src/a.ts"] or ["R100", "old.ts", "new.ts"]
@@ -90,5 +100,55 @@ describe("parseNameStatusOutput", () => {
       paths: ["src/conflicted.ts", "src/unknown.ts", "src/after.ts"],
       movedFrom: new Map(),
     });
+  });
+});
+
+// A real temp repo: the point of these helpers is that the object ids and the
+// bytes match git's own, which a fake Git could only assert against itself.
+describe("blob bytes", () => {
+  let repoRoot: string;
+  let git: Git;
+
+  beforeEach(async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "delta-review-git-"));
+    git = createGit(repoRoot);
+    await git.run(["init", "-b", "main"]);
+  });
+
+  afterEach(async () => {
+    await rm(repoRoot, { recursive: true, force: true });
+  });
+
+  it("hashes bytes to the id git itself computes", async () => {
+    const content = Buffer.from("a\nb\nc", "utf8");
+    const expected = (
+      await git.run(["hash-object", "--stdin"], { stdin: "a\nb\nc" })
+    ).trim();
+    await expect(writeBlobBytes(repoRoot, content)).resolves.toBe(expected);
+  });
+
+  it("gives a line slice the id the skill's pipeline produces", async () => {
+    const origin = Buffer.from("one\ntwo\nthree\nfour\n", "utf8");
+    const originSha = await writeBlobBytes(repoRoot, origin);
+    const slice = sliceLines(await readBlobBytes(repoRoot, originSha), [
+      [2, 3],
+    ]);
+    const expected = (
+      await git.run(["hash-object", "--stdin"], { stdin: "two\nthree\n" })
+    ).trim();
+    expect(slice).toBeDefined();
+    await expect(
+      writeBlobBytes(repoRoot, slice ?? Buffer.alloc(0)),
+    ).resolves.toBe(expected);
+  });
+
+  it("round-trips content that is not valid UTF-8", async () => {
+    const content = Buffer.from([0x61, 0x0a, 0x80, 0xfe, 0x00, 0x62]);
+    const sha = await writeBlobBytes(repoRoot, content);
+    await expect(readBlobBytes(repoRoot, sha)).resolves.toEqual(content);
+  });
+
+  it("rejects for an object that is not in the database", async () => {
+    await expect(readBlobBytes(repoRoot, "0".repeat(40))).rejects.toThrow();
   });
 });

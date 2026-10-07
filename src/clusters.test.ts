@@ -33,8 +33,10 @@ const file = (path: string, triage: Triage = "normal"): ReviewFile => ({
   diffBasePath: path,
   movedFrom: undefined,
   moveOrigin: undefined,
+  moveDeclared: false,
   donor: undefined,
   moveNote: undefined,
+  originLinesOutOfRange: false,
   moveClassification: undefined,
   originContentUnavailable: false,
   triage,
@@ -48,12 +50,23 @@ const reviewedFile = (path: string, triage: Triage = "normal"): ReviewFile => ({
 
 const contract = (
   clusters: ClustersContract["clusters"],
-): ClustersContract => ({ version: 1, clusters, moves: [] });
+): ClustersContract => ({
+  version: 1,
+  clusters,
+  moves: [],
+  notes: new Map(),
+});
 
 const contractV2 = (
   clusters: ClustersContract["clusters"],
   moves: ClustersContract["moves"] = [],
-): ClustersContract => ({ version: 2, clusters, moves });
+): ClustersContract => ({ version: 2, clusters, moves, notes: new Map() });
+
+const contractV3 = (
+  clusters: ClustersContract["clusters"],
+  moves: ClustersContract["moves"] = [],
+  notes: ClustersContract["notes"] = new Map(),
+): ClustersContract => ({ version: 3, clusters, moves, notes });
 
 const move = (
   path: string,
@@ -164,13 +177,13 @@ describe("parseClustersContract", () => {
     const result = parseClustersContract(JSON.stringify({ clusters: [] }));
     expect(result).toEqual({
       ok: false,
-      error: 'missing "version" (extension supports 1 and 2)',
+      error: 'missing "version" (extension supports 1, 2 and 3)',
     });
   });
 
   it.each([
-    [0, "unsupported version 0 (extension supports 1 and 2)"],
-    ["1", 'unsupported version "1" (extension supports 1 and 2)'],
+    [0, "unsupported version 0 (extension supports 1, 2 and 3)"],
+    ["1", 'unsupported version "1" (extension supports 1, 2 and 3)'],
   ])("rejects version %j", (version, error) => {
     const result = parseClustersContract(
       JSON.stringify({ version, clusters: [] }),
@@ -281,13 +294,20 @@ describe("parseClustersContract", () => {
     ).toEqual({ ok: true, contract: contract([]) });
   });
 
-  it("rejects version 3, naming both supported versions", () => {
+  it("accepts a version 3 contract with neither moves nor notes", () => {
     const result = parseClustersContract(
       JSON.stringify({ version: 3, clusters: [] }),
     );
+    expect(result).toEqual({ ok: true, contract: contractV3([]) });
+  });
+
+  it("rejects version 4, naming all three supported versions", () => {
+    const result = parseClustersContract(
+      JSON.stringify({ version: 4, clusters: [] }),
+    );
     expect(result).toEqual({
       ok: false,
-      error: "unsupported version 3 (extension supports 1 and 2)",
+      error: "unsupported version 4 (extension supports 1, 2 and 3)",
     });
   });
 });
@@ -583,6 +603,291 @@ describe("parseClustersContract moves", () => {
       }),
     );
     expect(result).toEqual({ ok: false, error: "move 2 must be an object" });
+  });
+});
+
+describe("parseClustersContract version 3 moves", () => {
+  const parseMovesV3 = (moves: unknown): ParseClustersResult =>
+    parseClustersContract(JSON.stringify({ version: 3, clusters: [], moves }));
+
+  const parseMovesV2 = (moves: unknown): ParseClustersResult =>
+    parseClustersContract(JSON.stringify({ version: 2, clusters: [], moves }));
+
+  it("still reads moves in a version 3 contract", () => {
+    expect(
+      parseMovesV3([{ path: "a.ts", from: "b.ts", origin: "repo" }]),
+    ).toEqual({
+      ok: true,
+      contract: contractV3([], [move("a.ts", "b.ts", "repo")]),
+    });
+  });
+
+  it("keeps baseBlob on a repo entry", () => {
+    expect(
+      parseMovesV3([
+        {
+          path: "src/new.ts",
+          from: "src/old.ts",
+          origin: "repo",
+          baseBlob: "a".repeat(40),
+        },
+      ]),
+    ).toEqual({
+      ok: true,
+      contract: contractV3(
+        [],
+        [
+          move("src/new.ts", "src/old.ts", "repo", {
+            baseBlob: "a".repeat(40),
+          }),
+        ],
+      ),
+    });
+  });
+
+  it("rejects a malformed baseBlob on a repo entry", () => {
+    expect(
+      parseMovesV3([
+        {
+          path: "src/new.ts",
+          from: "src/old.ts",
+          origin: "repo",
+          baseBlob: "not-a-blob",
+        },
+      ]),
+    ).toEqual({
+      ok: false,
+      error:
+        'move 1 ("src/new.ts"): "baseBlob" must be a 40- or 64-character hex object id',
+    });
+  });
+
+  it("still drops donor on a repo entry", () => {
+    expect(
+      parseMovesV3([
+        { path: "a.ts", from: "b.ts", origin: "repo", donor: "donor-app" },
+      ]),
+    ).toEqual({
+      ok: true,
+      contract: contractV3([], [move("a.ts", "b.ts", "repo")]),
+    });
+  });
+
+  it("accepts a single fromLines range", () => {
+    expect(
+      parseMovesV3([
+        {
+          path: "src/slice.ts",
+          from: "src/big.ts",
+          origin: "repo",
+          fromLines: [[120, 180]],
+          baseBlob: "b".repeat(40),
+        },
+      ]),
+    ).toEqual({
+      ok: true,
+      contract: contractV3(
+        [],
+        [
+          move("src/slice.ts", "src/big.ts", "repo", {
+            fromLines: [[120, 180]],
+            baseBlob: "b".repeat(40),
+          }),
+        ],
+      ),
+    });
+  });
+
+  it("accepts several ascending, non-overlapping fromLines ranges", () => {
+    expect(
+      parseMovesV3([
+        {
+          path: "a.ts",
+          from: "b.ts",
+          origin: "repo",
+          fromLines: [
+            [1, 4],
+            [5, 5],
+            [40, 90],
+          ],
+        },
+      ]),
+    ).toEqual({
+      ok: true,
+      contract: contractV3(
+        [],
+        [
+          move("a.ts", "b.ts", "repo", {
+            fromLines: [
+              [1, 4],
+              [5, 5],
+              [40, 90],
+            ],
+          }),
+        ],
+      ),
+    });
+  });
+
+  it.each([
+    ["a non-array", "120-180"],
+    ["an object", { start: 1, end: 2 }],
+    ["an empty array", []],
+    ["a non-array pair", [5]],
+    ["a one-element pair", [[5]]],
+    ["a three-element pair", [[1, 2, 3]]],
+    ["a non-integer start", [[1.5, 5]]],
+    ["a non-integer end", [[1, "5"]]],
+    ["a zero start", [[0, 5]]],
+    ["a negative start", [[-2, 5]]],
+    ["an end before its start", [[5, 4]]],
+    [
+      "ranges sharing a line",
+      [
+        [1, 10],
+        [10, 20],
+      ],
+    ],
+    [
+      "overlapping ranges",
+      [
+        [1, 10],
+        [5, 20],
+      ],
+    ],
+    [
+      "descending ranges",
+      [
+        [10, 20],
+        [1, 5],
+      ],
+    ],
+  ])("rejects the contract for fromLines that is %s", (_name, fromLines) => {
+    expect(
+      parseMovesV3([
+        { path: "src/new.ts", from: "src/old.ts", origin: "repo", fromLines },
+      ]),
+    ).toEqual({
+      ok: false,
+      error:
+        'move 1 ("src/new.ts"): "fromLines" must be a non-empty array of ascending, non-overlapping [start, end] line pairs',
+    });
+  });
+
+  it("drops fromLines on an external entry, whatever its value", () => {
+    expect(
+      parseMovesV3([
+        {
+          path: "a.ts",
+          from: "lib/a.ts",
+          origin: "external",
+          donor: "donor-app",
+          fromLines: "nonsense",
+        },
+      ]),
+    ).toEqual({
+      ok: true,
+      contract: contractV3(
+        [],
+        [move("a.ts", "lib/a.ts", "external", { donor: "donor-app" })],
+      ),
+    });
+  });
+
+  it("ignores fromLines inside a version 2 contract, even when malformed", () => {
+    expect(
+      parseMovesV2([
+        { path: "a.ts", from: "b.ts", origin: "repo", fromLines: [[0, 0]] },
+      ]),
+    ).toEqual({
+      ok: true,
+      contract: contractV2([], [move("a.ts", "b.ts", "repo")]),
+    });
+  });
+});
+
+describe("parseClustersContract notes", () => {
+  const parseNotes = (notes: unknown): ParseClustersResult =>
+    parseClustersContract(JSON.stringify({ version: 3, clusters: [], notes }));
+
+  it("parses notes into a map", () => {
+    expect(parseNotes({ "a.ts": "first", "src/b.ts": "second" })).toEqual({
+      ok: true,
+      contract: contractV3(
+        [],
+        [],
+        new Map([
+          ["a.ts", "first"],
+          ["src/b.ts", "second"],
+        ]),
+      ),
+    });
+  });
+
+  it("accepts an empty notes object", () => {
+    expect(parseNotes({})).toEqual({ ok: true, contract: contractV3([]) });
+  });
+
+  it("drops empty-string values", () => {
+    expect(parseNotes({ "a.ts": "", "b.ts": "kept" })).toEqual({
+      ok: true,
+      contract: contractV3([], [], new Map([["b.ts", "kept"]])),
+    });
+  });
+
+  it("keeps a multi-line note verbatim", () => {
+    expect(parseNotes({ "a.ts": "  one\ntwo  " })).toEqual({
+      ok: true,
+      contract: contractV3([], [], new Map([["a.ts", "  one\ntwo  "]])),
+    });
+  });
+
+  it.each([
+    ["an array", []],
+    ["null", null],
+    ["a string", "a remark"],
+    ["a number", 7],
+  ])("rejects notes that are %s", (_name, notes) => {
+    expect(parseNotes(notes)).toEqual({
+      ok: false,
+      error: '"notes" must be an object',
+    });
+  });
+
+  it("rejects a non-string value, naming its key", () => {
+    expect(parseNotes({ "a.ts": "fine", "src/b.ts": 7 })).toEqual({
+      ok: false,
+      error: 'notes["src/b.ts"] must be a string',
+    });
+  });
+
+  it("ignores notes inside a version 2 contract, even when malformed", () => {
+    expect(
+      parseClustersContract(
+        JSON.stringify({ version: 2, clusters: [], notes: "nonsense" }),
+      ),
+    ).toEqual({ ok: true, contract: contractV2([]) });
+  });
+
+  it("ignores notes inside a version 1 contract, even when malformed", () => {
+    expect(
+      parseClustersContract(
+        JSON.stringify({ version: 1, clusters: [], notes: [1] }),
+      ),
+    ).toEqual({ ok: true, contract: contract([]) });
+  });
+
+  it("reports a moves error before a notes error", () => {
+    expect(
+      parseClustersContract(
+        JSON.stringify({
+          version: 3,
+          clusters: [],
+          moves: ["nope"],
+          notes: "nonsense",
+        }),
+      ),
+    ).toEqual({ ok: false, error: "move 1 must be an object" });
   });
 });
 
@@ -966,12 +1271,12 @@ describe("loadClustersContract", () => {
   it("returns invalid with the parse error for a bad contract", async () => {
     await writeContract(
       "clusters-main.json",
-      JSON.stringify({ version: 3, clusters: [] }),
+      JSON.stringify({ version: 4, clusters: [] }),
     );
     const result = await loadClustersContract(gitWithCommonDir(".git"), "main");
     expect(result).toEqual({
       state: "invalid",
-      error: "unsupported version 3 (extension supports 1 and 2)",
+      error: "unsupported version 4 (extension supports 1, 2 and 3)",
     });
   });
 

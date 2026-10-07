@@ -16,7 +16,11 @@ import {
 } from "./decorations";
 import { escapeMarkdownText } from "./markdown";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
-import { buildRowDescription, buildTooltipOriginLine } from "./moveDisplay";
+import {
+  buildRowDescription,
+  buildTooltipOriginLine,
+  buildTooltipStatusLine,
+} from "./moveDisplay";
 import {
   autoGroupContextValue,
   fileContextValue,
@@ -510,6 +514,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       moveOrigin: file.moveOrigin,
       donor: file.donor,
       moveClassification: file.moveClassification,
+      originLines: file.originLines,
     });
     // Hover always leads with the full repo-relative path (the row usually
     // truncates it), with any status notes on separate lines
@@ -522,6 +527,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     const originLine = buildTooltipOriginLine({
       movedFrom: file.movedFrom,
       donor: file.donor,
+      originLines: file.originLines,
     });
     if (originLine !== undefined) {
       notes.push(originLine);
@@ -530,12 +536,19 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       // Contract text: escaped so its markdown cannot restyle the tooltip
       notes.push(escapeMarkdownText(file.moveNote));
     }
-    if (file.moveClassification === "verbatim") {
-      notes.push("Identical to the origin");
-    } else if (file.originContentUnavailable) {
-      notes.push(
-        "Origin content is no longer available — showing the whole file.",
-      );
+    if (file.fileNote !== undefined && file.fileNote !== "") {
+      // Contract text, escaped for the same reason as the move note
+      notes.push(escapeMarkdownText(file.fileNote));
+    }
+    // Worded by the display module, alongside the row and title forms
+    const statusLine = buildTooltipStatusLine({
+      moveClassification: file.moveClassification,
+      originLines: file.originLines,
+      originContentUnavailable: file.originContentUnavailable,
+      originLinesOutOfRange: file.originLinesOutOfRange,
+    });
+    if (statusLine !== undefined) {
+      notes.push(statusLine);
     }
     if (file.deleted) {
       notes.push("Deleted from the working tree");
