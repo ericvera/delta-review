@@ -7,7 +7,7 @@
     "spec": "skipped",
     "critic": "skipped",
     "execute": "done",
-    "review": null,
+    "review": "done",
     "gate": null
   },
   "amendments": 0,
