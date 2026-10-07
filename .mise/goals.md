@@ -17,6 +17,8 @@
 - Waiting: Claude Code's Monitor tool runs a shell until-loop that exits when the notes file's content changes; on wake the agent recomputes the Work set and re-waits if empty. Doc-only; no helper script. One extra wake per round from the extension's derived-field write-back is accepted.
 - End: only when the user interrupts. No idle timeout.
 - Reporting: one Channel-discipline status line per round that did work, plus blockers as they arise.
+- Entry: watch mode starts when invoked with `watch` or when `${user_config.always_watch}` is on. Otherwise the pass ends by offering "Reply `watch` to keep watching — or turn on *Always watch* in `/plugin configure`."
+- "Always watch" is a plugin.json `userConfig` entry `always_watch` (default off), read via `${user_config.always_watch}` substitution in the SKILL.md body; set by the user with `/plugin configure` (docs: https://code.claude.com/docs/en/plugins/manifest-reference.md#user-configuration).
 
 ## Assumptions
 
@@ -24,11 +26,12 @@
 - Watch is a Default workflow mode (overridable), with any binding rule it needs (e.g. per-round status line) stated once in the Contract.
 - Change detection compares file content (hash), polled every few seconds; a missing notes file is waited on, not an error; a corrupt file still stops per the Contract.
 - If the Monitor tool is unavailable, the skill does one normal pass and says watch mode is unavailable.
+- Implementer verifies whether userConfig supports `type: "boolean"` and what an unset `${user_config.always_watch}` substitutes to; falls back to a `"yes"`/`"no"` string and a stated default of off.
 - Plugin minor bump plugin.json 0.6.0 → 0.7.0, commit "plugin v0.7.0: …"; README agent-loop bullets, DEVELOPMENT.md Review notes section and manual step 35 updated.
 - Verification is a manual/scripted watch run; no unit tests (no code).
 
 ## Proposal
 
 Issue: delta:review-notes stops after one pass, so new reviewer notes need the skill re-run.
-Approach: add a `watch` Default-workflow mode that, after a pass, waits via a Monitor until-loop on notes-file content change, recomputes the Work set, handles it, prints one status line per round, and runs until interrupted; docs + plugin 0.7.0.
+Approach: add a watch mode (entered via `watch` arg, a `watch` reply to the end-of-pass offer, or plugin userConfig `always_watch`) that waits via a Monitor until-loop on notes-file content change, recomputes the Work set, handles it, prints one status line per round, and runs until interrupted; docs + plugin 0.7.0.
 Skips: spec and critic (doc-only, one skill file, no schema/API change, easily undone).
