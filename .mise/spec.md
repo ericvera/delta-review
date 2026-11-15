@@ -2,7 +2,7 @@
 
 ## What
 
-- A file moved on the branch (git-detected rename, or declared `origin: "repo"` move that won declaration precedence) with no snapshot of its own diffs against the old path's reviewed snapshot: only the changes since that review.
+- A file moved on the branch (git-detected rename, or declared `origin: "repo"` move without `fromLines` that won declaration precedence, whose origin is deleted from disk and is the `from` of no other move) with no snapshot of its own diffs against the old path's reviewed snapshot: only the changes since that review.
 - A moved file always reads Needs Review until marked at the new path, even when its content equals the old-path snapshot.
 - Its row keeps showing the previous path (existing move display). Its classification word is:
   - `unchanged` — content identical to the last reviewed snapshot (its own if it has one, else the inherited old-path one). Opening it shows an empty since-review diff.
@@ -22,6 +22,8 @@ New exported `selectReviewSnapshot(input)`:
 input: {
   path: string;
   move: ResolvedMove | undefined;          // movesByPath.get(path): the winning move only
+  originDeleted: boolean;                   // move !== undefined && isDeletedFromWorkingTree(move.from)
+  originShared: boolean;                    // more than one movesByPath entry has this move's `from`
   reviewPaths: ReadonlySet<string>;         // adjusted review set (AdjustedReviewSet.paths)
   reviewState: ReadonlyMap<string, string>; // readReviewState result
   currentSha: string;                       // working sha, or sentinel when deleted
@@ -38,10 +40,14 @@ returns: {
 
 Rules:
 - `own = reviewState.get(path)`.
-- `inheritedSnapshotFrom = move.from` iff `move.origin === "repo"`, `!reviewPaths.has(move.from)`, and `reviewState.get(move.from)` is defined and not `sentinelSha`. Otherwise undefined.
+- `inheritedSnapshotFrom = move.from` iff all hold: `move.origin === "repo"`, `move.fromLines === undefined`, `!originShared`, `originDeleted`, `!reviewPaths.has(move.from)`, and `reviewState.get(move.from)` is defined and not `sentinelSha`. Otherwise undefined.
   - External moves never inherit (their `from` is a donor path).
-  - A `from` that is still its own row (overwrite case keeps the origin's `D` row; an origin still on disk) keeps its snapshot to itself, so a displaced git-rename source (re-added as its own row) and a non-suppressed origin never lend their snapshot.
+  - Extractions (`fromLines` declared) never inherit: the old snapshot is the whole old file, not the declared slice; the slice-based origin comparison stays.
+  - A `from` shared by several moves (several extractions or declarations from one file, or a declaration and a git rename naming the same source) lends to none of them, so no unmark deletes a key a sibling inherits. Git's own renames are one-to-one.
+  - An origin still on disk (whether or not it is in the review set) keeps its snapshot to itself.
+  - A deleted `from` that is still its own row (overwrite case keeps the origin's `D` row; a displaced git-rename source is re-added as its own row) keeps its snapshot to itself.
   - A sentinel old-path snapshot is no usable base, so nothing is inherited.
+- Caller (`computeReviewModel`) computes `originShared` from a count of `move.from` over `movesByPath.values()`, and `originDeleted` with the existing `isDeletedFromWorkingTree`.
 - `reviewed = own !== undefined && own === currentSha`.
 - `snapshotBaseSha`: when `own !== undefined`, `own` if `!reviewed && own !== sentinelSha`, else undefined (today's rule). When `own === undefined`, the inherited sha (or undefined).
 - `inheritedSnapshotFrom` is reported whether or not the file has its own snapshot, so unmark after a re-mark still clears the old key.
@@ -79,7 +85,7 @@ Nothing removed. Behaviour change for existing moved files with their own snapsh
 
 ## Hard-to-undo
 
-- Unmark on a moved file now also deletes the old path's key from `refs/review/<branch>` (a ref write; recoverable through the ref's parent chain). No schema, migration, contract-format or public API change.
+- Unmark on a moved file now also deletes the old path's key from `refs/review/<branch>` (a ref write; recoverable through the ref's parent chain). The old key is only ever deleted for a one-to-one, non-extraction repo move whose origin is deleted from disk (the inheritance rule), so no unmark deletes a snapshot another file inherits or a file still on disk owns. No schema, migration, contract-format or public API change.
 
 ## Task index
 
