@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Delta Review — "wait" clusters in the sidebar</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<p><a href="index.html">&larr; index</a></p>
+<h1>Sidebar: clusters an agent flagged "wait"</h1>
+<p class="note">Grouped-by-cluster view in the SCM sidebar. The agent set <code>wait: true</code> on "Combined diff refresh" in the clusters contract. That cluster row and every row under it are muted, the way Explorer mutes a git-ignored folder. Order does not change, and nothing is disabled: hover actions (Open Cluster Changes, Mark Reviewed) and the file rows work the same. Unclustered, Auto and Reviewed are never muted.</p>
+
+<h2>1. Grouped view, list mode: one cluster waiting (hover the rows)</h2>
+<div class="frame"><div class="sidebar">
+  <div class="section"><span>&#9662;</span> Delta Review <span class="acts"><span title="View as Tree">&#8801;</span><span title="Ungroup Clusters">&#9638;</span><span title="Refresh">&#8635;</span></span></div>
+
+  <div class="row" style="padding-left:8px"><span class="tw">&#9662;</span><span class="ic">&#9776;</span>Cluster contract: wait flag<span class="desc">0/3</span><span class="hacts"><span title="Open Cluster Changes">&#8644;</span><span title="Mark Reviewed">+</span></span></div>
+  <div class="row" style="padding-left:30px"><span class="ic">&#9636;</span>clusters.ts<span class="desc">src</span><span class="badge b-M">M</span><span class="hacts"><span>&#8599;</span><span>+</span></span></div>
+  <div class="row" style="padding-left:30px"><span class="ic">&#9636;</span>clusters.test.ts<span class="desc">src</span><span class="badge b-M">M</span><span class="hacts"><span>&#8599;</span><span>+</span></span></div>
+  <div class="row" style="padding-left:30px"><span class="ic">&#9636;</span>SKILL.md<span class="desc">plugin/skills/cluster</span><span class="badge b-M">M</span><span class="hacts"><span>&#8599;</span><span>+</span></span></div>
+
+  <div class="row muted" style="padding-left:8px"><span class="tw">&#9662;</span><span class="ic">&#9776;</span>Combined diff refresh<span class="desc">0/2</span><span class="hacts" style="color:var(--fg)"><span title="Open Cluster Changes">&#8644;</span><span title="Mark Reviewed">+</span></span></div>
+  <div class="row muted" style="padding-left:30px"><span class="ic">&#9636;</span>extension.ts<span class="desc">src</span><span class="badge b-M">M</span><span class="hacts" style="color:var(--fg)"><span>&#8599;</span><span>+</span></span></div>
+  <div class="row muted" style="padding-left:30px"><span class="ic">&#9636;</span>clusterChanges.ts<span class="desc">src</span><span class="badge b-M">M</span><span class="hacts" style="color:var(--fg)"><span>&#8599;</span><span>+</span></span></div>
+
+  <div class="row" style="padding-left:8px"><span class="tw">&#9662;</span><span class="ic">&#9776;</span>Tree rendering<span class="desc">1/2</span></div>
+  <div class="row" style="padding-left:30px"><span class="ic">&#9636;</span>treeProvider.ts<span class="desc">src</span><span class="badge b-M">M</span></div>
+
+  <div class="row" style="padding-left:8px"><span class="tw">&#9662;</span><span class="ic" style="color:var(--warn)">&#9888;</span><span style="color:var(--warn)">Unclustered</span><span class="desc">0/1</span></div>
+  <div class="row" style="padding-left:30px"><span class="ic">&#9636;</span>DEVELOPMENT.md<span class="badge b-M">M</span></div>
+  <div class="row" style="padding-left:8px"><span class="tw">&#9656;</span><span class="ic">&#9881;</span>Auto<span class="desc">2</span></div>
+  <div class="row" style="padding-left:8px"><span class="tw">&#9656;</span><span class="ic">&#10003;</span>Reviewed<span class="desc">1</span></div>
+</div></div>
+
+<h2>2. Tooltip on a waiting cluster row</h2>
+<p class="note">The cluster's summary stays first; one line says why the row is muted. File rows under it get the same line appended to their normal tooltip.</p>
+<div class="frame" style="height:150px"><div class="sidebar">
+  <div class="section"><span>&#9662;</span> Delta Review</div>
+  <div class="row muted" style="padding-left:8px;background:var(--hover)"><span class="tw">&#9662;</span><span class="ic">&#9776;</span>Combined diff refresh<span class="desc">0/2</span>
+    <div class="tip"><b>Rebuild the open combined diff tab when its needs-review files or bases change</b><span style="color:var(--muted)">Waiting on the agent: still expected to change.</span></div>
+  </div>
+  <div class="row muted" style="padding-left:30px"><span class="ic">&#9636;</span>extension.ts<span class="desc">src</span><span class="badge b-M">M</span></div>
+</div></div>
+
+<h2>3. Tree mode: folder rows under a waiting cluster are muted too</h2>
+<div class="frame"><div class="sidebar">
+  <div class="section"><span>&#9662;</span> Delta Review</div>
+  <div class="row muted" style="padding-left:8px"><span class="tw">&#9662;</span><span class="ic">&#9776;</span>Combined diff refresh<span class="desc">0/3</span></div>
+  <div class="row muted" style="padding-left:22px"><span class="tw">&#9662;</span><span class="ic">&#9649;</span>src</div>
+  <div class="row muted" style="padding-left:44px"><span class="ic">&#9636;</span>extension.ts<span class="badge b-M">M</span></div>
+  <div class="row muted" style="padding-left:44px"><span class="ic">&#9636;</span>clusterChanges.ts<span class="badge b-M">M</span></div>
+  <div class="row muted" style="padding-left:22px"><span class="tw">&#9662;</span><span class="ic">&#9649;</span>scripts</div>
+  <div class="row muted" style="padding-left:44px"><span class="ic">&#9636;</span>e2e-cluster-changes.mjs<span class="badge b-A">A</span></div>
+  <div class="row" style="padding-left:8px"><span class="tw">&#9656;</span><span class="ic">&#9776;</span>Tree rendering<span class="desc">1/2</span></div>
+</div></div>
+
+<h2>4. Flag cleared: the agent removed <code>wait</code></h2>
+<p class="note">The contract watcher picks the change up on the next refresh; the cluster renders normally with no other change (same position, same count).</p>
+<div class="frame"><div class="sidebar">
+  <div class="section"><span>&#9662;</span> Delta Review</div>
+  <div class="row" style="padding-left:8px"><span class="tw">&#9662;</span><span class="ic">&#9776;</span>Combined diff refresh<span class="desc">0/2</span></div>
+  <div class="row" style="padding-left:30px"><span class="ic">&#9636;</span>extension.ts<span class="desc">src</span><span class="badge b-M">M</span></div>
+  <div class="row" style="padding-left:30px"><span class="ic">&#9636;</span>clusterChanges.ts<span class="desc">src</span><span class="badge b-M">M</span></div>
+</div></div>
+
+<h2>Contract the agent writes (for reference, not UI)</h2>
+<pre class="json">{
+  <span class="k">"version"</span>: 3,
+  <span class="k">"clusters"</span>: [
+    { <span class="k">"label"</span>: <span class="s">"Cluster contract: wait flag"</span>, <span class="k">"files"</span>: [ ... ] },
+    { <span class="k">"label"</span>: <span class="s">"Combined diff refresh"</span>, <span class="hl"><span class="k">"wait"</span>: <span class="bo">true</span></span>, <span class="k">"files"</span>: [ ... ] }
+  ]
+}</pre>
+<p class="legend">Version stays 3; an older extension ignores <code>wait</code> and shows the cluster normally.</p>
+</body></html>

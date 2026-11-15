@@ -1,0 +1,48 @@
+:root{--bg:#1e1e1e;--side:#181818;--fg:#cccccc;--muted:#8b8b8b;--dim:#6e6e6e;--hover:#2a2d2e;--sel:#04395e;--border:#2b2b2b;--accent:#0078d4;--add:#2ea04326;--del:#f8514926;--warn:#cca700;--tab:#181818;--tabActive:#1f1f1f}
+*{box-sizing:border-box}
+body{margin:0;background:#111;color:var(--fg);font:13px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;padding:24px}
+h1{font-size:18px;margin:0 0 4px}h2{font-size:14px;margin:28px 0 8px;color:#e0e0e0}
+p.note{color:var(--muted);max-width:900px;margin:4px 0 12px}
+a{color:#4daafc}
+.frame{display:flex;border:1px solid var(--border);background:var(--bg);width:fit-content;margin-bottom:8px}
+.sidebar{width:340px;background:var(--side);border-right:1px solid var(--border);font-size:13px}
+.section{height:22px;display:flex;align-items:center;padding:0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;gap:6px}
+.section .acts{margin-left:auto;display:flex;gap:6px;color:var(--fg);font-weight:400}
+.row{height:22px;display:flex;align-items:center;gap:6px;padding-right:8px;white-space:nowrap;cursor:default;position:relative}
+.row:hover{background:var(--hover)}
+.row .tw{width:16px;text-align:center;color:var(--fg);font-size:10px}
+.row .ic{width:16px;text-align:center}
+.row .desc{color:var(--muted);font-size:12px;margin-left:2px}
+.row .badge{margin-left:auto;font-size:11px;font-weight:600;width:14px;text-align:center}
+.row .hacts{display:none;margin-left:auto;gap:6px}
+.row:hover .hacts{display:flex}.row:hover .badge{display:none}
+.b-M{color:#e2c08d}.b-A{color:#73c991}.b-D{color:#c74e39}.b-R{color:#73c991}
+.muted,.muted .desc,.muted .badge,.muted .tw{color:var(--dim)!important}
+.muted .ic{opacity:.55}
+.selected{background:var(--sel)!important;outline:1px solid var(--accent);outline-offset:-1px}
+.tip{position:absolute;left:60px;top:22px;z-index:5;background:#252526;border:1px solid #454545;padding:8px 10px;width:300px;white-space:normal;color:var(--fg);box-shadow:0 2px 8px #000a;font-size:12px}
+.tip b{display:block;margin-bottom:4px}
+.editor{width:760px;display:flex;flex-direction:column}
+.tabs{display:flex;background:var(--tab);border-bottom:1px solid var(--border);height:35px}
+.tab{padding:0 12px;display:flex;align-items:center;gap:6px;border-right:1px solid var(--border);color:var(--muted);font-size:13px}
+.tab.active{background:var(--tabActive);color:#fff;border-top:1px solid var(--accent)}
+.tab .x{opacity:.6;font-size:11px}
+.titlebar{display:flex;align-items:center;height:28px;padding:0 10px;color:var(--muted);font-size:12px;border-bottom:1px solid var(--border)}
+.titlebar .acts{margin-left:auto;display:flex;gap:10px;color:var(--fg)}
+.titlebar .hl{outline:1px dashed #4daafc;outline-offset:2px}
+.mdiff{padding:8px;min-height:240px}
+.fhead{display:flex;align-items:center;gap:6px;background:#252526;padding:4px 8px;border:1px solid var(--border);font-size:12px}
+.fhead .path{color:var(--muted)}
+.fhead .chk{margin-left:auto;color:var(--muted)}
+.code{font:12px/18px Menlo,Consolas,monospace;border:1px solid var(--border);border-top:0;margin-bottom:8px;display:grid;grid-template-columns:1fr 1fr}
+.code div{padding:0 8px;white-space:pre;overflow:hidden}
+.code .a{background:var(--add)}.code .d{background:var(--del)}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:240px;color:var(--muted);gap:6px}
+.empty .big{font-size:28px;opacity:.6}
+.toast{background:#252526;border:1px solid #454545;padding:10px 12px;width:440px;box-shadow:0 2px 8px #000a;font-size:12px;display:flex;gap:8px}
+.callout{border-left:3px solid #4daafc;background:#1a2733;padding:6px 10px;max-width:900px;margin:6px 0 10px;font-size:12px;color:#c8d7e6}
+.legend{font-size:12px;color:var(--muted)}
+pre.json{background:var(--bg);border:1px solid var(--border);padding:10px;font:12px/18px Menlo,monospace;width:fit-content;margin:0}
+pre.json .k{color:#9cdcfe}pre.json .s{color:#ce9178}pre.json .bo{color:#569cd6}pre.json .hl{background:#2ea04340}
+.steps{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.steps>div>.cap{font-size:12px;color:var(--muted);margin:0 0 4px}
