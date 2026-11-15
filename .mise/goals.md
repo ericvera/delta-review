@@ -1,0 +1,1 @@
+when a file is marked as reviewed, the multi-file diff should refresh. Also, would if be possible to have a way for agents to mark a cluster as "safe to review" because as it works those are not expected to change and that should refresh as plans change
