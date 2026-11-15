@@ -40,8 +40,12 @@ Feature, not a bug fix; nothing was run. All from reading the code.
     - Changing what the contract accepts for `baseBlob` is a public file-format change (`clusters.ts:256-348`, cluster SKILL.md).
 12. No UI or `package.json` contributes changes are implied, so the mock condition does not apply.
 
+## Decisions
+
+- A renamed file whose content is identical to the old path's reviewed snapshot reads as unreviewed, with the old path's snapshot as its diff base, until the owner marks the new path. (Owner, pending their question on whether this row shows the "verbatim" tag.)
+- Unmark on a renamed file that inherits the old path's snapshot drops both the new path's and the old path's snapshots.
+
 ## Open questions
 
-1. A renamed file whose content is identical to the old path's reviewed snapshot: Reviewed, or back in the queue with an empty "since my review" diff?
-2. Unmark on a renamed file that inherits the old path's snapshot: also drop the old path's snapshot, or only the new path's?
+1. Does an unreviewed renamed file identical to its inherited snapshot show the "verbatim" tag? (Owner asked; being looked up.)
 3. The optional item (repo move `baseBlob` as an in-branch base): on contract v3 a repo move without `fromLines` already keeps `baseBlob` as its whole base, though it loses to a snapshot or a destination merge-base blob. Leave as is, or change precedence?
