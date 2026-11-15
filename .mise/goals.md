@@ -46,15 +46,16 @@ Owner's goal, in their words: not have to re-review code already reviewed, but k
 
 - A file renamed on the branch (git-detected rename or declared repo move) uses the old path's reviewed snapshot as its diff base when it has no snapshot of its own.
 - A moved file always lands in Needs Review, even when its content is identical to the old path's reviewed snapshot. It leaves Needs Review once the owner marks it at the new path.
-- Its row shows the previous path, and reads "verbatim" when its content is identical to what was last reviewed at the old path. Opening it shows an empty since-review diff.
+- Its row shows the previous path, and reads "unchanged" when its content is identical to what was last reviewed at the old path. Opening it shows an empty since-review diff.
+- "verbatim" keeps today's meaning and is shown only when the moved file has no reviewed snapshot at either path: identical to the move origin. Each word means one thing.
 - A moved file edited since the review shows only the changes since that review.
 - Unmark on a moved file that inherits the old path's snapshot drops both the new path's and the old path's snapshots.
 - Out of scope: the optional item. A repo move's declared `baseBlob` keeps its current behaviour and precedence.
 
 ## Assumptions
 
-- "Verbatim" for a moved file with an inherited snapshot compares against that snapshot; with no snapshot at either path it keeps today's comparison against the move origin. This changes the documented rule (`DEVELOPMENT.md:82`, cluster `SKILL.md:113`), so both docs are updated.
-- A moved file not identical to the inherited snapshot keeps the existing non-verbatim wording ("adapted").
+- "unchanged" is a new row/tooltip tag alongside the existing classification wording; the documented classification rule (`DEVELOPMENT.md:82`, cluster `SKILL.md:113`) is updated to describe it.
+- A moved file with an inherited snapshot that differs from it shows neither "unchanged" nor "verbatim"; it keeps the existing non-verbatim wording ("adapted") and the existing "Changed since last reviewed" wording.
 - An inherited snapshot outranks a declared `baseBlob` and the origin base, the same as a file's own snapshot does today. A file's own snapshot outranks an inherited one.
 - Only the winning move's `from` is followed (Investigation 6); external moves never inherit (Investigation 4).
 - Marking the moved file reviewed writes a snapshot at the new path only; the old path's snapshot is left in place.
@@ -64,5 +65,5 @@ Owner's goal, in their words: not have to re-review code already reviewed, but k
 ## Proposal
 
 - Issue: a file moved on the branch loses its review and shows its whole diff again.
-- Approach: a moved file goes to Needs Review showing its previous path, diffs only against what was last reviewed at the old path, and reads "verbatim" when nothing changed since that review; unmark clears both paths.
-- Skips: none. Spec and critic both run, because the meaning of "verbatim" and the documented review-state rules change.
+- Approach: a moved file goes to Needs Review showing its previous path, diffs only against what was last reviewed at the old path, and reads "unchanged" when nothing changed since that review ("verbatim" stays for never-reviewed moves identical to their origin); unmark clears both paths.
+- Skips: none. Spec and critic both run, because a new "unchanged" tag and the documented review-state rules change.
