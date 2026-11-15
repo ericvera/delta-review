@@ -255,6 +255,8 @@ Clusters:
 29. Both levers persist across reload. Flipping either lever changes no review state (`git ls-tree -r refs/review/<branch>` identical before/after).
 30. Break the contract (e.g. `"version": 4`) → `⚠ Clusters contract: unsupported version 4 (extension supports 1, 2 and 3)`, view falls back to ungrouped, **and every declared move reverts to plain rows** — an invalid contract costs moves as well as grouping. Grouping preference survives a later fix. Delete the contract → button and message disappear (moves revert the same way).
 31. Throughout: `git status` in the test repo stays clean — the contract lives under `.git`.
+    31a. Mark a 3-file cluster reviewed, edit two of its files, press the cluster's `Open Cluster Changes` → a `Cluster Changes: <label>` tab lists exactly those two files, each `last reviewed ↔ working tree`. Edit another file and press it again → the old tab closes and one tab lists the current files.
+    31b. On a fresh cluster, every needs-review file is listed against the merge base (or move origin); a file changed since review and then deleted shows an empty right side. Unclustered and Auto rows offer the button too; a fully reviewed cluster shows none, and invoking the command on one (e.g. via a stale row) shows `No files in '<label>' need review.` Two clusters with the same label open as `Cluster Changes: <label> (<n>)` tabs with distinct `n`. The cluster row's context menu lists `Open Cluster Changes` first, then `Mark Reviewed` / `Unmark Reviewed`.
 
 Notes:
 

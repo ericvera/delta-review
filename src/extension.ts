@@ -3,6 +3,12 @@ import { basename, isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
 import { baseBlobForNote } from "./baseDocument";
 import {
+  clusterChangesFiles,
+  clusterChangesTitle,
+  clusterLabelForKey,
+  nothingToReviewMessage,
+} from "./clusterChanges";
+import {
   ClusterModel,
   clusterFilesForKey,
   loadClustersContract,
@@ -695,6 +701,58 @@ export const activate = async (
     await refresh();
   };
 
+  const diffUris = (
+    activeGit: Git,
+    file: ReviewFile,
+  ): { left: vscode.Uri; right: vscode.Uri } => ({
+    // The path identifying the base document the model actually resolved: a
+    // repo origin's old path when the base really is that origin's blob, the
+    // file's own path otherwise. Always repo-relative, so a declared external
+    // origin can never escape the repo through a base-document URI.
+    left: createReviewBaseUri(file.diffBasePath, file.diffBaseSha),
+    right: file.deleted
+      ? createReviewBaseUri(file.path, undefined)
+      : vscode.Uri.file(join(activeGit.repoRoot, file.path)),
+  });
+
+  type ClusterChangesEntry = {
+    clusterKey: string;
+    label: string;
+    paths: string[];
+    leftSides: { path: string; basePath: string; baseQuery: string }[];
+    repoRoot: string;
+    branch: string;
+  };
+
+  // Title of the one open combined cluster diff -> what it shows
+  const clusterChangesTabs = new Map<string, ClusterChangesEntry>();
+
+  // The multi-diff editor appends a localized file count, `<title> (2 files)`,
+  // once its resources resolve
+  const isClusterChangesLabel = (label: string, title: string): boolean =>
+    label === title ||
+    (label.startsWith(title) &&
+      /^ \(\d+[^()]*\)$/.test(label.slice(title.length)));
+
+  // The stable API has no multi-diff tab input class, so a combined diff is a
+  // tab whose input matches none of the known ones
+  const clusterChangesTabsFor = (title: string): vscode.Tab[] =>
+    vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .filter(
+        (tab) =>
+          isClusterChangesLabel(tab.label, title) &&
+          !(
+            tab.input instanceof vscode.TabInputText ||
+            tab.input instanceof vscode.TabInputTextDiff ||
+            tab.input instanceof vscode.TabInputCustom ||
+            tab.input instanceof vscode.TabInputWebview ||
+            tab.input instanceof vscode.TabInputNotebook ||
+            tab.input instanceof vscode.TabInputNotebookDiff ||
+            tab.input instanceof vscode.TabInputTerminal
+          ),
+      );
+
   const openDiff = async (
     file: ReviewFile,
     selection?: vscode.Range,
@@ -702,14 +760,7 @@ export const activate = async (
     if (git === undefined) {
       return;
     }
-    // The path identifying the base document the model actually resolved: a
-    // repo origin's old path when the base really is that origin's blob, the
-    // file's own path otherwise. Always repo-relative, so a declared external
-    // origin can never escape the repo through a base-document URI.
-    const leftUri = createReviewBaseUri(file.diffBasePath, file.diffBaseSha);
-    const rightUri = file.deleted
-      ? createReviewBaseUri(file.path, undefined)
-      : vscode.Uri.file(join(git.repoRoot, file.path));
+    const { left: leftUri, right: rightUri } = diffUris(git, file);
     const baseLabel = file.diffBaseIsReviewedSnapshot
       ? "last reviewed"
       : "merge base";
@@ -1146,6 +1197,62 @@ export const activate = async (
         const branch = model.branch;
         await applyReviewStateChange("unmark folder", () =>
           unmarkReviewed(activeGit, branch, paths),
+        );
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.openClusterChanges",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined ||
+          element?.kind !== "cluster"
+        ) {
+          return;
+        }
+        const activeGit = git;
+        const branch = model.branch;
+        const label = clusterLabelForKey(clusterModel, element.clusterKey);
+        const files = clusterChangesFiles(
+          clusterFilesForKey(clusterModel, element.clusterKey),
+        );
+        if (files.length === 0) {
+          void vscode.window.showInformationMessage(
+            nothingToReviewMessage(label),
+          );
+          return;
+        }
+        const title = clusterChangesTitle(clusterModel, element.clusterKey);
+        const stale = clusterChangesTabsFor(title);
+        if (stale.length > 0 && !(await vscode.window.tabGroups.close(stale))) {
+          return;
+        }
+        const resources = files.map((file) => ({
+          file,
+          ...diffUris(activeGit, file),
+        }));
+        clusterChangesTabs.set(title, {
+          clusterKey: element.clusterKey,
+          label,
+          paths: files.map((file) => file.path),
+          leftSides: resources.map((resource) => ({
+            path: resource.file.path,
+            basePath: resource.left.path.replace(/^\//, ""),
+            baseQuery: resource.left.query,
+          })),
+          repoRoot: activeGit.repoRoot,
+          branch,
+        });
+        await vscode.commands.executeCommand(
+          "vscode.changes",
+          title,
+          resources.map((resource) => [
+            vscode.Uri.file(join(activeGit.repoRoot, resource.file.path)),
+            resource.left,
+            resource.right,
+          ]),
         );
       },
     ),
