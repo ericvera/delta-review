@@ -47,7 +47,7 @@ Rules:
   - An origin still on disk (whether or not it is in the review set) keeps its snapshot to itself.
   - A deleted `from` that is still its own row (overwrite case keeps the origin's `D` row; a displaced git-rename source is re-added as its own row) keeps its snapshot to itself.
   - A sentinel old-path snapshot is no usable base, so nothing is inherited.
-- Caller (`computeReviewModel`) computes `originShared` from a count of `move.from` over `movesByPath.values()`, and `originDeleted` with a new local `isAbsentAtExactCase(path)`: true when `existsSync` is false, or when the parent directory's listing (`readdirSync`) does not contain `basename(path)` exactly (NFC-normalized on both sides); a failed listing counts as absent. On a case-insensitive filesystem a case-only rename (`Foo.ts` → `foo.ts`) leaves `existsSync(Foo.ts)` true because it resolves to the destination; the exact-case listing reports the origin gone, so the rename inherits. This does not weaken the unmark bound: the only file answering to the old name is the destination itself, and `!reviewPaths.has(move.from)` still guards a `from` that is its own row. `isDeletedFromWorkingTree` (used by `adjustReviewSetForMoves`) is unchanged.
+- Caller (`computeReviewModel`) computes `originShared` from a count of `move.from` over `movesByPath.values()`, and `originDeleted` with a new local `isAbsentAtExactCase(path)`: true when `existsSync` is false, or when any segment of `path` (split on `/`, walked from `git.repoRoot` down) is missing from its parent directory's listing (`readdirSync`) exactly (NFC-normalized on both sides); a failed listing counts as absent. On a case-insensitive filesystem a case-only rename of the file or of any directory above it (`Foo.ts` → `foo.ts`, `Src/foo.ts` → `src/foo.ts`) leaves `existsSync` true for the old path because it resolves to the destination; the per-segment exact-case listing reports the origin gone, so the rename inherits. Checking only the last segment would miss a directory case rename. This does not weaken the unmark bound: the only file answering to the old name is the destination itself, and `!reviewPaths.has(move.from)` still guards a `from` that is its own row. `isDeletedFromWorkingTree` (used by `adjustReviewSetForMoves`) is unchanged.
 - `reviewed = own !== undefined && own === currentSha`.
 - `snapshotBaseSha`: when `own !== undefined`, `own` if `!reviewed && own !== sentinelSha`, else undefined (today's rule). When `own === undefined`, the inherited sha (or undefined).
 - `inheritedSnapshotFrom` is reported whether or not the file has its own snapshot, so unmark after a re-mark still clears the old key.
@@ -71,7 +71,7 @@ Rules:
 ### Display (`src/moveDisplay.ts`, `src/treeProvider.ts`)
 
 - `classificationText` renders `· unchanged` as it does `verbatim`/`adapted`.
-- `buildTooltipStatusLine`: `"unchanged"` pushes `Unchanged since last reviewed`.
+- `buildTooltipStatusLine`: `"unchanged"` pushes `Unchanged since last reviewed`. The out-of-range and unavailable warnings both follow it (the unavailable warning's guard changes from `lines.length === 0` to `moveClassification !== "verbatim"`), so a Reviewed moved file with no base blob still shows `Origin content is no longer available`.
 - `treeProvider.ts`: `Changed since last reviewed` only when `diffBaseIsReviewedSnapshot && moveClassification !== "unchanged"`.
 - Diff title label stays `last reviewed` (driven by `diffBaseIsReviewedSnapshot`).
 
