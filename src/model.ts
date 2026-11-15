@@ -19,7 +19,11 @@ import {
   type OriginBase,
   type SliceIo,
 } from "./originSlice";
-import { DELETED_SENTINEL_CONTENT, readReviewState } from "./reviewState";
+import {
+  DELETED_SENTINEL_CONTENT,
+  readPreDeletionState,
+  readReviewState,
+} from "./reviewState";
 import { computeTriage, Triage } from "./triage";
 
 export enum FileReviewStatus {
@@ -265,6 +269,18 @@ export interface SnapshotSelection {
   hasReviewSnapshot: boolean;
 }
 
+// The snapshot a moved file can inherit from its origin: the origin's own,
+// or — once its deletion was marked — the one it held before that
+export const originSnapshotSha = (
+  from: string,
+  reviewState: ReadonlyMap<string, string>,
+  preDeletionState: ReadonlyMap<string, string>,
+  sentinelSha: string,
+): string | undefined => {
+  const own = reviewState.get(from);
+  return own === sentinelSha ? preDeletionState.get(from) : own;
+};
+
 // Picks the snapshot a file is judged against: its own, else the one a moved
 // file inherits from its old path. Status depends on the own snapshot only.
 export const selectReviewSnapshot = (input: {
@@ -279,6 +295,7 @@ export const selectReviewSnapshot = (input: {
   // own live row
   liveReviewPaths: ReadonlySet<string>;
   reviewState: ReadonlyMap<string, string>;
+  preDeletionState: ReadonlyMap<string, string>;
   // Working-tree sha, or the sentinel when deleted
   currentSha: string;
   sentinelSha: string;
@@ -286,7 +303,14 @@ export const selectReviewSnapshot = (input: {
   const { move, reviewState, sentinelSha } = input;
   const own = reviewState.get(input.path);
   const inheritedSha =
-    move === undefined ? undefined : reviewState.get(move.from);
+    move === undefined
+      ? undefined
+      : originSnapshotSha(
+          move.from,
+          reviewState,
+          input.preDeletionState,
+          sentinelSha,
+        );
   const inheritedSnapshotFrom =
     move?.origin === "repo" &&
     move.fromLines === undefined &&
@@ -660,6 +684,7 @@ export const computeReviewModel = async (
   );
 
   const reviewState = await readReviewState(git, branch);
+  const preDeletionState = await readPreDeletionState(git, branch);
   const { bases: originBaseByPath, sliceShas } =
     await resolveDeclaredOriginBases(
       options?.sliceIo ?? createSliceIo(git),
@@ -693,7 +718,9 @@ export const computeReviewModel = async (
     const move = movesByPath.get(path);
     const originShared =
       move !== undefined && (wholeFileFromCounts.get(move.from) ?? 0) > 1;
-    const oldSha = move ? reviewState.get(move.from) : undefined;
+    const oldSha = move
+      ? originSnapshotSha(move.from, reviewState, preDeletionState, sentinelSha)
+      : undefined;
     // The filesystem walk runs last, only once every cheap condition holds
     const originDeleted =
       move?.origin === "repo" &&
@@ -710,6 +737,7 @@ export const computeReviewModel = async (
       originShared,
       liveReviewPaths,
       reviewState,
+      preDeletionState,
       currentSha,
       sentinelSha,
     });

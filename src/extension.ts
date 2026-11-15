@@ -53,6 +53,7 @@ import {
 import { provenanceEntriesFor } from "./provenance";
 import {
   clearAllReviewSnapshots,
+  deletePreDeletionRef,
   markReviewed,
   reviewRefForBranch,
   unmarkReviewed,
@@ -1299,9 +1300,11 @@ export const activate = async (
           } catch {
             // Ref did not exist — nothing to clear
           }
-          // The slice anchor goes with it: its blobs are review state too.
-          // refs/review-notes/<branch> deliberately does not.
+          // The slice anchor and pre-deletion snapshots go with it: their
+          // blobs are review state too. refs/review-notes/<branch>
+          // deliberately does not.
           await deleteSliceRef(activeGit, clearedBranch);
+          await deletePreDeletionRef(activeGit, clearedBranch);
         });
         // Those slices are unanchored now, so the cache may not hand them to
         // the refresh below — it writes them, and the ref, again

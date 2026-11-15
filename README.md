@@ -7,7 +7,7 @@ Incremental local code review for VS Code — mark files reviewed and, when they
 - Auto-review: mechanical files (lockfiles, build output, `linguist-generated`) fold into a collapsed **Auto** subgroup — review or bulk-✓ them separately, or let them mark themselves.
 - Clustered review: group the change into narrative clusters (written by Claude Code) and review it story by story instead of file by file.
 - Review notes: comment on diff lines, have Claude Code address them, and track the thread to resolution — all inside the editor.
-- Zero footprint: state lives inside `.git` (`refs/review/<branch>`, `refs/review-notes/<branch>`, `refs/review-slices/<branch>`, and `.git/delta-review/`), never in your working tree, never pushed.
+- Zero footprint: state lives inside `.git` (`refs/review/<branch>`, `refs/review-notes/<branch>`, `refs/review-slices/<branch>`, `refs/review-predeletion/<branch>`, and `.git/delta-review/`), never in your working tree, never pushed.
 
 ## Install
 
