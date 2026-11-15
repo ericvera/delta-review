@@ -11,6 +11,7 @@ import {
   computeReviewModel,
   FileReviewStatus,
   hasAnyReviewSnapshot,
+  originSnapshotSha,
   parseCheckAttrOutput,
   pathsWithReviewSnapshot,
   ResolvedMove,
@@ -316,8 +317,9 @@ const select = (input: {
   move?: ResolvedMove;
   originDeleted?: boolean;
   originShared?: boolean;
-  reviewPaths?: string[];
+  liveReviewPaths?: string[];
   reviewState?: [path: string, sha: string][];
+  preDeletionState?: [path: string, sha: string][];
   currentSha?: string;
 }) =>
   selectReviewSnapshot({
@@ -325,8 +327,9 @@ const select = (input: {
     move: input.move,
     originDeleted: input.originDeleted ?? true,
     originShared: input.originShared ?? false,
-    reviewPaths: new Set(input.reviewPaths ?? ["src/new.ts"]),
+    liveReviewPaths: new Set(input.liveReviewPaths ?? ["src/new.ts"]),
     reviewState: new Map(input.reviewState ?? []),
+    preDeletionState: new Map(input.preDeletionState ?? []),
     currentSha: input.currentSha ?? WORKING_SHA,
     sentinelSha: SELECT_SENTINEL_SHA,
   });
@@ -429,14 +432,30 @@ describe("selectReviewSnapshot", () => {
     ).toEqual(NOT_INHERITED);
   });
 
-  it("does not inherit from an origin that is its own row", () => {
+  it("does not inherit from an origin that is its own live row", () => {
     expect(
       select({
         move: repoMove("src/old.ts"),
-        reviewPaths: ["src/new.ts", "src/old.ts"],
+        liveReviewPaths: ["src/new.ts", "src/old.ts"],
         reviewState: [["src/old.ts", REVIEWED_SHA]],
       }),
     ).toEqual(NOT_INHERITED);
+  });
+
+  it("inherits from an origin whose own row is only its deletion", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        liveReviewPaths: ["src/new.ts"],
+        reviewState: [["src/old.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual({
+      reviewed: false,
+      snapshotBaseSha: REVIEWED_SHA,
+      lastReviewedSha: REVIEWED_SHA,
+      inheritedSnapshotFrom: "src/old.ts",
+      hasReviewSnapshot: true,
+    });
   });
 
   it("does not inherit a sentinel old-path snapshot", () => {
@@ -448,11 +467,81 @@ describe("selectReviewSnapshot", () => {
     ).toEqual(NOT_INHERITED);
   });
 
+  it("inherits the pre-deletion snapshot behind a sentinel old-path snapshot", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        reviewState: [["src/old.ts", SELECT_SENTINEL_SHA]],
+        preDeletionState: [["src/old.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual({
+      reviewed: false,
+      snapshotBaseSha: REVIEWED_SHA,
+      lastReviewedSha: REVIEWED_SHA,
+      inheritedSnapshotFrom: "src/old.ts",
+      hasReviewSnapshot: true,
+    });
+  });
+
+  it("ignores the pre-deletion snapshot while the old path holds its own", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        reviewState: [["src/old.ts", REVIEWED_SHA]],
+        preDeletionState: [["src/old.ts", PATH_SHA]],
+      }),
+    ).toEqual({
+      reviewed: false,
+      snapshotBaseSha: REVIEWED_SHA,
+      lastReviewedSha: REVIEWED_SHA,
+      inheritedSnapshotFrom: "src/old.ts",
+      hasReviewSnapshot: true,
+    });
+  });
+
   it("inherits nothing without a move", () => {
     expect(select({ reviewState: [["src/old.ts", REVIEWED_SHA]] })).toEqual(
       NOT_INHERITED,
     );
   });
+});
+
+describe("originSnapshotSha", () => {
+  it.each([
+    ["no snapshot", [], [], undefined],
+    ["own snapshot", [["src/old.ts", REVIEWED_SHA]], [], REVIEWED_SHA],
+    [
+      "own snapshot over a pre-deletion one",
+      [["src/old.ts", REVIEWED_SHA]],
+      [["src/old.ts", PATH_SHA]],
+      REVIEWED_SHA,
+    ],
+    [
+      "pre-deletion snapshot behind the sentinel",
+      [["src/old.ts", SELECT_SENTINEL_SHA]],
+      [["src/old.ts", PATH_SHA]],
+      PATH_SHA,
+    ],
+    [
+      "sentinel with no pre-deletion snapshot",
+      [["src/old.ts", SELECT_SENTINEL_SHA]],
+      [],
+      undefined,
+    ],
+    ["pre-deletion snapshot alone", [], [["src/old.ts", PATH_SHA]], undefined],
+  ] as [string, [string, string][], [string, string][], string | undefined][])(
+    "%s",
+    (_, reviewState, preDeletionState, expected) => {
+      expect(
+        originSnapshotSha(
+          "src/old.ts",
+          new Map(reviewState),
+          new Map(preDeletionState),
+          SELECT_SENTINEL_SHA,
+        ),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe("resolveFileBase", () => {
@@ -794,6 +883,7 @@ interface FakeRepo {
   untracked: string[];
   baseBlobs: Record<string, string>;
   reviewState: Record<string, string>;
+  preDeletionState: Record<string, string>;
   // Working-tree content shas; each path is also written to disk
   workingShas: Record<string, string>;
   objectTypes: Record<string, string>;
@@ -883,6 +973,7 @@ describe("computeReviewModel", () => {
       untracked: [],
       baseBlobs: {},
       reviewState: {},
+      preDeletionState: {},
       workingShas: {},
       objectTypes: {},
       ...repo,
@@ -932,10 +1023,16 @@ describe("computeReviewModel", () => {
               ),
             );
           }
-          if (Object.keys(full.reviewState).length === 0) {
+          const snapshots =
+            args[3] === `refs/review/${full.branch}`
+              ? full.reviewState
+              : args[3] === `refs/review-predeletion/${full.branch}`
+                ? full.preDeletionState
+                : {};
+          if (Object.keys(snapshots).length === 0) {
             throw new Error("fatal: not a valid object name");
           }
-          return lsTreeOutput(full.reviewState);
+          return lsTreeOutput(snapshots);
         }
         if (args[0] === "check-attr") {
           checkAttrStdin.push(options?.stdin ?? "");
@@ -1164,6 +1261,112 @@ describe("computeReviewModel", () => {
       undefined,
     ]);
     expect(pathsWithReviewSnapshot(model.files)).toEqual([]);
+  });
+
+  it("lends a deleted origin to its whole-file move though an extraction names it", async () => {
+    const git = await setUp({
+      changes: [
+        ["A", "src/a.ts"],
+        ["A", "src/b.ts"],
+        ["D", "src/shared.ts"],
+      ],
+      baseBlobs: { "src/shared.ts": fakeSha(ORIGIN_CONTENT) },
+      reviewState: { "src/shared.ts": REVIEWED_SHA },
+      workingShas: { "src/a.ts": WORKING_SHA, "src/b.ts": WORKING_SHA },
+    });
+    const model = await computeReviewModel(git, "main", {
+      moves: [
+        declaration("src/a.ts", "src/shared.ts", "repo"),
+        declaration("src/b.ts", "src/shared.ts", "repo", {
+          fromLines: [[2, 3]],
+        }),
+      ],
+      sliceIo: fakeSliceIo([ORIGIN_CONTENT]),
+    });
+    expect(model.files.map((file) => file.path)).toEqual([
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+    expect(model.files.map((file) => file.inheritedSnapshotFrom)).toEqual([
+      "src/shared.ts",
+      undefined,
+    ]);
+  });
+
+  it("lends an overwrite destination the snapshot of its origin's deletion row", async () => {
+    const git = await setUp({
+      changes: [
+        ["M", "src/dest.ts"],
+        ["D", "src/old.ts"],
+      ],
+      baseBlobs: { "src/dest.ts": PATH_SHA, "src/old.ts": ORIGIN_SHA },
+      reviewState: { "src/old.ts": REVIEWED_SHA },
+      workingShas: { "src/dest.ts": WORKING_SHA },
+    });
+    const model = await computeReviewModel(git, "main", {
+      moves: [declaration("src/dest.ts", "src/old.ts", "repo")],
+    });
+    expect(model.files.map((file) => file.path)).toEqual([
+      "src/dest.ts",
+      "src/old.ts",
+    ]);
+    const [dest] = model.files;
+    expect(dest.inheritedSnapshotFrom).toBe("src/old.ts");
+    expect(dest.diffBaseSha).toBe(REVIEWED_SHA);
+    expect(pathsWithReviewSnapshot(model.files)).toEqual([
+      "src/dest.ts",
+      "src/old.ts",
+      "src/old.ts",
+    ]);
+  });
+
+  it("keeps an overwrite destination's inheritance once its origin's deletion row is marked", async () => {
+    const git = await setUp({
+      changes: [
+        ["M", "src/dest.ts"],
+        ["D", "src/old.ts"],
+      ],
+      baseBlobs: { "src/dest.ts": PATH_SHA, "src/old.ts": ORIGIN_SHA },
+      reviewState: { "src/old.ts": SENTINEL_SHA },
+      preDeletionState: { "src/old.ts": REVIEWED_SHA },
+      workingShas: { "src/dest.ts": WORKING_SHA },
+    });
+    const model = await computeReviewModel(git, "main", {
+      moves: [declaration("src/dest.ts", "src/old.ts", "repo")],
+    });
+    expect(model.files.map((file) => file.path)).toEqual([
+      "src/dest.ts",
+      "src/old.ts",
+    ]);
+    const [dest, old] = model.files;
+    expect(dest.inheritedSnapshotFrom).toBe("src/old.ts");
+    expect(dest.diffBaseSha).toBe(REVIEWED_SHA);
+    expect(dest.status).toBe(FileReviewStatus.NeedsReview);
+    expect(old.status).toBe(FileReviewStatus.Reviewed);
+  });
+
+  it("does not inherit from a declared origin that is its own row still on disk", async () => {
+    const git = await setUp({
+      changes: [
+        ["A", "src/copy.ts"],
+        ["M", "src/origin.ts"],
+      ],
+      baseBlobs: { "src/origin.ts": ORIGIN_SHA },
+      reviewState: { "src/origin.ts": REVIEWED_SHA },
+      workingShas: {
+        "src/copy.ts": REVIEWED_SHA,
+        "src/origin.ts": WORKING_SHA,
+      },
+    });
+    const model = await computeReviewModel(git, "main", {
+      moves: [declaration("src/copy.ts", "src/origin.ts", "repo")],
+    });
+    expect(model.files.map((file) => file.path)).toEqual([
+      "src/copy.ts",
+      "src/origin.ts",
+    ]);
+    expect(model.files[0].inheritedSnapshotFrom).toBeUndefined();
+    expect(model.files[0].hasReviewSnapshot).toBe(false);
   });
 
   it("inherits across a case-only rename of the file", async () => {

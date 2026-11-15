@@ -7,7 +7,7 @@ Incremental local code review for VS Code — mark files reviewed and, when they
 - Auto-review: mechanical files (lockfiles, build output, `linguist-generated`) fold into a collapsed **Auto** subgroup — review or bulk-✓ them separately, or let them mark themselves.
 - Clustered review: group the change into narrative clusters (written by Claude Code) and review it story by story instead of file by file.
 - Review notes: comment on diff lines, have Claude Code address them, and track the thread to resolution — all inside the editor.
-- Zero footprint: state lives inside `.git` (`refs/review/<branch>`, `refs/review-notes/<branch>`, `refs/review-slices/<branch>`, and `.git/delta-review/`), never in your working tree, never pushed.
+- Zero footprint: state lives inside `.git` (`refs/review/<branch>`, `refs/review-notes/<branch>`, `refs/review-slices/<branch>`, `refs/review-predeletion/<branch>`, and `.git/delta-review/`), never in your working tree, never pushed.
 
 ## Install
 
@@ -66,6 +66,7 @@ The plugin ships two skills: `/delta:cluster` (this section) and `/delta:review-
 - Provenance is declared, never inferred: Claude records only the moves and extractions it made or that you described — it never guesses one from the diff. (The panel still recognizes ordinary git renames on its own, contract or not.)
 - Claude can also leave a one-line remark on any file. That remark and the file's origin ride together in a pinned, read-only comment at the top of its diff — context before the code, with nothing to reply to or resolve.
 - A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last.
+- A cluster row's `$(diff-multiple)` action opens all its needs-review files in one combined diff, each against its own base.
 - Grouping is pure presentation — toggling it never changes what's marked reviewed.
 
 ### Review notes

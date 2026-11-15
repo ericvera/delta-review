@@ -1,7 +1,18 @@
 import { access, readFile } from "node:fs/promises";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import * as vscode from "vscode";
 import { baseBlobForNote } from "./baseDocument";
+import {
+  clusterChangesFiles,
+  clusterChangesMarkPaths,
+  clusterChangesTitle,
+  clusterLabelForKey,
+  DiffDocument,
+  fileForDiffDocument,
+  isRowAlreadySelected,
+  nothingToReviewMessage,
+  sameClusterChangesSource,
+} from "./clusterChanges";
 import {
   ClusterModel,
   clusterFilesForKey,
@@ -53,6 +64,7 @@ import {
 import { provenanceEntriesFor } from "./provenance";
 import {
   clearAllReviewSnapshots,
+  deletePreDeletionRef,
   markReviewed,
   reviewRefForBranch,
   unmarkReviewed,
@@ -608,6 +620,15 @@ export const activate = async (
       },
     );
 
+  const markClusterPaths = async (
+    activeGit: Git,
+    branch: string,
+    paths: string[],
+  ): Promise<void> =>
+    applyReviewStateChange("mark cluster reviewed", () =>
+      markReviewed(activeGit, branch, paths),
+    );
+
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleRefresh = (): void => {
     if (refreshTimer !== undefined) {
@@ -694,6 +715,105 @@ export const activate = async (
     await refresh();
   };
 
+  const diffUris = (
+    activeGit: Git,
+    file: ReviewFile,
+  ): { left: vscode.Uri; right: vscode.Uri } => ({
+    // The path identifying the base document the model actually resolved: a
+    // repo origin's old path when the base really is that origin's blob, the
+    // file's own path otherwise. Always repo-relative, so a declared external
+    // origin can never escape the repo through a base-document URI.
+    left: createReviewBaseUri(file.diffBasePath, file.diffBaseSha),
+    right: file.deleted
+      ? createReviewBaseUri(file.path, undefined)
+      : vscode.Uri.file(join(activeGit.repoRoot, file.path)),
+  });
+
+  type ClusterChangesEntry = {
+    clusterKey: string;
+    label: string;
+    paths: string[];
+    leftSides: { path: string; basePath: string; baseQuery: string }[];
+    repoRoot: string;
+    branch: string;
+  };
+
+  // Title of the one open combined cluster diff -> what it shows
+  const clusterChangesTabs = new Map<string, ClusterChangesEntry>();
+
+  // The multi-diff editor appends a localized file count, `<title> (2 files)`,
+  // once its resources resolve
+  const isClusterChangesLabel = (label: string, title: string): boolean =>
+    label === title ||
+    (label.startsWith(title) &&
+      /^ \(\d+[^()]*\)$/.test(label.slice(title.length)));
+
+  // The stable API has no multi-diff tab input class, so a combined diff is a
+  // tab whose input matches none of the known ones
+  const isStableTabInput = (input: unknown): boolean =>
+    input instanceof vscode.TabInputText ||
+    input instanceof vscode.TabInputTextDiff ||
+    input instanceof vscode.TabInputCustom ||
+    input instanceof vscode.TabInputWebview ||
+    input instanceof vscode.TabInputNotebook ||
+    input instanceof vscode.TabInputNotebookDiff ||
+    input instanceof vscode.TabInputTerminal;
+
+  const clusterChangesTabsFor = (title: string): vscode.Tab[] =>
+    vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .filter(
+        (tab) =>
+          isClusterChangesLabel(tab.label, title) &&
+          !isStableTabInput(tab.input),
+      );
+
+  // More than one title matches only when a cluster label itself ends in a
+  // file-count-like suffix
+  const clusterChangesTitlesForTab = (tab: vscode.Tab | undefined): string[] =>
+    tab === undefined || isStableTabInput(tab.input)
+      ? []
+      : [...clusterChangesTabs.keys()].filter((title) =>
+          isClusterChangesLabel(tab.label, title),
+        );
+
+  const isClusterChangesTab = (tab: vscode.Tab | undefined): boolean =>
+    clusterChangesTitlesForTab(tab).length > 0;
+
+  const activeClusterChanges = ():
+    { title: string; entry: ClusterChangesEntry } | undefined => {
+    const titles = clusterChangesTitlesForTab(
+      vscode.window.tabGroups.activeTabGroup.activeTab,
+    );
+    return titles.length === 1
+      ? { title: titles[0], entry: clusterChangesTabs.get(titles[0])! }
+      : undefined;
+  };
+
+  const updateClusterChangesContext = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.clusterChangesActive",
+      isClusterChangesTab(vscode.window.tabGroups.activeTabGroup.activeTab),
+    );
+  };
+  context.subscriptions.push(
+    vscode.window.tabGroups.onDidChangeTabs((event) => {
+      for (const tab of event.closed) {
+        const titles = [...clusterChangesTabs.keys()].filter((title) =>
+          isClusterChangesLabel(tab.label, title),
+        );
+        for (const title of titles) {
+          if (clusterChangesTabsFor(title).length === 0) {
+            clusterChangesTabs.delete(title);
+          }
+        }
+      }
+      updateClusterChangesContext();
+    }),
+    vscode.window.tabGroups.onDidChangeTabGroups(updateClusterChangesContext),
+  );
+
   const openDiff = async (
     file: ReviewFile,
     selection?: vscode.Range,
@@ -701,14 +821,7 @@ export const activate = async (
     if (git === undefined) {
       return;
     }
-    // The path identifying the base document the model actually resolved: a
-    // repo origin's old path when the base really is that origin's blob, the
-    // file's own path otherwise. Always repo-relative, so a declared external
-    // origin can never escape the repo through a base-document URI.
-    const leftUri = createReviewBaseUri(file.diffBasePath, file.diffBaseSha);
-    const rightUri = file.deleted
-      ? createReviewBaseUri(file.path, undefined)
-      : vscode.Uri.file(join(git.repoRoot, file.path));
+    const { left: leftUri, right: rightUri } = diffUris(git, file);
     const baseLabel = file.diffBaseIsReviewedSnapshot
       ? "last reviewed"
       : "merge base";
@@ -749,6 +862,71 @@ export const activate = async (
       console.warn("Delta Review: could not reveal file row", error);
     }
   };
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (
+        editor === undefined ||
+        git === undefined ||
+        model === undefined ||
+        !treeView.visible
+      ) {
+        return;
+      }
+      const active = activeClusterChanges();
+      if (active === undefined) {
+        return;
+      }
+      const { entry } = active;
+      if (
+        !sameClusterChangesSource(entry, {
+          repoRoot: git.repoRoot,
+          branch: model.branch,
+        })
+      ) {
+        return;
+      }
+      const uri = editor.document.uri;
+      let doc: DiffDocument;
+      if (uri.scheme === "file") {
+        const path = relative(git.repoRoot, uri.fsPath).replace(/\\/g, "/");
+        if (path.startsWith("..")) {
+          return;
+        }
+        doc = { scheme: "file", path };
+      } else if (uri.scheme === REVIEW_BASE_SCHEME) {
+        doc = {
+          scheme: "base",
+          path: uri.path.replace(/^\//, ""),
+          query: uri.query,
+        };
+      } else {
+        return;
+      }
+      const files = model.files.filter((f) => entry.paths.includes(f.path));
+      let file: ReviewFile | undefined;
+      if (doc.scheme === "base") {
+        const { path, query } = doc;
+        const side = entry.leftSides.find(
+          (s) => s.basePath === path && s.baseQuery === query,
+        );
+        if (side !== undefined) {
+          file = files.find((f) => f.path === side.path);
+        }
+      }
+      file ??= fileForDiffDocument(files, doc);
+      if (file === undefined) {
+        return;
+      }
+      const selected = treeView.selection.flatMap((e) =>
+        e.kind === "file" ? [e.file.path] : [],
+      );
+      if (isRowAlreadySelected(selected, file.path)) {
+        return;
+      }
+      void revealFileRow(file);
+    }),
+  );
 
   // The visible file set a folder row subdivides: all files when scoped to
   // the grouped Reviewed bucket, its cluster's files when cluster-scoped
@@ -1150,6 +1328,135 @@ export const activate = async (
     ),
 
     vscode.commands.registerCommand(
+      "deltaReview.openClusterChanges",
+      async (element?: ReviewTreeElement) => {
+        if (
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined ||
+          element?.kind !== "cluster"
+        ) {
+          return;
+        }
+        const activeGit = git;
+        const branch = model.branch;
+        const label = clusterLabelForKey(clusterModel, element.clusterKey);
+        const files = clusterChangesFiles(
+          clusterFilesForKey(clusterModel, element.clusterKey),
+        );
+        if (files.length === 0) {
+          void vscode.window.showInformationMessage(
+            nothingToReviewMessage(label),
+          );
+          return;
+        }
+        const title = clusterChangesTitle(clusterModel, element.clusterKey);
+        const stale = clusterChangesTabsFor(title);
+        if (stale.length > 0 && !(await vscode.window.tabGroups.close(stale))) {
+          return;
+        }
+        const resources = files.map((file) => ({
+          file,
+          ...diffUris(activeGit, file),
+        }));
+        clusterChangesTabs.set(title, {
+          clusterKey: element.clusterKey,
+          label,
+          paths: files.map((file) => file.path),
+          leftSides: resources.map((resource) => ({
+            path: resource.file.path,
+            basePath: resource.left.path.replace(/^\//, ""),
+            baseQuery: resource.left.query,
+          })),
+          repoRoot: activeGit.repoRoot,
+          branch,
+        });
+        await vscode.commands.executeCommand(
+          "vscode.changes",
+          title,
+          resources.map((resource) => [
+            vscode.Uri.file(join(activeGit.repoRoot, resource.file.path)),
+            resource.left,
+            resource.right,
+          ]),
+        );
+        updateClusterChangesContext();
+      },
+    ),
+
+    // editor/title passes (resource, { groupId }): the resource is the
+    // multi-diff's random `multi-diff-editor:` source, which no stable tab
+    // input exposes, and groupId is internal (TabGroup has only viewColumn).
+    // Neither maps to a vscode.Tab, so the press is trusted only when no other
+    // group's title bar could have shown the button.
+    vscode.commands.registerCommand(
+      "deltaReview.markClusterChangesReviewed",
+      async (..._args: unknown[]) => {
+        const cantTell = (): void => {
+          void vscode.window.showInformationMessage(
+            "Can't tell which editor this button belongs to. Focus the cluster's combined diff and try again.",
+          );
+        };
+        const activeGroup = vscode.window.tabGroups.activeTabGroup;
+        const titles = clusterChangesTitlesForTab(activeGroup.activeTab);
+        if (titles.length > 1) {
+          cantTell();
+          return;
+        }
+        const active = activeClusterChanges();
+        if (
+          active === undefined ||
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined
+        ) {
+          return;
+        }
+        const { title, entry } = active;
+        const activeGit = git;
+        const branch = model.branch;
+        if (clusterChangesTabsFor(title).length > 1) {
+          void vscode.window.showInformationMessage(
+            `More than one '${title}' tab is open. Close them and reopen it from the Delta Review pane.`,
+          );
+          return;
+        }
+        if (
+          vscode.window.tabGroups.all.some(
+            (group) =>
+              group !== activeGroup &&
+              group.activeTab !== undefined &&
+              !isStableTabInput(group.activeTab.input),
+          )
+        ) {
+          cantTell();
+          return;
+        }
+        const result = clusterChangesMarkPaths(
+          {
+            title,
+            label: entry.label,
+            paths: entry.paths,
+            repoRoot: entry.repoRoot,
+            branch: entry.branch,
+          },
+          {
+            title: clusterChangesTitle(clusterModel, entry.clusterKey),
+            label: clusterLabelForKey(clusterModel, entry.clusterKey),
+            repoRoot: activeGit.repoRoot,
+            branch,
+          },
+          clusterFilesForKey(clusterModel, entry.clusterKey),
+        );
+        if ("message" in result) {
+          void vscode.window.showInformationMessage(result.message);
+          return;
+        }
+        await markClusterPaths(activeGit, branch, result.paths);
+      },
+    ),
+
+    vscode.commands.registerCommand(
       "deltaReview.markClusterReviewed",
       async (element?: ReviewTreeElement) => {
         if (
@@ -1166,11 +1473,7 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        const activeGit = git;
-        const branch = model.branch;
-        await applyReviewStateChange("mark cluster reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await markClusterPaths(git, model.branch, paths);
       },
     ),
 
@@ -1299,9 +1602,11 @@ export const activate = async (
           } catch {
             // Ref did not exist — nothing to clear
           }
-          // The slice anchor goes with it: its blobs are review state too.
-          // refs/review-notes/<branch> deliberately does not.
+          // The slice anchor and pre-deletion snapshots go with it: their
+          // blobs are review state too. refs/review-notes/<branch>
+          // deliberately does not.
           await deleteSliceRef(activeGit, clearedBranch);
+          await deletePreDeletionRef(activeGit, clearedBranch);
         });
         // Those slices are unanchored now, so the cache may not hand them to
         // the refresh below — it writes them, and the ref, again
@@ -1366,6 +1671,7 @@ export const activate = async (
             ]),
           ),
           notesBadge: notesTreeView.badge,
+          clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
         };
       }),
     );

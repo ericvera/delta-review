@@ -19,7 +19,11 @@ import {
   type OriginBase,
   type SliceIo,
 } from "./originSlice";
-import { DELETED_SENTINEL_CONTENT, readReviewState } from "./reviewState";
+import {
+  DELETED_SENTINEL_CONTENT,
+  readPreDeletionState,
+  readReviewState,
+} from "./reviewState";
 import { computeTriage, Triage } from "./triage";
 
 export enum FileReviewStatus {
@@ -265,6 +269,18 @@ export interface SnapshotSelection {
   hasReviewSnapshot: boolean;
 }
 
+// The snapshot a moved file can inherit from its origin: the origin's own,
+// or — once its deletion was marked — the one it held before that
+export const originSnapshotSha = (
+  from: string,
+  reviewState: ReadonlyMap<string, string>,
+  preDeletionState: ReadonlyMap<string, string>,
+  sentinelSha: string,
+): string | undefined => {
+  const own = reviewState.get(from);
+  return own === sentinelSha ? preDeletionState.get(from) : own;
+};
+
 // Picks the snapshot a file is judged against: its own, else the one a moved
 // file inherits from its old path. Status depends on the own snapshot only.
 export const selectReviewSnapshot = (input: {
@@ -273,10 +289,13 @@ export const selectReviewSnapshot = (input: {
   // The move's `from` is absent from the working tree; the caller may pass
   // false without checking when another inheritance condition already fails
   originDeleted: boolean;
-  // More than one move resolved for the review set has this `from`
+  // More than one whole-file move resolved for the review set has this `from`
   originShared: boolean;
-  reviewPaths: ReadonlySet<string>;
+  // Review-set paths present in the working tree; a `from` among them is its
+  // own live row
+  liveReviewPaths: ReadonlySet<string>;
   reviewState: ReadonlyMap<string, string>;
+  preDeletionState: ReadonlyMap<string, string>;
   // Working-tree sha, or the sentinel when deleted
   currentSha: string;
   sentinelSha: string;
@@ -284,13 +303,20 @@ export const selectReviewSnapshot = (input: {
   const { move, reviewState, sentinelSha } = input;
   const own = reviewState.get(input.path);
   const inheritedSha =
-    move === undefined ? undefined : reviewState.get(move.from);
+    move === undefined
+      ? undefined
+      : originSnapshotSha(
+          move.from,
+          reviewState,
+          input.preDeletionState,
+          sentinelSha,
+        );
   const inheritedSnapshotFrom =
     move?.origin === "repo" &&
     move.fromLines === undefined &&
     !input.originShared &&
     input.originDeleted &&
-    !input.reviewPaths.has(move.from) &&
+    !input.liveReviewPaths.has(move.from) &&
     inheritedSha !== undefined &&
     inheritedSha !== sentinelSha
       ? move.from
@@ -317,9 +343,11 @@ export const selectReviewSnapshot = (input: {
 //
 // Diff-base precedence: the reviewed snapshot, then the merge-base blob at
 // the file's own path (an overwrite is still an edit to a file the reviewer
-// already had), then the origin base. The classification is against the last
-// reviewed snapshot when there is one, else against the origin base, whatever
-// the diff is shown against.
+// already had), then the origin base. An overwrite destination that inherits
+// a snapshot diffs against it, so the content it overwrote is shown nowhere;
+// the merge-base blob is the base only without a snapshot. The classification
+// is against the last reviewed snapshot when there is one, else against the
+// origin base, whatever the diff is shown against.
 export const resolveFileBase = (input: {
   path: string;
   move: ResolvedMove | undefined;
@@ -619,8 +647,8 @@ export const computeReviewModel = async (
     !existsSync(join(git.repoRoot, path));
   // On a case-insensitive filesystem a case-only rename of the file or any
   // directory above it leaves `existsSync` true for the old path; the only
-  // file answering to it is the destination, and the review-set check in
-  // `selectReviewSnapshot` still guards a `from` that is its own row
+  // file answering to it is the destination, and the `liveReviewPaths` check
+  // in `selectReviewSnapshot` still guards a `from` that is its own row
   const isAbsentAtExactCase = (path: string): boolean => {
     if (isDeletedFromWorkingTree(path)) {
       return true;
@@ -656,6 +684,7 @@ export const computeReviewModel = async (
   );
 
   const reviewState = await readReviewState(git, branch);
+  const preDeletionState = await readPreDeletionState(git, branch);
   const { bases: originBaseByPath, sliceShas } =
     await resolveDeclaredOriginBases(
       options?.sliceIo ?? createSliceIo(git),
@@ -672,10 +701,15 @@ export const computeReviewModel = async (
     options?.hashCache,
   );
 
-  const reviewPaths = new Set(paths);
-  const fromCounts = new Map<string, number>();
+  const liveReviewPaths = new Set(currentShaByPath.keys());
+  const wholeFileFromCounts = new Map<string, number>();
   for (const move of movesByPath.values()) {
-    fromCounts.set(move.from, (fromCounts.get(move.from) ?? 0) + 1);
+    if (move.fromLines === undefined) {
+      wholeFileFromCounts.set(
+        move.from,
+        (wholeFileFromCounts.get(move.from) ?? 0) + 1,
+      );
+    }
   }
 
   const files = paths.map((path): ReviewFile => {
@@ -683,14 +717,16 @@ export const computeReviewModel = async (
     const currentSha = currentShaByPath.get(path) ?? sentinelSha;
     const move = movesByPath.get(path);
     const originShared =
-      move !== undefined && (fromCounts.get(move.from) ?? 0) > 1;
-    const oldSha = move ? reviewState.get(move.from) : undefined;
+      move !== undefined && (wholeFileFromCounts.get(move.from) ?? 0) > 1;
+    const oldSha = move
+      ? originSnapshotSha(move.from, reviewState, preDeletionState, sentinelSha)
+      : undefined;
     // The filesystem walk runs last, only once every cheap condition holds
     const originDeleted =
       move?.origin === "repo" &&
       move.fromLines === undefined &&
       !originShared &&
-      !reviewPaths.has(move.from) &&
+      !liveReviewPaths.has(move.from) &&
       oldSha !== undefined &&
       oldSha !== sentinelSha &&
       isAbsentAtExactCase(move.from);
@@ -699,8 +735,9 @@ export const computeReviewModel = async (
       move,
       originDeleted,
       originShared,
-      reviewPaths,
+      liveReviewPaths,
       reviewState,
+      preDeletionState,
       currentSha,
       sentinelSha,
     });

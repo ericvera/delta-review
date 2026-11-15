@@ -127,6 +127,18 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.openClusterChanges",
+        "title": "Open Cluster Changes",
+        "icon": "$(diff-multiple)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markClusterChangesReviewed",
+        "title": "Mark Cluster Reviewed",
+        "icon": "$(check-all)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.markClusterReviewed",
         "title": "Mark Reviewed",
         "icon": "$(add)",
@@ -219,6 +231,13 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "deltaReview.markClusterChangesReviewed",
+          "when": "activeEditor == 'multiDiffEditor' && deltaReview.clusterChangesActive",
+          "group": "navigation@-1000"
+        }
+      ],
       "view/title": [
         {
           "command": "deltaReview.viewAsTree",
@@ -323,6 +342,16 @@
           "group": "navigation"
         },
         {
+          "command": "deltaReview.openClusterChanges",
+          "when": "view == deltaReview && viewItem =~ /^clusterNeedsReview/",
+          "group": "inline@1"
+        },
+        {
+          "command": "deltaReview.openClusterChanges",
+          "when": "view == deltaReview && viewItem =~ /^clusterNeedsReview/",
+          "group": "navigation@1"
+        },
+        {
           "command": "deltaReview.markClusterReviewed",
           "when": "view == deltaReview && viewItem =~ /^clusterNeedsReview/",
           "group": "inline@2"
@@ -330,7 +359,7 @@
         {
           "command": "deltaReview.markClusterReviewed",
           "when": "view == deltaReview && viewItem =~ /^clusterNeedsReview/",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "deltaReview.unmarkClusterReviewed",
@@ -340,7 +369,7 @@
         {
           "command": "deltaReview.unmarkClusterReviewed",
           "when": "view == deltaReview && viewItem =~ /^(clusterReviewed|clusterNeedsReviewSnapshot)$/",
-          "group": "navigation"
+          "group": "navigation@3"
         },
         {
           "command": "deltaReview.markAllReviewed",
@@ -472,6 +501,14 @@
         },
         {
           "command": "deltaReview.unmarkAutoReviewed",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.openClusterChanges",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markClusterChangesReviewed",
           "when": "false"
         },
         {
