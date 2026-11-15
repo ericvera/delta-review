@@ -16,7 +16,7 @@ While a Delta Review combined cluster diff (`Cluster Changes: <label>`) is the a
 
 ## Background
 
-- Task 02_02 added `type ClusterChangesEntry = { clusterKey; label; paths; leftSides; repoRoot; branch }` (`leftSides: { path; basePath; baseQuery }[]`: per shown file, its path plus the left URI's path without leading `/` and its query exactly as opened; the tab's left documents keep that sha even after the model's `diffBaseSha` changes from a sidebar mark or re-snapshot; `repoRoot`/`branch`: the repo and branch the tab was opened from) and `clusterChangesTabs: Map<title, ClusterChangesEntry>` (the paths shown in the one open combined diff per title). Task 02_03 added `activeClusterChanges(): ClusterChangesEntry | undefined`, which returns the active combined diff's full entry or undefined.
+- Task 02_02 added `type ClusterChangesEntry = { clusterKey; label; paths; leftSides; repoRoot; branch }` (`leftSides: { path; basePath; baseQuery }[]`: per shown file, its path plus the left URI's path without leading `/` and its query exactly as opened; the tab's left documents keep that sha even after the model's `diffBaseSha` changes from a sidebar mark or re-snapshot; `repoRoot`/`branch`: the repo and branch the tab was opened from) and `clusterChangesTabs: Map<title, ClusterChangesEntry>` (the paths shown in the one open combined diff per title). Task 02_03 added `activeClusterChanges(): { title: string; entry: ClusterChangesEntry } | undefined`, which returns the active combined diff's title and full entry, or undefined when the active tab is not ours or its label matches more than one recorded title. Tab labels carry VS Code's localized ` (N files)` suffix, so tab-to-title matching goes through `isClusterChangesLabel` / `clusterChangesTabsFor` (`src/extension.ts:732-754`) and 02_03's `clusterChangesTitlesForTab`; never `tab.label === title` or `clusterChangesTabs.get(tab.label)`.
 - Task 02_01 added in `src/clusterChanges.ts`:
   - `fileForDiffDocument(files, doc)`, where `doc` is `{ scheme: "file"; path }` or `{ scheme: "base"; path; query }` with a repo-relative path and no leading `/`;
   - `isRowAlreadySelected(selectedPaths, path)`;
@@ -34,7 +34,7 @@ While a Delta Review combined cluster diff (`Cluster Changes: <label>`) is the a
 
 1. Add a `vscode.window.onDidChangeActiveTextEditor((editor) => …)` subscription (push it into `context.subscriptions`):
    - Return when `editor` is undefined, `git`/`model` is undefined, or `!treeView.visible`.
-   - Set `entry = activeClusterChanges()` and return when it is undefined.
+   - Set `active = activeClusterChanges()` and return when it is undefined (this also skips an ambiguous label); `entry = active.entry`. Do not look the entry up by the tab's label yourself.
    - Return when `!sameClusterChangesSource(entry, { repoRoot: git.repoRoot, branch: model.branch })`, before mapping any URI: after an SCM repo switch or a branch checkout, the tab's repo-relative paths would otherwise resolve against another repo's or branch's files.
    - Map `editor.document.uri`. For scheme `file`, compute `relative(git.repoRoot, uri.fsPath)` with posix separators and return when it starts with `..`; this gives `{ scheme: "file", path }`. For scheme `REVIEW_BASE_SCHEME`, this gives `{ scheme: "base", path: uri.path.replace(/^\//, ""), query: uri.query }`. For any other scheme, return.
    - Set `files = model.files.filter(f => entry.paths.includes(f.path))`.
@@ -58,6 +58,7 @@ While a Delta Review combined cluster diff (`Cluster Changes: <label>`) is the a
 - Do not call `treeView.reveal` when `!treeView.visible`: reveal would force the view open.
 - `revealFileRow` must not be awaited in a way that blocks the event; fire and forget (it already catches).
 - Keyboard navigation between files inside the multi-diff also changes the active text editor, and that is intended.
+- Never match the active tab to a title with `tab.label === title`: real labels are `<title> (N files)`. Use `activeClusterChanges()` only.
 - Run `yarn format` before finishing.
 
 ## Verification
