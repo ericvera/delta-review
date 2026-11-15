@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Delta Review mock: cluster row, Open Cluster Changes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+<div class="crumbs"><a href="index.html">Mock index</a> / Sidebar</div>
+<h1>DELTA REVIEW sidebar: cluster rows and the new action</h1>
+<p>Grouped layout, tree view mode. The new command <b>Open Cluster Changes</b> (<span class="codicon codicon-diff-multiple"></span> <code>$(diff-multiple)</code>) appears on a cluster row as the first inline action and the first context-menu entry whenever at least one file in that cluster still needs review: changed since its reviewed snapshot, or never reviewed. Fresh, never-reviewed clusters get it too. New elements have a dashed blue outline.</p>
+
+<div class="row-of-panels">
+
+<!-- Panel 1: shown -->
+<div>
+<p class="panel-caption"><b>1. Offered (hovering the row).</b> "Settings panel" has 4 files that need review: 3 changed since review (one is a moved file that took over its old path's snapshot, task 1) and 1 never reviewed. Inline actions: <span class="codicon codicon-diff-multiple"></span> new, then the existing <span class="codicon codicon-add"></span> Mark and <span class="codicon codicon-remove"></span> Unmark.</p>
+<div class="sidebar">
+  <div class="view-header"><span class="codicon codicon-chevron-down"></span><span class="title">Delta Review</span>
+    <span class="actions"><span class="codicon codicon-refresh"></span><span class="codicon codicon-list-flat"></span><span class="codicon codicon-ungroup-by-ref-type"></span><span class="codicon codicon-ellipsis"></span></span></div>
+  <div class="tree">
+    <div class="row ind0 hover"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-layers"></span><span class="label">Settings panel</span><span class="desc">2/6</span>
+      <span class="actions"><span class="codicon codicon-diff-multiple new hot" title="Open Cluster Changes"></span><span class="codicon codicon-add" title="Mark Reviewed"></span><span class="codicon codicon-remove" title="Unmark Reviewed"></span></span>
+      <div class="hovertip" style="top:24px; left:228px;">Open Cluster Changes</div>
+    </div>
+    <div class="row ind1"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-folder"></span><span class="label">src</span></div>
+    <div class="row ind2"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-folder"></span><span class="label">settings</span></div>
+    <div class="row ind3"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">panel.ts</span><span class="desc">← src/settingsPanel.ts</span><span class="badge M">M</span></div>
+    <div class="row ind3"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">schema.ts</span><span class="spacer"></span><span class="badge M">M</span></div>
+    <div class="row ind3"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">validate.ts</span><span class="spacer"></span><span class="badge A">A</span></div>
+    <div class="row ind2"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">extension.ts</span><span class="spacer"></span><span class="badge M">M</span></div>
+    <div class="row ind0"><span class="twisty codicon codicon-chevron-right"></span><span class="icon codicon codicon-layers"></span><span class="label">Notes watcher</span><span class="desc">0/3</span></div>
+    <div class="row ind0"><span class="twisty codicon codicon-chevron-right"></span><span class="icon codicon codicon-layers"></span><span class="label">Rename tracking</span><span class="desc">4/4</span></div>
+    <div class="row ind0"><span class="twisty codicon codicon-chevron-right"></span><span class="icon codicon codicon-warning warn"></span><span class="label warn">Unclustered</span><span class="desc">0/1</span></div>
+    <div class="row ind0"><span class="twisty codicon codicon-chevron-right"></span><span class="icon codicon codicon-gear"></span><span class="label">Auto</span><span class="desc">2</span></div>
+    <div class="row ind0"><span class="twisty codicon codicon-chevron-right"></span><span class="icon codicon codicon-check"></span><span class="label">Reviewed</span><span class="desc">7</span></div>
+  </div>
+</div>
+<p class="note" style="max-width:340px;font-size:12px">The file rows are unchanged. Hovering <code>panel.ts</code>, <code>schema.ts</code> or <code>extension.ts</code> still shows "Changed since last reviewed". <code>validate.ts</code> was never reviewed; it is included in the combined diff against the merge base.</p>
+</div>
+
+<!-- Panel 2: context menu -->
+<div>
+<p class="panel-caption"><b>2. Offered (right-click).</b> The same command leads the cluster's context menu, above the existing Mark and Unmark entries.</p>
+<div class="sidebar" style="height:330px">
+  <div class="view-header"><span class="codicon codicon-chevron-down"></span><span class="title">Delta Review</span>
+    <span class="actions"><span class="codicon codicon-refresh"></span><span class="codicon codicon-list-flat"></span><span class="codicon codicon-ungroup-by-ref-type"></span><span class="codicon codicon-ellipsis"></span></span></div>
+  <div class="tree">
+    <div class="row ind0 selected"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-layers"></span><span class="label">Settings panel</span><span class="desc">2/6</span>
+      <span class="actions"><span class="codicon codicon-diff-multiple new"></span><span class="codicon codicon-add"></span><span class="codicon codicon-remove"></span></span></div>
+    <div class="row ind1"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-folder"></span><span class="label">src</span></div>
+    <div class="row ind2"><span class="twisty codicon codicon-chevron-right"></span><span class="icon codicon codicon-folder"></span><span class="label">settings</span></div>
+    <div class="row ind2"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">extension.ts</span><span class="spacer"></span><span class="badge M">M</span></div>
+    <div class="row ind0"><span class="twisty codicon codicon-chevron-right"></span><span class="icon codicon codicon-layers"></span><span class="label">Notes watcher</span><span class="desc">0/3</span></div>
+  </div>
+  <div class="menu" style="top:40px; left:90px;">
+    <div class="item active" style="outline:1px dashed var(--accent)">Open Cluster Changes<span class="new-tag">new</span></div>
+    <div class="sep"></div>
+    <div class="item">Mark Reviewed</div>
+    <div class="item">Unmark Reviewed</div>
+  </div>
+</div>
+</div>
+
+<!-- Panel 3: not offered -->
+<div>
+<p class="panel-caption"><b>3. Fresh cluster offered; the rest not.</b> "Notes watcher" was never reviewed, so every file needs review and the icon appears. The other two have nothing that needs review, so neither the inline icon nor the menu entry appears. The Mark and Unmark actions are unchanged.</p>
+<div class="sidebar">
+  <div class="view-header"><span class="codicon codicon-chevron-down"></span><span class="title">Delta Review</span>
+    <span class="actions"><span class="codicon codicon-refresh"></span><span class="codicon codicon-list-flat"></span><span class="codicon codicon-ungroup-by-ref-type"></span><span class="codicon codicon-ellipsis"></span></span></div>
+  <div class="tree">
+    <div class="row ind0 hover"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-layers"></span><span class="label">Notes watcher</span><span class="desc">0/3</span>
+      <span class="actions"><span class="codicon codicon-diff-multiple new"></span><span class="codicon codicon-add"></span></span></div>
+    <div class="row ind1"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">notesWatch.ts</span><span class="spacer"></span><span class="badge A">A</span></div>
+    <div class="row ind1"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">notesStore.ts</span><span class="spacer"></span><span class="badge M">M</span></div>
+    <div class="row ind1"><span class="twisty"></span><span class="icon codicon codicon-markdown" style="color:#519aba"></span><span class="label">SKILL.md</span><span class="spacer"></span><span class="badge M">M</span></div>
+    <div class="row ind0 hover"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-layers"></span><span class="label">Rename tracking</span><span class="desc">4/4</span>
+      <span class="actions"><span class="codicon codicon-remove"></span></span></div>
+    <div class="row ind1 msg"><span class="twisty"></span><span class="label">All files reviewed.</span></div>
+    <div class="row ind0 hover"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-layers"></span><span class="label">Packaging</span><span class="desc">0/0</span>
+      <span class="actions"></span></div>
+    <div class="row ind1 msg"><span class="twisty"></span><span class="label">No files from this cluster are in the current change.</span></div>
+  </div>
+</div>
+<p class="note" style="max-width:340px;font-size:12px"><b>Notes watcher</b>: never reviewed, offered; all 3 files open against the merge base. <b>Rename tracking</b>: everything reviewed and nothing changed since, not offered. <b>Packaging</b>: no files in this change, not offered.</p>
+</div>
+
+<!-- Panel 4: Unclustered / Auto -->
+<div>
+<p class="panel-caption"><b>4. Unclustered and Auto buckets (a guess).</b> They use the same rule as real clusters: the icon appears when one of their files needs review.</p>
+<div class="sidebar">
+  <div class="view-header"><span class="codicon codicon-chevron-down"></span><span class="title">Delta Review</span>
+    <span class="actions"><span class="codicon codicon-refresh"></span><span class="codicon codicon-list-flat"></span><span class="codicon codicon-ungroup-by-ref-type"></span><span class="codicon codicon-ellipsis"></span></span></div>
+  <div class="tree">
+    <div class="row ind0 hover"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-warning warn"></span><span class="label warn">Unclustered</span><span class="desc">1/2</span>
+      <span class="actions"><span class="codicon codicon-diff-multiple new"></span><span class="codicon codicon-add"></span><span class="codicon codicon-remove"></span></span></div>
+    <div class="row ind1"><span class="twisty"></span><span class="icon codicon codicon-file-code" style="color:#519aba"></span><span class="label">esbuild.mjs</span><span class="desc"></span><span class="badge M">M</span></div>
+    <div class="row ind0 hover"><span class="twisty codicon codicon-chevron-down"></span><span class="icon codicon codicon-gear"></span><span class="label">Auto</span><span class="desc">1/2</span>
+      <span class="actions"><span class="codicon codicon-diff-multiple new"></span><span class="codicon codicon-add"></span><span class="codicon codicon-remove"></span></span></div>
+    <div class="row ind1"><span class="twisty"></span><span class="icon codicon codicon-json" style="color:#cbcb41"></span><span class="label">yarn.lock</span><span class="desc"></span><span class="badge M">M</span></div>
+  </div>
+</div>
+</div>
+
+</div>
+
+<div class="callout">
+<b>Click result:</b> opens <a href="multi-diff.html">the combined diff</a> for the cluster in VS Code's multi-diff editor. If, between rendering and clicking, the cluster no longer has any file that needs review (for example, its files were all marked reviewed), show the info message <i>"No files in 'Settings panel' need review."</i> and open nothing.
+</div>
+
+<p class="note">The ungrouped layout (clustering off) has no cluster rows, so it is unchanged. Task 1 (moves inheriting a reviewed snapshot) adds no UI. Its only visible effect is that more moved files, like <code>panel.ts</code> above, open against "last reviewed" instead of the merge base in this combined diff.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Delta Review mock</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+<h1>Delta Review mock: Open Cluster Changes (combined cluster diff)</h1>
+<p>Branch <code>feat/move-inherit-and-cluster-delta-diff</code>. Only task 2 changes the UI. Task 1 (moved files inheriting their old path's reviewed snapshot) has no UI of its own; its effect shows on the moved file in both screens.</p>
+<ul class="index-list">
+  <li><a href="sidebar.html">Sidebar: cluster rows</a>
+    <div class="sub">The new <span class="codicon codicon-diff-multiple"></span> "Open Cluster Changes" inline action and context-menu entry. States: offered (hover and right-click), offered on a fresh never-reviewed cluster, not offered (all reviewed and unchanged, empty), the Unclustered and Auto buckets, and what happens when nothing needs review at click time.</div></li>
+  <li><a href="multi-diff.html">Combined diff: multi-diff editor</a>
+    <div class="sub">One entry per cluster file that needs review, each against its own base (reviewed snapshot, else merge base), with the new <span class="codicon codicon-check-all"></span> "Mark Cluster Reviewed" title-bar button. Includes a moved file whose snapshot came from its old path and a never-reviewed file against the merge base.</div></li>
+  <li><a href="click-to-select.html">Click to select: sidebar and combined diff side by side</a>
+    <div class="sub">Clicking into a file's text in the combined diff selects that file's row in the Delta Review pane, which keeps no keyboard focus, so the row's existing <span class="codicon codicon-add"></span> Mark Reviewed button is right there. Clicking only a file's header does not select it.</div></li>
+</ul>
+<p class="note">New elements have a dashed blue outline. Icons are VS Code codicons, using the bundled font copy <code>codicon.ttf</code>.</p>
+</div>
+</body>
+</html>
