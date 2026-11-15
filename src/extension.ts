@@ -1,5 +1,5 @@
 import { access, readFile } from "node:fs/promises";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import * as vscode from "vscode";
 import { baseBlobForNote } from "./baseDocument";
 import {
@@ -7,7 +7,11 @@ import {
   clusterChangesMarkPaths,
   clusterChangesTitle,
   clusterLabelForKey,
+  DiffDocument,
+  fileForDiffDocument,
+  isRowAlreadySelected,
   nothingToReviewMessage,
+  sameClusterChangesSource,
 } from "./clusterChanges";
 import {
   ClusterModel,
@@ -858,6 +862,71 @@ export const activate = async (
       console.warn("Delta Review: could not reveal file row", error);
     }
   };
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (
+        editor === undefined ||
+        git === undefined ||
+        model === undefined ||
+        !treeView.visible
+      ) {
+        return;
+      }
+      const active = activeClusterChanges();
+      if (active === undefined) {
+        return;
+      }
+      const { entry } = active;
+      if (
+        !sameClusterChangesSource(entry, {
+          repoRoot: git.repoRoot,
+          branch: model.branch,
+        })
+      ) {
+        return;
+      }
+      const uri = editor.document.uri;
+      let doc: DiffDocument;
+      if (uri.scheme === "file") {
+        const path = relative(git.repoRoot, uri.fsPath).replace(/\\/g, "/");
+        if (path.startsWith("..")) {
+          return;
+        }
+        doc = { scheme: "file", path };
+      } else if (uri.scheme === REVIEW_BASE_SCHEME) {
+        doc = {
+          scheme: "base",
+          path: uri.path.replace(/^\//, ""),
+          query: uri.query,
+        };
+      } else {
+        return;
+      }
+      const files = model.files.filter((f) => entry.paths.includes(f.path));
+      let file: ReviewFile | undefined;
+      if (doc.scheme === "base") {
+        const { path, query } = doc;
+        const side = entry.leftSides.find(
+          (s) => s.basePath === path && s.baseQuery === query,
+        );
+        if (side !== undefined) {
+          file = files.find((f) => f.path === side.path);
+        }
+      }
+      file ??= fileForDiffDocument(files, doc);
+      if (file === undefined) {
+        return;
+      }
+      const selected = treeView.selection.flatMap((e) =>
+        e.kind === "file" ? [e.file.path] : [],
+      );
+      if (isRowAlreadySelected(selected, file.path)) {
+        return;
+      }
+      void revealFileRow(file);
+    }),
+  );
 
   // The visible file set a folder row subdivides: all files when scoped to
   // the grouped Reviewed bucket, its cluster's files when cluster-scoped
