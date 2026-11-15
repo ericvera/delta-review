@@ -47,7 +47,8 @@ Owner's goal, in their words: not have to re-review code already reviewed, but k
 - A file renamed on the branch (git-detected rename or declared repo move) uses the old path's reviewed snapshot as its diff base when it has no snapshot of its own.
 - A moved file always lands in Needs Review, even when its content is identical to the old path's reviewed snapshot. It leaves Needs Review once the owner marks it at the new path.
 - Its row shows the previous path, and reads "unchanged" when its content is identical to what was last reviewed at the old path. Opening it shows an empty since-review diff.
-- "verbatim" keeps today's meaning and is shown only when the moved file has no reviewed snapshot at either path: identical to the move origin. Each word means one thing.
+- "verbatim" keeps today's meaning (identical to the move origin) and is shown only when the moved file has no reviewed snapshot of its own and inherits none. Each word means one thing.
+- Not inherited (driver's call after critic rounds): a file extracted from part of another file, several files declared from one origin, and a move whose old path is still on disk. These keep today's behaviour, so unmarking one file never clears a review another file relies on. Renames that only change letter case do inherit.
 - A moved file edited since the review shows only the changes since that review.
 - Unmark on a moved file that inherits the old path's snapshot drops both the new path's and the old path's snapshots.
 - Out of scope: the optional item. A repo move's declared `baseBlob` keeps its current behaviour and precedence.

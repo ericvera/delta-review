@@ -22,7 +22,7 @@ New exported `selectReviewSnapshot(input)`:
 input: {
   path: string;
   move: ResolvedMove | undefined;          // movesByPath.get(path): the winning move only
-  originDeleted: boolean;                   // move !== undefined && isAbsentAtExactCase(move.from)
+  originDeleted: boolean;                   // isAbsentAtExactCase(move.from), evaluated only when every other inheritance condition holds; else false
   originShared: boolean;                    // more than one movesByPath entry has this move's `from`
   reviewPaths: ReadonlySet<string>;         // adjusted review set (AdjustedReviewSet.paths)
   reviewState: ReadonlyMap<string, string>; // readReviewState result
@@ -47,7 +47,7 @@ Rules:
   - An origin still on disk (whether or not it is in the review set) keeps its snapshot to itself.
   - A deleted `from` that is still its own row (overwrite case keeps the origin's `D` row; a displaced git-rename source is re-added as its own row) keeps its snapshot to itself.
   - A sentinel old-path snapshot is no usable base, so nothing is inherited.
-- Caller (`computeReviewModel`) computes `originShared` from a count of `move.from` over `movesByPath.values()`, and `originDeleted` with a new local `isAbsentAtExactCase(path)`: true when `existsSync` is false, or when any segment of `path` (split on `/`, walked from `git.repoRoot` down) is missing from its parent directory's listing (`readdirSync`) exactly (NFC-normalized on both sides); a failed listing counts as absent. On a case-insensitive filesystem a case-only rename of the file or of any directory above it (`Foo.ts` → `foo.ts`, `Src/foo.ts` → `src/foo.ts`) leaves `existsSync` true for the old path because it resolves to the destination; the per-segment exact-case listing reports the origin gone, so the rename inherits. Checking only the last segment would miss a directory case rename. This does not weaken the unmark bound: the only file answering to the old name is the destination itself, and `!reviewPaths.has(move.from)` still guards a `from` that is its own row. `isDeletedFromWorkingTree` (used by `adjustReviewSetForMoves`) is unchanged.
+- Caller (`computeReviewModel`) computes `originShared` from a count of `move.from` over `movesByPath.values()`, and `originDeleted` with a new local `isAbsentAtExactCase(path)`: true when `existsSync` is false, or when any segment of `path` (split on `/`, walked from `git.repoRoot` down) is missing from its parent directory's listing (`readdirSync`) exactly (NFC-normalized on both sides); a failed listing counts as absent. On a case-insensitive filesystem a case-only rename of the file or of any directory above it (`Foo.ts` → `foo.ts`, `Src/foo.ts` → `src/foo.ts`) leaves `existsSync` true for the old path because it resolves to the destination; the per-segment exact-case listing reports the origin gone, so the rename inherits. Checking only the last segment would miss a directory case rename. This does not weaken the unmark bound: the only file answering to the old name is the destination itself, and `!reviewPaths.has(move.from)` still guards a `from` that is its own row. The caller evaluates `isAbsentAtExactCase` last, only when `move.origin === "repo"`, `move.fromLines === undefined`, `!originShared`, `!reviewPaths.has(move.from)`, and `reviewState.get(move.from)` is defined and not `sentinelSha`; otherwise it passes `originDeleted: false` (equivalent, since inheritance already fails), so external moves and extractions never walk the filesystem. `isDeletedFromWorkingTree` (used by `adjustReviewSetForMoves`) is unchanged.
 - `reviewed = own !== undefined && own === currentSha`.
 - `snapshotBaseSha`: when `own !== undefined`, `own` if `!reviewed && own !== sentinelSha`, else undefined (today's rule). When `own === undefined`, the inherited sha (or undefined).
 - `inheritedSnapshotFrom` is reported whether or not the file has its own snapshot, so unmark after a re-mark still clears the old key.
@@ -91,6 +91,6 @@ Nothing removed from the product. Behaviour change for existing moved files with
 
 | Task file | What | Files |
 |---|---|---|
-| `01_01_inherit_old_path_snapshot.md` | Snapshot selection with old-path inheritance, `unchanged` classification, unmark scope covering the old path | `src/model.ts`, `src/extension.ts` |
-| `01_02_unchanged_wording.md` | Row `· unchanged`, tooltip `Unchanged since last reviewed`, suppress `Changed since last reviewed` on unchanged | `src/moveDisplay.ts`, `src/treeProvider.ts` |
+| `01_01_inherit_old_path_snapshot.md` | Snapshot selection with old-path inheritance, `unchanged` classification, unmark scope covering the old path | `src/model.ts`, `src/extension.ts`, `src/model.test.ts` |
+| `01_02_unchanged_wording.md` | Row `· unchanged`, tooltip `Unchanged since last reviewed`, suppress `Changed since last reviewed` on unchanged | `src/moveDisplay.ts`, `src/treeProvider.ts`, `src/moveDisplay.test.ts` |
 | `01_03_docs_inherited_snapshot.md` | Document inheritance, `unchanged`, unmark scope, manual test steps | `DEVELOPMENT.md`, `README.md`, `plugin/skills/cluster/SKILL.md` |

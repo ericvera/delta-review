@@ -8,6 +8,7 @@ In the Delta Review VS Code extension, render the new `"unchanged"` move classif
 
 - `src/moveDisplay.ts`
 - `src/treeProvider.ts`
+- `src/moveDisplay.test.ts` (test)
 
 ## Background
 
