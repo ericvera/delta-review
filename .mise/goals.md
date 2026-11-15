@@ -47,5 +47,6 @@ Feature, not a bug fix; nothing was run. All from reading the code.
 
 ## Open questions
 
-1. Does an unreviewed renamed file identical to its inherited snapshot show the "verbatim" tag? (Owner asked; being looked up.)
+1. Owner asked whether 1b would use the "verbatim" tag. Finding: no. `moveClassification` (`src/model.ts:293-300`) is `workingSha === originBaseSha`, the origin base being the declared `baseBlob`/slice or the merge-base blob at `move.from`; the reviewed snapshot never enters it (`DEVELOPMENT.md:82`, cluster `SKILL.md:113`). A renamed file equal to its inherited snapshot but edited since the merge base reads "adapted". Owner to confirm 1b, 1a, or a classification change.
+4. Inherited old-path snapshot vs a declared `baseBlob` on the same renamed file: which is the diff base?
 3. The optional item (repo move `baseBlob` as an in-branch base): on contract v3 a repo move without `fromLines` already keeps `baseBlob` as its whole base, though it loses to a snapshot or a destination merge-base blob. Leave as is, or change precedence?
