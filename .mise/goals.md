@@ -60,3 +60,9 @@ Owner's goal, in their words: not have to re-review code already reviewed, but k
 - Marking the moved file reviewed writes a snapshot at the new path only; the old path's snapshot is left in place.
 - The previous path is already shown on moved rows by the existing move display; no tree structure, command or button changes, so no mock.
 - No snapshot storage or contract file-format change.
+
+## Proposal
+
+- Issue: a file moved on the branch loses its review and shows its whole diff again.
+- Approach: a moved file goes to Needs Review showing its previous path, diffs only against what was last reviewed at the old path, and reads "verbatim" when nothing changed since that review; unmark clears both paths.
+- Skips: none. Spec and critic both run, because the meaning of "verbatim" and the documented review-state rules change.
