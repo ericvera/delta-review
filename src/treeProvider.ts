@@ -553,7 +553,11 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (file.deleted) {
       notes.push("Deleted from the working tree");
     }
-    if (file.diffBaseIsReviewedSnapshot) {
+    // An unchanged file has nothing changed since its review
+    if (
+      file.diffBaseIsReviewedSnapshot &&
+      file.moveClassification !== "unchanged"
+    ) {
       notes.push("Changed since last reviewed");
     }
     if (notes.length > 0) {
