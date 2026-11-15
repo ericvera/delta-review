@@ -42,11 +42,21 @@ Feature, not a bug fix; nothing was run. All from reading the code.
 
 ## Decisions
 
-- A renamed file whose content is identical to the old path's reviewed snapshot reads as unreviewed, with the old path's snapshot as its diff base, until the owner marks the new path. (Owner, pending their question on whether this row shows the "verbatim" tag.)
-- Unmark on a renamed file that inherits the old path's snapshot drops both the new path's and the old path's snapshots.
+Owner's goal, in their words: not have to re-review code already reviewed, but know when files moved; the move itself is something to review.
 
-## Open questions
+- A file renamed on the branch (git-detected rename or declared repo move) uses the old path's reviewed snapshot as its diff base when it has no snapshot of its own.
+- A moved file always lands in Needs Review, even when its content is identical to the old path's reviewed snapshot. It leaves Needs Review once the owner marks it at the new path.
+- Its row shows the previous path, and reads "verbatim" when its content is identical to what was last reviewed at the old path. Opening it shows an empty since-review diff.
+- A moved file edited since the review shows only the changes since that review.
+- Unmark on a moved file that inherits the old path's snapshot drops both the new path's and the old path's snapshots.
+- Out of scope: the optional item. A repo move's declared `baseBlob` keeps its current behaviour and precedence.
 
-1. Owner asked whether 1b would use the "verbatim" tag. Finding: no. `moveClassification` (`src/model.ts:293-300`) is `workingSha === originBaseSha`, the origin base being the declared `baseBlob`/slice or the merge-base blob at `move.from`; the reviewed snapshot never enters it (`DEVELOPMENT.md:82`, cluster `SKILL.md:113`). A renamed file equal to its inherited snapshot but edited since the merge base reads "adapted". Owner to confirm 1b, 1a, or a classification change.
-4. Inherited old-path snapshot vs a declared `baseBlob` on the same renamed file: which is the diff base?
-3. The optional item (repo move `baseBlob` as an in-branch base): on contract v3 a repo move without `fromLines` already keeps `baseBlob` as its whole base, though it loses to a snapshot or a destination merge-base blob. Leave as is, or change precedence?
+## Assumptions
+
+- "Verbatim" for a moved file with an inherited snapshot compares against that snapshot; with no snapshot at either path it keeps today's comparison against the move origin. This changes the documented rule (`DEVELOPMENT.md:82`, cluster `SKILL.md:113`), so both docs are updated.
+- A moved file not identical to the inherited snapshot keeps the existing non-verbatim wording ("adapted").
+- An inherited snapshot outranks a declared `baseBlob` and the origin base, the same as a file's own snapshot does today. A file's own snapshot outranks an inherited one.
+- Only the winning move's `from` is followed (Investigation 6); external moves never inherit (Investigation 4).
+- Marking the moved file reviewed writes a snapshot at the new path only; the old path's snapshot is left in place.
+- The previous path is already shown on moved rows by the existing move display; no tree structure, command or button changes, so no mock.
+- No snapshot storage or contract file-format change.
