@@ -22,6 +22,7 @@ import {
   computeReviewModel,
   FileReviewStatus,
   pathsWithReviewSnapshot,
+  reviewSnapshotPaths,
   resolveBranch,
   ReviewFile,
   ReviewModel,
@@ -899,7 +900,7 @@ export const activate = async (
         }
         const activeGit = git;
         const branch = model.branch;
-        const paths = [element.file.path];
+        const paths = reviewSnapshotPaths(element.file);
         await applyReviewStateChange("unmark reviewed", () =>
           unmarkReviewed(activeGit, branch, paths),
         );

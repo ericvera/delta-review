@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { LineRange, MoveDeclaration } from "./clusters";
 import {
@@ -31,8 +31,11 @@ export enum FileReviewStatus {
 // rename or a declaration) or another project entirely (declaration only)
 export type MoveOrigin = "repo" | "external";
 
-// How a move's working-tree content compares to its origin base
-export type MoveClassification = "verbatim" | "adapted" | "unknown";
+// How a move's working-tree content compares to its last reviewed snapshot
+// when it has one ("unchanged" / "adapted"), else to its origin base
+// ("verbatim" / "adapted")
+export type MoveClassification =
+  "verbatim" | "adapted" | "unchanged" | "unknown";
 
 export interface ReviewFile {
   path: string;
@@ -44,9 +47,12 @@ export interface ReviewFile {
   // True when the diff base is the last-reviewed snapshot rather than the
   // merge base — i.e. the diff shows only the delta since the last review
   diffBaseIsReviewedSnapshot: boolean;
-  // True when a snapshot exists for this path in `refs/review/<branch>`,
-  // whatever the file's current status
+  // True when a snapshot exists in `refs/review/<branch>` for this path or for
+  // the old path it inherits from, whatever the file's current status
   hasReviewSnapshot: boolean;
+  // Old path whose snapshot this moved file inherits; the diff base only when
+  // the file has no snapshot of its own; unmark drops it too
+  inheritedSnapshotFrom?: string;
   // Blob sha for the left side of the diff; undefined renders as empty (new file)
   diffBaseSha: string | undefined;
   // Repo-relative path identifying the document the base side actually shows.
@@ -95,14 +101,24 @@ export interface ReviewModel {
   sliceShas: string[];
 }
 
-// The scope an unmark acts on: every path holding a snapshot, whether or not
-// its row currently reads as Reviewed. A file whose content diverged from its
-// snapshot (a rebase, a big edit) still diffs against that snapshot, so it is
-// exactly what an unmark has to reach.
+// The snapshot keys an unmark of this file drops: its own path and the old
+// path it inherits from
+export const reviewSnapshotPaths = (file: ReviewFile): string[] => {
+  if (!file.hasReviewSnapshot) {
+    return [];
+  }
+  return file.inheritedSnapshotFrom === undefined
+    ? [file.path]
+    : [file.path, file.inheritedSnapshotFrom];
+};
+
+// The scope an unmark acts on: every snapshot key the files hold, own or
+// inherited, whether or not a row currently reads as Reviewed. A file whose
+// content diverged from its snapshot (a rebase, a big edit) still diffs
+// against that snapshot, so it is exactly what an unmark has to reach.
 export const pathsWithReviewSnapshot = (
   files: readonly ReviewFile[],
-): string[] =>
-  files.filter((file) => file.hasReviewSnapshot).map((file) => file.path);
+): string[] => files.flatMap(reviewSnapshotPaths);
 
 // Whether an unmark affordance has anything to act on in this scope
 export const hasAnyReviewSnapshot = (files: readonly ReviewFile[]): boolean =>
@@ -241,13 +257,69 @@ export interface FileBaseResolution {
   originLinesOutOfRange: boolean;
 }
 
+export interface SnapshotSelection {
+  reviewed: boolean;
+  snapshotBaseSha: string | undefined;
+  lastReviewedSha: string | undefined;
+  inheritedSnapshotFrom: string | undefined;
+  hasReviewSnapshot: boolean;
+}
+
+// Picks the snapshot a file is judged against: its own, else the one a moved
+// file inherits from its old path. Status depends on the own snapshot only.
+export const selectReviewSnapshot = (input: {
+  path: string;
+  move: ResolvedMove | undefined;
+  // The move's `from` is absent from the working tree; the caller may pass
+  // false without checking when another inheritance condition already fails
+  originDeleted: boolean;
+  // More than one move resolved for the review set has this `from`
+  originShared: boolean;
+  reviewPaths: ReadonlySet<string>;
+  reviewState: ReadonlyMap<string, string>;
+  // Working-tree sha, or the sentinel when deleted
+  currentSha: string;
+  sentinelSha: string;
+}): SnapshotSelection => {
+  const { move, reviewState, sentinelSha } = input;
+  const own = reviewState.get(input.path);
+  const inheritedSha =
+    move === undefined ? undefined : reviewState.get(move.from);
+  const inheritedSnapshotFrom =
+    move?.origin === "repo" &&
+    move.fromLines === undefined &&
+    !input.originShared &&
+    input.originDeleted &&
+    !input.reviewPaths.has(move.from) &&
+    inheritedSha !== undefined &&
+    inheritedSha !== sentinelSha
+      ? move.from
+      : undefined;
+  const inherited =
+    inheritedSnapshotFrom === undefined ? undefined : inheritedSha;
+  const reviewed = own !== undefined && own === input.currentSha;
+  return {
+    reviewed,
+    snapshotBaseSha:
+      own !== undefined
+        ? !reviewed && own !== sentinelSha
+          ? own
+          : undefined
+        : inherited,
+    lastReviewedSha: own ?? inherited,
+    inheritedSnapshotFrom,
+    hasReviewSnapshot: own !== undefined || inheritedSnapshotFrom !== undefined,
+  };
+};
+
 // Selects one file's diff base, the path identifying it, and — for a move —
 // how its content compares to where it came from.
 //
 // Diff-base precedence: the reviewed snapshot, then the merge-base blob at
 // the file's own path (an overwrite is still an edit to a file the reviewer
-// already had), then the origin base. The classification is always computed
-// against the origin base, even when the diff is shown against something else.
+// already had), then the origin base. The classification is against the last
+// reviewed snapshot when there is one, else against the origin base, whatever
+// the diff is shown against.
 export const resolveFileBase = (input: {
   path: string;
   move: ResolvedMove | undefined;
@@ -256,6 +328,8 @@ export const resolveFileBase = (input: {
   workingSha: string | undefined;
   reviewedSha: string | undefined;
   useSnapshotBase: boolean;
+  // Own or inherited snapshot sha, including a sentinel own snapshot
+  lastReviewedSha: string | undefined;
   // Merge-base path -> blob sha
   mergeBaseBlobs: ReadonlyMap<string, string>;
   // File path -> the origin base a declaration resolved to: a slice of the
@@ -290,14 +364,20 @@ export const resolveFileBase = (input: {
     }
   }
 
-  const moveClassification =
-    move === undefined
-      ? undefined
-      : input.deleted || originBaseSha === undefined
-        ? "unknown"
-        : input.workingSha === originBaseSha
-          ? "verbatim"
-          : "adapted";
+  let moveClassification: MoveClassification | undefined;
+  if (move === undefined) {
+    moveClassification = undefined;
+  } else if (input.deleted) {
+    moveClassification = "unknown";
+  } else if (input.lastReviewedSha !== undefined) {
+    moveClassification =
+      input.workingSha === input.lastReviewedSha ? "unchanged" : "adapted";
+  } else if (originBaseSha === undefined) {
+    moveClassification = "unknown";
+  } else {
+    moveClassification =
+      input.workingSha === originBaseSha ? "verbatim" : "adapted";
+  }
 
   // Nothing else can supply a base, so an origin-side shortfall is what the
   // reviewer actually ends up looking at
@@ -537,6 +617,29 @@ export const computeReviewModel = async (
   );
   const isDeletedFromWorkingTree = (path: string): boolean =>
     !existsSync(join(git.repoRoot, path));
+  // On a case-insensitive filesystem a case-only rename of the file or any
+  // directory above it leaves `existsSync` true for the old path; the only
+  // file answering to it is the destination, and the review-set check in
+  // `selectReviewSnapshot` still guards a `from` that is its own row
+  const isAbsentAtExactCase = (path: string): boolean => {
+    if (isDeletedFromWorkingTree(path)) {
+      return true;
+    }
+    let dir = git.repoRoot;
+    for (const segment of path.split("/")) {
+      let names: string[];
+      try {
+        names = readdirSync(dir).map((name) => name.normalize("NFC"));
+      } catch {
+        return true;
+      }
+      if (!names.includes(segment.normalize("NFC"))) {
+        return true;
+      }
+      dir = join(dir, segment);
+    }
+    return false;
+  };
   const { paths, movesByPath } = adjustReviewSetForMoves({
     paths: rawPaths,
     movedFromByPath,
@@ -569,36 +672,60 @@ export const computeReviewModel = async (
     options?.hashCache,
   );
 
+  const reviewPaths = new Set(paths);
+  const fromCounts = new Map<string, number>();
+  for (const move of movesByPath.values()) {
+    fromCounts.set(move.from, (fromCounts.get(move.from) ?? 0) + 1);
+  }
+
   const files = paths.map((path): ReviewFile => {
     const deleted = !currentShaByPath.has(path);
     const currentSha = currentShaByPath.get(path) ?? sentinelSha;
-    const reviewedSha = reviewState.get(path);
-    const reviewed = reviewedSha !== undefined && reviewedSha === currentSha;
-    // A sentinel snapshot (file was deleted when reviewed) is not usable as a
-    // diff base if the file has since been recreated — fall back to the merge base
-    const snapshotUsable =
-      reviewedSha !== undefined && reviewedSha !== sentinelSha;
-    const useSnapshotBase = !reviewed && snapshotUsable;
     const move = movesByPath.get(path);
+    const originShared =
+      move !== undefined && (fromCounts.get(move.from) ?? 0) > 1;
+    const oldSha = move ? reviewState.get(move.from) : undefined;
+    // The filesystem walk runs last, only once every cheap condition holds
+    const originDeleted =
+      move?.origin === "repo" &&
+      move.fromLines === undefined &&
+      !originShared &&
+      !reviewPaths.has(move.from) &&
+      oldSha !== undefined &&
+      oldSha !== sentinelSha &&
+      isAbsentAtExactCase(move.from);
+    const selection = selectReviewSnapshot({
+      path,
+      move,
+      originDeleted,
+      originShared,
+      reviewPaths,
+      reviewState,
+      currentSha,
+      sentinelSha,
+    });
+    const useSnapshotBase = selection.snapshotBaseSha !== undefined;
     const base = resolveFileBase({
       path,
       move,
       deleted,
       workingSha: currentShaByPath.get(path),
-      reviewedSha,
+      reviewedSha: selection.snapshotBaseSha,
       useSnapshotBase,
+      lastReviewedSha: selection.lastReviewedSha,
       mergeBaseBlobs: baseBlobs,
       originBaseByPath,
     });
     return {
       path,
-      status: reviewed
+      status: selection.reviewed
         ? FileReviewStatus.Reviewed
         : FileReviewStatus.NeedsReview,
       deleted,
       existsInMergeBase: baseBlobs.has(path),
       diffBaseIsReviewedSnapshot: useSnapshotBase,
-      hasReviewSnapshot: reviewedSha !== undefined,
+      hasReviewSnapshot: selection.hasReviewSnapshot,
+      inheritedSnapshotFrom: selection.inheritedSnapshotFrom,
       diffBaseSha: base.diffBaseSha,
       diffBasePath: base.diffBasePath,
       movedFrom: move?.from,

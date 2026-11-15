@@ -116,6 +116,12 @@ describe("buildRowDescription", () => {
         repo("src/api/retry.ts", "src/util/backoff.ts", "adapted", "src/api"),
       ).toBe("src/api ← src/util/backoff.ts · adapted");
     });
+
+    it("appends the unchanged word", () => {
+      expect(
+        repo("src/api/retry.ts", "src/util/backoff.ts", "unchanged", "src/api"),
+      ).toBe("src/api ← src/util/backoff.ts · unchanged");
+    });
   });
 
   describe("shared-suffix stripping", () => {
@@ -414,6 +420,18 @@ describe("buildRowDescription", () => {
           "src/new",
         ),
       ).toBe("src/new ← big.ts:120-180 · verbatim");
+    });
+
+    it("appends the unchanged word to an extraction", () => {
+      expect(
+        extraction(
+          "src/new/big.ts",
+          "src/old/big.ts",
+          [[120, 180]],
+          "unchanged",
+          "src/new",
+        ),
+      ).toBe("src/new ← big.ts:120-180 · unchanged");
     });
 
     it("shows the first range and an ellipsis for several", () => {
@@ -764,6 +782,31 @@ describe("buildTooltipStatusLine", () => {
         originContentUnavailable: true,
       }),
     ).toBe("Identical to the origin");
+  });
+
+  it("says an unchanged move is unchanged since last reviewed", () => {
+    expect(status({ moveClassification: "unchanged" })).toBe(
+      "Unchanged since last reviewed",
+    );
+  });
+
+  it("keeps the out-of-range warning after the unchanged line", () => {
+    expect(
+      status({ moveClassification: "unchanged", originLinesOutOfRange: true }),
+    ).toBe(
+      "Unchanged since last reviewed\n\nDeclared lines are outside the origin. Showing the whole file.",
+    );
+  });
+
+  it("keeps the unavailable warning after the unchanged line", () => {
+    expect(
+      status({
+        moveClassification: "unchanged",
+        originContentUnavailable: true,
+      }),
+    ).toBe(
+      "Unchanged since last reviewed\n\nOrigin content is no longer available — showing the whole file.",
+    );
   });
 
   it("leads with the out-of-range warning over the unavailable one", () => {

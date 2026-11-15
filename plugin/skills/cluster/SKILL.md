@@ -110,7 +110,7 @@ Declare only on evidence: a move you performed in the invoking task, or one the 
 
 - `donor` — always write it for an external origin. A project name, not a description; it competes with the origin path for the row's width.
 - `baseBlob` — on an `external` entry, record the donor file's pre-move content with `git hash-object -w <donor file>` and store the printed id; a `repo` entry takes it from the merge base per **Declaring an extraction**. Unreadable donor (the common case on a cold run) → omit rather than guess: the diff then shows the whole file as an addition, and the row cannot say verbatim or adapted.
-- `note` — prose about how the file was adapted, nothing else. **verbatim/adapted is not a contract field**; the extension computes it from content hashes.
+- `note` — prose about how the file was adapted, nothing else. **verbatim/adapted/unchanged is not a contract field**; the extension computes it from content hashes.
 
 No commit SHAs anywhere, and no blob id other than `moves[].baseBlob`. Everything in `clusters` must be derivable from the current diff on every run; `moves` and `notes` are the preserved exceptions, because neither provenance nor a reviewer's remark is recoverable from the diff.
 

@@ -95,7 +95,9 @@ const stripSharedSuffix = (
 const classificationText = (
   classification: MoveClassification | undefined,
 ): string | undefined =>
-  classification === "verbatim" || classification === "adapted"
+  classification === "verbatim" ||
+  classification === "adapted" ||
+  classification === "unchanged"
     ? `· ${classification}`
     : undefined;
 
@@ -292,7 +294,8 @@ export interface TooltipStatusInput {
 // match the whole origin that stood in for out-of-range lines, so the
 // out-of-range warning follows the verbatim line rather than yielding to it —
 // otherwise the tooltip would hide a warning the provenance thread shows. The
-// unavailable warning cannot follow it: verbatim needs an origin base. Several
+// unchanged line, exclusive with verbatim, is followed by either warning; only
+// verbatim excludes the unavailable warning, as it needs an origin base. Several
 // lines come back as separate markdown paragraphs, the tooltip's line form.
 // Returns undefined when there is nothing to say.
 export const buildTooltipStatusLine = ({
@@ -302,6 +305,9 @@ export const buildTooltipStatusLine = ({
   originLinesOutOfRange,
 }: TooltipStatusInput): string | undefined => {
   const lines: string[] = [];
+  if (moveClassification === "unchanged") {
+    lines.push("Unchanged since last reviewed");
+  }
   if (moveClassification === "verbatim") {
     lines.push(
       originLines === undefined
@@ -313,7 +319,7 @@ export const buildTooltipStatusLine = ({
     lines.push(
       "Declared lines are outside the origin. Showing the whole file.",
     );
-  } else if (originContentUnavailable && lines.length === 0) {
+  } else if (originContentUnavailable && moveClassification !== "verbatim") {
     lines.push(
       "Origin content is no longer available — showing the whole file.",
     );

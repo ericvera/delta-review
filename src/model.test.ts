@@ -17,6 +17,8 @@ import {
   resolveBranch,
   resolveFileBase,
   ReviewFile,
+  reviewSnapshotPaths,
+  selectReviewSnapshot,
 } from "./model";
 import type { OriginBase, SliceIo } from "./originSlice";
 
@@ -291,6 +293,7 @@ const resolve = (input: {
   workingSha?: string;
   reviewedSha?: string;
   useSnapshotBase?: boolean;
+  lastReviewedSha?: string;
   mergeBaseBlobs?: [path: string, sha: string][];
   originBaseByPath?: [path: string, base: OriginBase][];
 }) =>
@@ -302,9 +305,155 @@ const resolve = (input: {
       input.deleted === true ? undefined : (input.workingSha ?? WORKING_SHA),
     reviewedSha: input.reviewedSha,
     useSnapshotBase: input.useSnapshotBase ?? false,
+    lastReviewedSha: input.lastReviewedSha,
     mergeBaseBlobs: new Map(input.mergeBaseBlobs ?? []),
     originBaseByPath: new Map(input.originBaseByPath ?? []),
   });
+
+const SELECT_SENTINEL_SHA = "8".repeat(40);
+
+const select = (input: {
+  move?: ResolvedMove;
+  originDeleted?: boolean;
+  originShared?: boolean;
+  reviewPaths?: string[];
+  reviewState?: [path: string, sha: string][];
+  currentSha?: string;
+}) =>
+  selectReviewSnapshot({
+    path: "src/new.ts",
+    move: input.move,
+    originDeleted: input.originDeleted ?? true,
+    originShared: input.originShared ?? false,
+    reviewPaths: new Set(input.reviewPaths ?? ["src/new.ts"]),
+    reviewState: new Map(input.reviewState ?? []),
+    currentSha: input.currentSha ?? WORKING_SHA,
+    sentinelSha: SELECT_SENTINEL_SHA,
+  });
+
+const NOT_INHERITED = {
+  reviewed: false,
+  snapshotBaseSha: undefined,
+  lastReviewedSha: undefined,
+  inheritedSnapshotFrom: undefined,
+  hasReviewSnapshot: false,
+};
+
+describe("selectReviewSnapshot", () => {
+  it("inherits a repo move's old-path snapshot when the file has none of its own", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        reviewState: [["src/old.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual({
+      reviewed: false,
+      snapshotBaseSha: REVIEWED_SHA,
+      lastReviewedSha: REVIEWED_SHA,
+      inheritedSnapshotFrom: "src/old.ts",
+      hasReviewSnapshot: true,
+    });
+  });
+
+  it("ranks the file's own snapshot above the inherited one, still reporting the old path", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        reviewState: [
+          ["src/old.ts", REVIEWED_SHA],
+          ["src/new.ts", PATH_SHA],
+        ],
+      }),
+    ).toEqual({
+      reviewed: false,
+      snapshotBaseSha: PATH_SHA,
+      lastReviewedSha: PATH_SHA,
+      inheritedSnapshotFrom: "src/old.ts",
+      hasReviewSnapshot: true,
+    });
+  });
+
+  it("gives a reviewed own snapshot no diff base", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        reviewState: [
+          ["src/old.ts", REVIEWED_SHA],
+          ["src/new.ts", WORKING_SHA],
+        ],
+      }),
+    ).toEqual({
+      reviewed: true,
+      snapshotBaseSha: undefined,
+      lastReviewedSha: WORKING_SHA,
+      inheritedSnapshotFrom: "src/old.ts",
+      hasReviewSnapshot: true,
+    });
+  });
+
+  it("never inherits through an external move", () => {
+    expect(
+      select({
+        move: externalMove(EXTERNAL_SHA),
+        reviewState: [["../donor/src/thing.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual(NOT_INHERITED);
+  });
+
+  it("never inherits through an extraction", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts", { fromLines: [[1, 5]] }),
+        reviewState: [["src/old.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual(NOT_INHERITED);
+  });
+
+  it("does not inherit from an origin another move shares", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        originShared: true,
+        reviewState: [["src/old.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual(NOT_INHERITED);
+  });
+
+  it("does not inherit from an origin still on disk", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        originDeleted: false,
+        reviewState: [["src/old.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual(NOT_INHERITED);
+  });
+
+  it("does not inherit from an origin that is its own row", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        reviewPaths: ["src/new.ts", "src/old.ts"],
+        reviewState: [["src/old.ts", REVIEWED_SHA]],
+      }),
+    ).toEqual(NOT_INHERITED);
+  });
+
+  it("does not inherit a sentinel old-path snapshot", () => {
+    expect(
+      select({
+        move: repoMove("src/old.ts"),
+        reviewState: [["src/old.ts", SELECT_SENTINEL_SHA]],
+      }),
+    ).toEqual(NOT_INHERITED);
+  });
+
+  it("inherits nothing without a move", () => {
+    expect(select({ reviewState: [["src/old.ts", REVIEWED_SHA]] })).toEqual(
+      NOT_INHERITED,
+    );
+  });
+});
 
 describe("resolveFileBase", () => {
   it("gives a plain modified file the merge-base blob at its own path", () => {
@@ -395,19 +544,57 @@ describe("resolveFileBase", () => {
     });
   });
 
-  it("classifies against the origin base while the diff shows a reviewed snapshot", () => {
+  it("classifies a move matching its last reviewed snapshot as unchanged", () => {
+    expect(
+      resolve({
+        move: repoMove("src/old.ts"),
+        workingSha: REVIEWED_SHA,
+        lastReviewedSha: REVIEWED_SHA,
+        mergeBaseBlobs: [["src/old.ts", ORIGIN_SHA]],
+      }).moveClassification,
+    ).toBe("unchanged");
+  });
+
+  it("classifies a move differing from its last reviewed snapshot as adapted even when it matches the origin base", () => {
     expect(
       resolve({
         move: repoMove("src/old.ts"),
         workingSha: ORIGIN_SHA,
         useSnapshotBase: true,
         reviewedSha: REVIEWED_SHA,
+        lastReviewedSha: REVIEWED_SHA,
         mergeBaseBlobs: [["src/old.ts", ORIGIN_SHA]],
+      }).moveClassification,
+    ).toBe("adapted");
+  });
+
+  it("classifies a deleted move as unknown even with a last reviewed snapshot", () => {
+    expect(
+      resolve({
+        move: repoMove("src/old.ts"),
+        deleted: true,
+        lastReviewedSha: REVIEWED_SHA,
+        mergeBaseBlobs: [["src/old.ts", ORIGIN_SHA]],
+      }).moveClassification,
+    ).toBe("unknown");
+  });
+
+  it("diffs against an inherited snapshot at the file's own path ahead of its merge-base blob and origin", () => {
+    expect(
+      resolve({
+        move: repoMove("src/old.ts"),
+        useSnapshotBase: true,
+        reviewedSha: REVIEWED_SHA,
+        lastReviewedSha: REVIEWED_SHA,
+        mergeBaseBlobs: [
+          ["src/old.ts", ORIGIN_SHA],
+          ["src/new.ts", PATH_SHA],
+        ],
       }),
     ).toEqual({
       diffBaseSha: REVIEWED_SHA,
       diffBasePath: "src/new.ts",
-      moveClassification: "verbatim",
+      moveClassification: "adapted",
       originContentUnavailable: false,
       originLines: undefined,
       originLinesOutOfRange: false,
@@ -889,7 +1076,140 @@ describe("computeReviewModel", () => {
     expect(declared.files[0].triage).toBe(plain.files[0].triage);
     // The declaration changes only the move facet
     expect(declared.files[0].moveOrigin).toBe("repo");
-    expect(declared.files[0].moveClassification).toBe("adapted");
+    expect(declared.files[0].moveClassification).toBe("unchanged");
+  });
+
+  it("diffs a renamed file against the snapshot at its old path", async () => {
+    const git = await setUp({
+      changes: [["R100", "src/old.ts", "src/renamed.ts"]],
+      baseBlobs: { "src/old.ts": ORIGIN_SHA },
+      reviewState: { "src/old.ts": REVIEWED_SHA },
+      workingShas: { "src/renamed.ts": REVIEWED_SHA },
+    });
+    const model = await computeReviewModel(git, "main");
+    const [renamed] = model.files;
+    expect(renamed.status).toBe(FileReviewStatus.NeedsReview);
+    expect(renamed.diffBaseIsReviewedSnapshot).toBe(true);
+    expect(renamed.diffBaseSha).toBe(REVIEWED_SHA);
+    expect(renamed.diffBasePath).toBe("src/renamed.ts");
+    expect(renamed.moveClassification).toBe("unchanged");
+    expect(renamed.inheritedSnapshotFrom).toBe("src/old.ts");
+    expect(pathsWithReviewSnapshot(model.files)).toEqual([
+      "src/renamed.ts",
+      "src/old.ts",
+    ]);
+  });
+
+  it("classifies a renamed file edited since its old path's snapshot as adapted", async () => {
+    const git = await setUp({
+      changes: [["R100", "src/old.ts", "src/renamed.ts"]],
+      baseBlobs: { "src/old.ts": ORIGIN_SHA },
+      reviewState: { "src/old.ts": REVIEWED_SHA },
+      workingShas: { "src/renamed.ts": WORKING_SHA },
+    });
+    const [renamed] = (await computeReviewModel(git, "main")).files;
+    expect(renamed.diffBaseSha).toBe(REVIEWED_SHA);
+    expect(renamed.moveClassification).toBe("adapted");
+    expect(renamed.inheritedSnapshotFrom).toBe("src/old.ts");
+  });
+
+  it("does not inherit the snapshot of a rename source a declaration displaced", async () => {
+    const git = await setUp({
+      changes: [
+        ["R100", "src/old.ts", "src/renamed.ts"],
+        ["D", "src/other.ts"],
+      ],
+      baseBlobs: { "src/old.ts": ORIGIN_SHA, "src/other.ts": PATH_SHA },
+      reviewState: { "src/old.ts": REVIEWED_SHA },
+      workingShas: { "src/renamed.ts": REVIEWED_SHA },
+    });
+    const model = await computeReviewModel(git, "main", {
+      moves: [declaration("src/renamed.ts", "src/other.ts", "repo")],
+    });
+    expect(model.files.map((file) => file.path)).toEqual([
+      "src/old.ts",
+      "src/renamed.ts",
+    ]);
+    const [source, renamed] = model.files;
+    expect(renamed.inheritedSnapshotFrom).toBeUndefined();
+    expect(renamed.hasReviewSnapshot).toBe(false);
+    expect(renamed.diffBaseSha).toBe(PATH_SHA);
+    expect(source.hasReviewSnapshot).toBe(true);
+    expect(pathsWithReviewSnapshot(model.files)).toEqual(["src/old.ts"]);
+  });
+
+  it("lends a deleted origin two declarations share to neither", async () => {
+    const git = await setUp({
+      changes: [
+        ["A", "src/a.ts"],
+        ["A", "src/b.ts"],
+        ["D", "src/shared.ts"],
+      ],
+      baseBlobs: { "src/shared.ts": ORIGIN_SHA },
+      reviewState: { "src/shared.ts": REVIEWED_SHA },
+      workingShas: { "src/a.ts": WORKING_SHA, "src/b.ts": WORKING_SHA },
+    });
+    const model = await computeReviewModel(git, "main", {
+      moves: [
+        declaration("src/a.ts", "src/shared.ts", "repo"),
+        declaration("src/b.ts", "src/shared.ts", "repo"),
+      ],
+    });
+    expect(model.files.map((file) => file.path)).toEqual([
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+    expect(model.files.map((file) => file.inheritedSnapshotFrom)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(pathsWithReviewSnapshot(model.files)).toEqual([]);
+  });
+
+  it("inherits across a case-only rename of the file", async () => {
+    const git = await setUp({
+      changes: [["R100", "src/Old.ts", "src/old.ts"]],
+      baseBlobs: { "src/Old.ts": ORIGIN_SHA },
+      reviewState: { "src/Old.ts": REVIEWED_SHA },
+      workingShas: { "src/old.ts": REVIEWED_SHA },
+    });
+    const [renamed] = (await computeReviewModel(git, "main")).files;
+    expect(renamed.inheritedSnapshotFrom).toBe("src/Old.ts");
+    expect(renamed.moveClassification).toBe("unchanged");
+  });
+
+  it("inherits across a case-only rename of a directory above the file", async () => {
+    const git = await setUp({
+      changes: [["R100", "Src/old.ts", "src/old.ts"]],
+      baseBlobs: { "Src/old.ts": ORIGIN_SHA },
+      reviewState: { "Src/old.ts": REVIEWED_SHA },
+      workingShas: { "src/old.ts": REVIEWED_SHA },
+    });
+    const [renamed] = (await computeReviewModel(git, "main")).files;
+    expect(renamed.inheritedSnapshotFrom).toBe("Src/old.ts");
+    expect(renamed.moveClassification).toBe("unchanged");
+  });
+
+  it("does not inherit from a declared origin still on disk", async () => {
+    const git = await setUp({
+      changes: [["A", "src/copy.ts"]],
+      baseBlobs: { "src/origin.ts": ORIGIN_SHA },
+      reviewState: { "src/origin.ts": REVIEWED_SHA },
+      workingShas: {
+        "src/copy.ts": REVIEWED_SHA,
+        "src/origin.ts": ORIGIN_SHA,
+      },
+    });
+    const [copy] = (
+      await computeReviewModel(git, "main", {
+        moves: [declaration("src/copy.ts", "src/origin.ts", "repo")],
+      })
+    ).files;
+    expect(copy.path).toBe("src/copy.ts");
+    expect(copy.inheritedSnapshotFrom).toBeUndefined();
+    expect(copy.hasReviewSnapshot).toBe(false);
+    expect(copy.diffBaseSha).toBe(ORIGIN_SHA);
+    expect(copy.moveClassification).toBe("adapted");
   });
 
   it("uses a readable external base blob and carries the declaration through", async () => {
@@ -1367,6 +1687,29 @@ const mixedScope: ReviewFile[] = [
   // diff base, but it is still an entry in the ref
   reviewFile("src/recreated.ts", { hasReviewSnapshot: true }),
 ];
+
+describe("reviewSnapshotPaths", () => {
+  it("is empty without a snapshot", () => {
+    expect(reviewSnapshotPaths(reviewFile("src/a.ts"))).toEqual([]);
+  });
+
+  it("takes the file's own path", () => {
+    expect(
+      reviewSnapshotPaths(reviewFile("src/a.ts", { hasReviewSnapshot: true })),
+    ).toEqual(["src/a.ts"]);
+  });
+
+  it("adds the old path the file inherits from", () => {
+    expect(
+      reviewSnapshotPaths(
+        reviewFile("src/a.ts", {
+          hasReviewSnapshot: true,
+          inheritedSnapshotFrom: "src/old.ts",
+        }),
+      ),
+    ).toEqual(["src/a.ts", "src/old.ts"]);
+  });
+});
 
 describe("pathsWithReviewSnapshot", () => {
   it("takes every file holding a snapshot, whatever its status, in order", () => {
