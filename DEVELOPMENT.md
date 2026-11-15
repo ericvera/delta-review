@@ -130,6 +130,7 @@ Clustered review is driven by a JSON contract the extension only ever **reads** 
 - A fully reviewed cluster keeps its header (`n/n`) with a single `All files reviewed.` row; cluster counts and header `+`/`−` still derive from the cluster's full membership.
 - Reviewed-bucket folder `−` (tree mode) unmarks every visible child — auto files included, since they render inline in the bucket rather than in an Auto subgroup. With `markAutomatically` on, an unmarked auto file returns to Reviewed on the next refresh (standard auto-review behavior, for every unmark path).
 - Grouping is pure presentation: tree rows resolve their files from the current `ClusterModel` at render time, and no lever flip touches `refs/review/<branch>`. Mark/unmark writes through the normal snapshot path, and that ref write is what moves a row between a cluster and the Reviewed bucket.
+- Combined cluster diff tabs: the stable API has no multi-diff tab input class, so a tab is ours when its input matches no stable `TabInput*` class and its label matches a title recorded by `openClusterChanges`. Labels carry VS Code's localized ` (N files)` suffix once resources resolve, so every match goes through `isClusterChangesLabel`. The `deltaReview.clusterChangesActive` context key (updated on `onDidChangeTabs`/`onDidChangeTabGroups`) gates the title-bar **Mark Cluster Reviewed** button. A label matching more than one recorded title refuses to mark, as does a press while another group's active tab is also a non-stable-input page (the command's arguments cannot identify the group it was pressed in).
 
 ### Review notes
 
@@ -208,7 +209,7 @@ extension via `vscode.commands.executeCommand` and asserts on the contract files
 repository switching via `git.toggleRepositoryVisibility` rather than the picker. With
 `DELTA_REVIEW_TEST=1` in the launch's `extensionTestsEnv`, the extension registers one extra
 command, `deltaReview.__inspect`, returning the review model's files, the provenance thread
-snapshots, each file's row description and the REVIEW NOTES badge — state the public API does not
+snapshots, each file's row description, the REVIEW NOTES badge and the recorded combined-diff tabs — state the public API does not
 expose; it is absent from `contributes.commands`, so no shipped build offers it. These are
 throwaway verification harnesses (session scratchpad), not shipped tests.
 
@@ -257,6 +258,7 @@ Clusters:
 31. Throughout: `git status` in the test repo stays clean — the contract lives under `.git`.
     31a. Mark a 3-file cluster reviewed, edit two of its files, press the cluster's `Open Cluster Changes` → a `Cluster Changes: <label>` tab lists exactly those two files, each `last reviewed ↔ working tree`. Edit another file and press it again → the old tab closes and one tab lists the current files.
     31b. On a fresh cluster, every needs-review file is listed against the merge base (or move origin); a file changed since review and then deleted shows an empty right side. Unclustered and Auto rows offer the button too; a fully reviewed cluster shows none, and invoking the command on one (e.g. via a stale row) shows `No files in '<label>' need review.` Two clusters with the same label open as `Cluster Changes: <label> (<n>)` tabs with distinct `n`. The cluster row's context menu lists `Open Cluster Changes` first, then `Mark Reviewed` / `Unmark Reviewed`.
+    31c. With a combined diff active, the title bar's first button is `Mark Cluster Reviewed`. Pressing it marks the files the tab lists that still need review, and the tab stays open (it is not refreshed; reopen it to see current bases). Switching to a plain file editor or the SCM "View Changes" multi-diff hides the button. Rename the cluster in the contract (or reorder clusters) while the tab is open and press it → `Cluster '<label>' changed since this diff opened. Reopen it from the Delta Review pane.` and `refs/review/<branch>` gets no new commit. Add a file to the cluster after opening and press it → that file stays Needs Review. Open `Cluster Changes: Unclustered`, switch the active SCM repo (or check out another branch) and press it → the changed-cluster message and no new commit on any `refs/review/*`. With the combined diff in one editor group and the SCM "View Changes" multi-diff in another, pressing the button from the other group writes nothing. Open the combined diff, edit another cluster file, reopen it → the first tab is gone and only one `Cluster Changes: <label>` tab exists; pressing its button marks the files it lists.
 
 Notes:
 

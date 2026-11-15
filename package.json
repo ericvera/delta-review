@@ -133,6 +133,12 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.markClusterChangesReviewed",
+        "title": "Mark Cluster Reviewed",
+        "icon": "$(check-all)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.markClusterReviewed",
         "title": "Mark Reviewed",
         "icon": "$(add)",
@@ -225,6 +231,13 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "deltaReview.markClusterChangesReviewed",
+          "when": "activeEditor == 'multiDiffEditor' && deltaReview.clusterChangesActive",
+          "group": "navigation@-1000"
+        }
+      ],
       "view/title": [
         {
           "command": "deltaReview.viewAsTree",
@@ -492,6 +505,10 @@
         },
         {
           "command": "deltaReview.openClusterChanges",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markClusterChangesReviewed",
           "when": "false"
         },
         {

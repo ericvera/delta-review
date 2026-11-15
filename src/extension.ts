@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import { baseBlobForNote } from "./baseDocument";
 import {
   clusterChangesFiles,
+  clusterChangesMarkPaths,
   clusterChangesTitle,
   clusterLabelForKey,
   nothingToReviewMessage,
@@ -615,6 +616,15 @@ export const activate = async (
       },
     );
 
+  const markClusterPaths = async (
+    activeGit: Git,
+    branch: string,
+    paths: string[],
+  ): Promise<void> =>
+    applyReviewStateChange("mark cluster reviewed", () =>
+      markReviewed(activeGit, branch, paths),
+    );
+
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleRefresh = (): void => {
     if (refreshTimer !== undefined) {
@@ -736,22 +746,69 @@ export const activate = async (
 
   // The stable API has no multi-diff tab input class, so a combined diff is a
   // tab whose input matches none of the known ones
+  const isStableTabInput = (input: unknown): boolean =>
+    input instanceof vscode.TabInputText ||
+    input instanceof vscode.TabInputTextDiff ||
+    input instanceof vscode.TabInputCustom ||
+    input instanceof vscode.TabInputWebview ||
+    input instanceof vscode.TabInputNotebook ||
+    input instanceof vscode.TabInputNotebookDiff ||
+    input instanceof vscode.TabInputTerminal;
+
   const clusterChangesTabsFor = (title: string): vscode.Tab[] =>
     vscode.window.tabGroups.all
       .flatMap((group) => group.tabs)
       .filter(
         (tab) =>
           isClusterChangesLabel(tab.label, title) &&
-          !(
-            tab.input instanceof vscode.TabInputText ||
-            tab.input instanceof vscode.TabInputTextDiff ||
-            tab.input instanceof vscode.TabInputCustom ||
-            tab.input instanceof vscode.TabInputWebview ||
-            tab.input instanceof vscode.TabInputNotebook ||
-            tab.input instanceof vscode.TabInputNotebookDiff ||
-            tab.input instanceof vscode.TabInputTerminal
-          ),
+          !isStableTabInput(tab.input),
       );
+
+  // More than one title matches only when a cluster label itself ends in a
+  // file-count-like suffix
+  const clusterChangesTitlesForTab = (tab: vscode.Tab | undefined): string[] =>
+    tab === undefined || isStableTabInput(tab.input)
+      ? []
+      : [...clusterChangesTabs.keys()].filter((title) =>
+          isClusterChangesLabel(tab.label, title),
+        );
+
+  const isClusterChangesTab = (tab: vscode.Tab | undefined): boolean =>
+    clusterChangesTitlesForTab(tab).length > 0;
+
+  const activeClusterChanges = ():
+    { title: string; entry: ClusterChangesEntry } | undefined => {
+    const titles = clusterChangesTitlesForTab(
+      vscode.window.tabGroups.activeTabGroup.activeTab,
+    );
+    return titles.length === 1
+      ? { title: titles[0], entry: clusterChangesTabs.get(titles[0])! }
+      : undefined;
+  };
+
+  const updateClusterChangesContext = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.clusterChangesActive",
+      isClusterChangesTab(vscode.window.tabGroups.activeTabGroup.activeTab),
+    );
+  };
+  context.subscriptions.push(
+    vscode.window.tabGroups.onDidChangeTabs((event) => {
+      for (const tab of event.closed) {
+        const titles = [...clusterChangesTabs.keys()].filter((title) =>
+          isClusterChangesLabel(tab.label, title),
+        );
+        for (const title of titles) {
+          if (clusterChangesTabsFor(title).length === 0) {
+            clusterChangesTabs.delete(title);
+          }
+        }
+      }
+      updateClusterChangesContext();
+    }),
+    vscode.window.tabGroups.onDidChangeTabGroups(updateClusterChangesContext),
+  );
 
   const openDiff = async (
     file: ReviewFile,
@@ -1254,6 +1311,79 @@ export const activate = async (
             resource.right,
           ]),
         );
+        updateClusterChangesContext();
+      },
+    ),
+
+    // editor/title passes (resource, { groupId }): the resource is the
+    // multi-diff's random `multi-diff-editor:` source, which no stable tab
+    // input exposes, and groupId is internal (TabGroup has only viewColumn).
+    // Neither maps to a vscode.Tab, so the press is trusted only when no other
+    // group's title bar could have shown the button.
+    vscode.commands.registerCommand(
+      "deltaReview.markClusterChangesReviewed",
+      async (..._args: unknown[]) => {
+        const cantTell = (): void => {
+          void vscode.window.showInformationMessage(
+            "Can't tell which editor this button belongs to. Focus the cluster's combined diff and try again.",
+          );
+        };
+        const activeGroup = vscode.window.tabGroups.activeTabGroup;
+        const titles = clusterChangesTitlesForTab(activeGroup.activeTab);
+        if (titles.length > 1) {
+          cantTell();
+          return;
+        }
+        const active = activeClusterChanges();
+        if (
+          active === undefined ||
+          git === undefined ||
+          model === undefined ||
+          clusterModel === undefined
+        ) {
+          return;
+        }
+        const { title, entry } = active;
+        const activeGit = git;
+        const branch = model.branch;
+        if (clusterChangesTabsFor(title).length > 1) {
+          void vscode.window.showInformationMessage(
+            `More than one '${title}' tab is open. Close them and reopen it from the Delta Review pane.`,
+          );
+          return;
+        }
+        if (
+          vscode.window.tabGroups.all.some(
+            (group) =>
+              group !== activeGroup &&
+              group.activeTab !== undefined &&
+              !isStableTabInput(group.activeTab.input),
+          )
+        ) {
+          cantTell();
+          return;
+        }
+        const result = clusterChangesMarkPaths(
+          {
+            title,
+            label: entry.label,
+            paths: entry.paths,
+            repoRoot: entry.repoRoot,
+            branch: entry.branch,
+          },
+          {
+            title: clusterChangesTitle(clusterModel, entry.clusterKey),
+            label: clusterLabelForKey(clusterModel, entry.clusterKey),
+            repoRoot: activeGit.repoRoot,
+            branch,
+          },
+          clusterFilesForKey(clusterModel, entry.clusterKey),
+        );
+        if ("message" in result) {
+          void vscode.window.showInformationMessage(result.message);
+          return;
+        }
+        await markClusterPaths(activeGit, branch, result.paths);
       },
     ),
 
@@ -1274,11 +1404,7 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        const activeGit = git;
-        const branch = model.branch;
-        await applyReviewStateChange("mark cluster reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await markClusterPaths(git, model.branch, paths);
       },
     ),
 
@@ -1476,6 +1602,7 @@ export const activate = async (
             ]),
           ),
           notesBadge: notesTreeView.badge,
+          clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
         };
       }),
     );
