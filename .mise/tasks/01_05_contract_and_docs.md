@@ -2,7 +2,7 @@
 
 ## Goal
 
-Update the agent-facing review-notes contract so agents can post a pending reply (`pending: true`). Pending notes stay actionable on the agent's next run. The schema-change rule exempts additive optional keys. Bump the plugin version, and document pending status and read/unread in DEVELOPMENT.md and README.md.
+Update the agent-facing review-notes contract so agents can post a pending reply (`pending: true`). Pending notes stay actionable on the agent's next run. The schema-change rule exempts additive optional keys in the responses file only. Bump the plugin version, and document pending status and read/unread in DEVELOPMENT.md and README.md.
 
 ## Files to modify/create
 
@@ -18,7 +18,7 @@ What the extension does after tasks 01_02–01_04:
 - A note whose newest turn is an agent reply with `pending: true` derives status **pending**. It shows a purple clock and the label "Pending", keeps the reply box ("Reply & Reopen"), is resolvable, and counts in the view badge.
 - In the notes file, pending persists as `"addressed"` (`persistedStatus` in `src/noteThreads.ts`), so the notes-file schema is unchanged.
 - Read/unread is local to VS Code workspace state (`deltaReview.pendingReadMarks`, per repo root and branch, logic in `src/pendingRead.ts`), keyed per note to the newest agent turn's `at`. Mark as Read (`deltaReview.markNoteRead` / `deltaReview.markNoteRowRead`) appears only on unread pending threads and rows; it re-styles in place (`restyleThreads` on the controller plus `notesTreeProvider.setThreads`) and never calls `renderThreads`.
-- Unread: the comment thread's label is "Pending • Unread"; the REVIEW NOTES row keeps its `noteLabel` text but renders bold, with a purple clock and the tooltip "Status: pending (unread)". Read: thread label "Pending", dimmed clock, tooltip "Status: pending".
+- Unread: the comment thread's label is "Pending • Unread"; the REVIEW NOTES row keeps its `noteLabel` text but renders as a full-span highlight (bold, in the theme's `list.highlightForeground`, usually blue — not white as in the mock), with a purple clock and no dot and the tooltip "Status: pending (unread)". Read: thread label "Pending", dimmed clock, tooltip "Status: pending".
 - Older extensions drop the unknown key and show Addressed.
 - Task 01_01 made turns render as markdown and already updated DEVELOPMENT.md "Long notes".
 
@@ -66,7 +66,7 @@ Design decisions:
      - Do not add `pending` to the JSON example unless a second example entry is clearer. One line in the rules is enough.
    - **Work set**: actionable iff `status` is not `"resolved"` and either the newest turn is a reviewer turn, or the newest turn is your response entry with `pending: true`. Keep the "never trust `status` alone" sentence. Note that the notes file shows a pending note as `"addressed"`.
    - **Channel discipline**: one bullet. "A note whose newest turn is your own `pending: true` reply is skipped for the rest of the session (all watch rounds included) until a newer reviewer turn arrives — that turn makes it actionable again at once; a later invocation picks still-pending notes up via Work set." Leave the question-skip bullet (`:134`, "for the rest of the pass") unchanged.
-   - **Schema changes**: an additive optional key that older readers ignore (the parser drops unknown keys) needs no `version` bump. Any other change still bumps `version` and updates `src/notes.ts` in the same commit.
+   - **Schema changes**: an additive optional key in the responses file needs no `version` bump — older extensions drop unknown keys and never rewrite that file. Every other change, including any notes-file change (additive or not), bumps `version` and updates `src/notes.ts` in the same commit: the extension rebuilds notes from known keys and re-saves them on each refresh, so an older extension would strip a newer notes key.
    - Intro sentence: the extension flips the note to **Addressed**, or **Pending** when the reply is marked pending.
 2. SKILL.md Default workflow:
    - Step 2: "excluding notes skipped earlier this pass per Channel discipline" becomes "excluding notes skipped per Channel discipline". The durations (pass for questions; session-until-reviewer-turn for pending) live only in Channel discipline. Reference only; do not restate the rule, and do not write "this session" here.
@@ -75,10 +75,10 @@ Design decisions:
 4. DEVELOPMENT.md:
    - `:141`: `{ noteId, response, at, anchor?, pending? }`.
    - `:155`: status derivation adds "agent last with `pending: true` → **pending**", plus "persisted as `addressed` (`persistedStatus`) so older readers still parse the notes file".
-   - Add one bullet in the same section covering read/unread. It is workspace state only (`deltaReview.pendingReadMarks`, per repo root then branch — per repo because the extension follows the SCM-selected repo and all repos share one `workspaceState` — keyed to the newest agent turn's `at`, pruned on successful notes loads only inside the loaded repo's map to present notes and that repo's existing local branches, logic in `src/pendingRead.ts`). Mark as Read re-styles in place (`restyleThreads`, `setThreads`) and never calls `renderThreads`. It never touches the contract files.
+   - Add one bullet in the same section covering read/unread. It is workspace state only (`deltaReview.pendingReadMarks`, per repo root then branch — per repo because the extension follows the SCM-selected repo and all repos share one `workspaceState` — keyed to the newest agent turn's `at`, pruned on successful notes loads (including zero-note loads; never on an invalid or missing notes file) only inside the loaded repo's map to present notes and that repo's existing local branches, logic in `src/pendingRead.ts`). Mark as Read re-styles in place (`restyleThreads`, `setThreads`) and never calls `renderThreads`. It never touches the contract files.
    - `:171`: update the gating list to include `pendingNote`/`pendingNoteUnread`.
    - Manual test script: add a step after 36. Append a response with `"pending": true`, and check:
-     - The thread label shows Pending • Unread; the row keeps its note text, bold, with a purple clock and the tooltip "Status: pending (unread)"; plus a reply box, Resolve available, and the badge counting it.
+     - The thread label shows Pending • Unread; the row keeps its note text, bold in the list highlight color (usually blue, not white), with a purple clock and the tooltip "Status: pending (unread)"; plus a reply box, Resolve available, and the badge counting it.
      - Expanding or opening it does not mark it read.
      - Mark as Read on the thread or the row dims the clock and the action disappears.
      - Another pending reply makes it unread again.

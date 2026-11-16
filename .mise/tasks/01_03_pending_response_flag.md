@@ -45,7 +45,7 @@ Let an agent's responses-file entry carry an optional `pending: true`. Parse it,
    - In `parseResponseEntry`, after the `at` check: if `value.pending !== undefined && typeof value.pending !== "boolean"`, return `{ error: \`${where2}: "pending" must be a boolean\` }`.
    - After building `entry`, `if (value.pending === true) entry.pending = true;`.
 2. `src/noteThreads.ts`: in `mergeThreads`, `if (entry.pending === true) turn.pending = true;` beside the anchor copy.
-3. `package.json` `when` clauses:
+3. `package.json` `when` clauses. In each, replace only the `commentThread =~ ...` or `viewItem =~ ...` term; keep every other term as it is (for example the `commentController == deltaReview.notes && !commentThreadIsEmpty &&` prefix at `package.json:464` and `:469`):
    - Row `resolveNoteRow` (both entries): `viewItem =~ /^noteRow-(open|addressed|pending|pendingUnread)$/`.
    - Thread title `resolveNote`: `commentThread =~ /^(openNote|addressedNote|pendingNote|pendingNoteUnread)$/`.
    - Thread title `deleteNoteThread`: `/^(openNote|addressedNote|pendingNote|pendingNoteUnread|resolvedNote)$/`.
