@@ -23,8 +23,8 @@ Let the agent that writes the clusters contract flag a cluster `"wait": true`, m
   - Unknown keys are ignored (clusters.ts:351), so older extensions will ignore `wait`.
 - Rendering:
   - `clusterTreeItem` is at src/treeProvider.ts:575-620. Real clusters get the `layers` icon and `tooltip = bucket?.summary`.
-  - Folder rows are at treeProvider.ts:470-491. They use `createReviewFolderUri(path)`, and `element.clusterKey` is set when the folder sits under a cluster.
-  - File rows are at treeProvider.ts:493-573. They use `createReviewItemUri(file)` and a MarkdownString tooltip with a `notes` list.
+  - The folder branch of `getTreeItem` starts at treeProvider.ts:463 (`if (element.kind === "folder")`). It uses `createReviewFolderUri(path)`, and `element.clusterKey` is set when the folder sits under a cluster. It has no local `clusterModel`; call `this.getClusterModel()` (constructor callback, treeProvider.ts:156).
+  - File rows follow at treeProvider.ts:493-573. They also have no local `clusterModel`; call `this.getClusterModel()`. They use `createReviewItemUri(file)` and a MarkdownString tooltip with a `notes` list.
   - Pattern to follow: the Unclustered header sets both a label and a `resourceUri` so a FileDecoration color tints the label (treeProvider.ts:600-602, decorations.ts:33-51).
 - Decorations: src/decorations.ts. The provider maps `uri.query` to a decoration (decorations.ts:79-90). File-row query is the change kind (`modified|added|deleted|renamed`). Folder rows have no query.
 - Design decisions:
@@ -65,13 +65,14 @@ Let the agent that writes the clusters contract flag a cluster `"wait": true`, m
      - Otherwise, the existing table. Build the muted decorations once, as module constants, like `DECORATIONS`.
 3. src/treeProvider.ts:
    - `clusterTreeItem`, real-cluster branch: when `isWaitingClusterKey(clusterModel, key)`, set `item.resourceUri = createWaitingClusterHeaderUri(key)`. Set the tooltip to `` `${bucket.summary}\n\n${WAIT_TOOLTIP}` `` (just `WAIT_TOOLTIP` when the summary is empty).
-   - Folder branch: `waiting = element.clusterKey !== undefined && clusterModel !== undefined && isWaitingClusterKey(clusterModel, element.clusterKey)`. Pass it to `createReviewFolderUri`, and when true, set the tooltip to `` `${element.path}\n\n${WAIT_TOOLTIP}` ``.
-   - File branch: `waiting = this.isGrouped() && file.status === FileReviewStatus.NeedsReview && clusterModel !== undefined && isWaitingFile(clusterModel, file)`. Pass it to `createReviewItemUri`, and when true, push `WAIT_TOOLTIP` as the last entry of `notes`.
+   - Folder branch: with `const clusterModel = this.getClusterModel()`, `waiting = element.clusterKey !== undefined && clusterModel !== undefined && isWaitingClusterKey(clusterModel, element.clusterKey)`. Pass it to `createReviewFolderUri`, and when true, set the tooltip to `` `${element.path}\n\n${WAIT_TOOLTIP}` ``.
+   - File branch: with `const clusterModel = this.getClusterModel()`, `waiting = this.isGrouped() && file.status === FileReviewStatus.NeedsReview && clusterModel !== undefined && isWaitingFile(clusterModel, file)`. Pass it to `createReviewItemUri`, and when true, push `WAIT_TOOLTIP` as the last entry of `notes`.
    - Check how the provider reads `isGrouped`/`getClusterModel` (constructor callbacks) and reuse them.
 4. plugin/skills/cluster/SKILL.md. Follow CLAUDE.md: a binding Contract plus a Default workflow that references it, terse, each rule stated once.
    - Schema example: add `"wait": true` to one cluster.
    - Field list (around line 80-90): `wait`: optional boolean on a cluster. `true` means you still expect this cluster to change, and the reviewer sees it muted. Omit it or write `false` when the cluster is settled. Any non-boolean value rejects the file.
    - Add a Contract subsection `### Wait`. Set `wait: true` on a cluster you still expect to change; clear it once the cluster is settled or plans change. On a cold re-run, preserve existing `wait` values only for clusters whose label survives; a cold run sets no new `wait`. Keep it short.
+   - Amend the rule at SKILL.md:115 ("Everything in `clusters` must be derivable from the current diff on every run; `moves` and `notes` are the preserved exceptions, because ..."). Name `wait` as a preserved exception there too, because the agent's intent is not recoverable from the diff. That sentence stays the single statement of what is preserved; `### Wait` only says how `wait` is carried and does not restate the exception.
    - Amend `### Schema changes` (line 164-166). Any change requires bumping `version` and updating `src/clusters.ts` in the same commit, except a new optional key an older extension can safely ignore (like `wait`), which keeps the version.
    - Default workflow: step 3 (existing-contract baseline) references carrying `wait` per **Wait**. Step 6 or 7 sets or clears `wait` per **Wait**, and step 7's report lists clusters flagged `wait`.
 5. DEVELOPMENT.md:

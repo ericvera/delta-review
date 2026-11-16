@@ -10,7 +10,7 @@
   - No contract `version` bump. Older extensions ignore the key. The cluster skill's schema-change rule is amended to exempt optional keys an older extension can safely ignore.
   - In grouped mode, a waiting cluster's header row, its folder rows, and its file rows render muted, in the git-ignored color. Unclustered, Auto, and the Reviewed bucket are never muted. Hover actions stay enabled.
   - Tooltips gain the line `Waiting on the agent: still expected to change.`
-  - The cluster skill tells agents to set `wait` on clusters they still expect to change and to clear it when the cluster settles or plans change.
+  - The cluster skill tells agents to set `wait` on clusters they still expect to change and to clear it when the cluster settles or plans change. Its "derivable from the current diff" rule names `wait` as a preserved exception alongside `moves` and `notes`.
 
 ## Design
 
@@ -44,23 +44,31 @@
   - `nothingToReviewMessage` is unchanged. It is still used by Open Cluster Changes on an empty cluster and by the title-bar button on an empty tab.
 - `src/extension.ts`
   - `ClusterChangesEntry` gains `signature: string[]`.
-  - The body of `deltaReview.openClusterChanges` that builds resources, records the entry, and calls `vscode.changes` is extracted into `showClusterChanges(title, clusterKey, label, files, { replacing })`.
-  - Rebuild order is open first, then close. Snapshot the `clusterChangesTabsFor(title)` Tab objects first. Record the new entry, then call `vscode.changes` (zero resources allowed). Then close the snapshotted old tabs that are still open.
-    - The new tab opens beside the active old one, so closing the old one leaves it in the old position.
-    - The title's tabs never drop to zero, so the `onDidChangeTabs` closed handler keeps the entry.
-    - If no new tab appeared (for example, `vscode.changes` refuses an empty list), the old tab is not closed. The entry is restored to its prior value, and an information message shows `Nothing to review in '<label>'. Files reappear here if they change.`
+  - The body of `deltaReview.openClusterChanges` that builds resources and the entry is extracted into `buildClusterChanges(activeGit, branch, clusterKey, label, files): { entry, resources }`, and the `vscode.changes` call into `showClusterChanges(title, resources)`. Open Cluster Changes records the entry and then calls `showClusterChanges`, as today. The rebuild records the new entry only once its tab exists (step 3 below).
+  - `vscode.changes` resolves before the editor opens (VS Code 1.146: its handler does not return the inner `_workbench.changes` promise). It opens as a preview editor in the active group. `resources: []` opens an empty multi-diff tab; it does not throw.
+  - Rebuild order is open first, then close:
+    1. Snapshot the `clusterChangesTabsFor(title)` Tab objects into `before`, save the previous entry, and note whether the active old tab `isPreview`.
+    2. Set `rebuildingTitle = title`. Subscribe a waiter to `onDidChangeTabs` before opening. It matches the first tab in an event's `opened` or `changed` that carries `title`, is not a stable tab input, and is not in `before`. Inside that same event callback, synchronously, it records the new entry in `clusterChangesTabs` and then resolves with the tab. It resolves `undefined` after a 3000 ms timeout, without recording anything.
+    3. Call `showClusterChanges` (zero resources allowed) and await the waiter. Until the new tab exists, the previous entry stays recorded, so `markClusterChangesReviewed` on the still-visible old tab reads the old tab's `paths`. The swap happens in the event callback that first exposes the new tab, so no command can run between the new tab appearing and its entry being recorded.
+    4. New tab found: close the members of `before` that are still open. An old tab already closed by preview replacement counts as success. If the old active tab was not a preview, run `workbench.action.keepEditor` so the rebuilt tab stays pinned.
+    5. No new tab within the timeout: leave the old tab open. The previous entry was never replaced, so nothing is restored. Record the failed signature in `failedRebuildSignature` (title -> joined signature), so the next sync with the same signature is skipped instead of retrying forever. Show `Couldn't refresh '<label>'. Reopen it from the Delta Review pane.` once per failure. A tab that opens after the timeout leaves two tabs with the title, which sync and `markClusterChangesReviewed` already refuse.
+    6. `finally`: clear `rebuildingTitle`. If no tab carries `title` any more, delete the entry. Call `updateClusterChangesContext()`. Call `void syncActiveClusterChanges()` once, to catch a tab switch whose sync was skipped mid-rebuild. The signature check keeps it loop-safe.
+  - While `rebuildingTitle` is set, the `onDidChangeTabs` closed handler does not delete that title's entry, so preview replacement cannot drop it mid-rebuild.
+  - Loop safety comes from the signature, not the flag. After a successful rebuild the entry's signature equals the current one, and after a failure `failedRebuildSignature` matches, so a late tab event that triggers a sync gets `unchanged` or a skip.
+  - Preview behavior (accepted, same as today's Open Cluster Changes): the new tab replaces the old one in place when the old one is a preview, and otherwise opens right of it. Because `vscode.changes` takes no editor options, opening a preview can replace an unrelated preview tab in the active group.
+  - Focus (accepted): `vscode.changes` takes no `preserveFocus`, and the stable API exposes no focused-view state to restore. A rebuild triggered from the sidebar (per-file `+`) moves keyboard focus to the combined diff. DEVELOPMENT.md's manual step states this.
   - `syncActiveClusterChanges()` runs on its own `createSerialQueue()` (src/serialQueue.ts). It is triggered:
     - at the end of every successful `refresh()`, after `treeProvider.setModel(model)`
-    - from `onDidChangeTabs` and `onDidChangeTabGroups`, skipping events fired while a rebuild is in flight
+    - from `onDidChangeTabs` and `onDidChangeTabGroups`, skipping events fired while `rebuildingTitle` is set (the `finally` catch-up sync covers them)
   - Each sync bails unless all of these hold:
     - `git`, `model`, and `clusterModel` are defined
     - `activeClusterChanges()` returns one entry
     - exactly one tab carries that title
-  - It then calls `clusterChangesRebuild`, using `clusterChangesTitle`, `clusterLabelForKey`, and `clusterFilesForKey` for the current side. Only `rebuild` acts.
+  - It then calls `clusterChangesRebuild` with `{ title, label: entry.label, repoRoot: entry.repoRoot, branch: entry.branch, signature: entry.signature }` (`ClusterChangesEntry` has no `title`), using `clusterChangesTitle`, `clusterLabelForKey`, and `clusterFilesForKey` for the current side. Only `rebuild` acts, and only when the new signature differs from `failedRebuildSignature.get(title)`.
   - Background tabs are never touched. Each is checked when it next becomes active.
-  - `markClusterChangesReviewed` is unchanged. On an empty tab, `entry.paths` is empty, so it reports `nothingToReviewMessage`.
+  - `markClusterChangesReviewed` is unchanged. It always reads the entry of the tab on screen, because the rebuild swaps entries only when the new tab appears. On an empty tab, `entry.paths` is empty, so it reports `nothingToReviewMessage`.
 - Nothing is removed. `leftSides` stays because selection sync reads it.
-- `DEVELOPMENT.md` manual steps 31c and 31d (lines 261-262) are rewritten. Step 31e covers background tabs and the empty state.
+- `DEVELOPMENT.md` manual steps 31c and 31d (lines 261-262) are rewritten. 31c's "Add a file to the cluster after opening and press it → that file stays Needs Review" moves to a background tab (an active tab now rebuilds to include the file). A new step covers background tabs and the empty state.
 - Releases: `package.json` goes to 0.13.0 and `plugin/.claude-plugin/plugin.json` goes to 0.8.0, in task 01_02 so the bump lands with the last task.
 
 ## Hard-to-undo
