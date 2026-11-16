@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mergeThreads, workSet } from "./noteThreads";
-import type { NoteThread } from "./noteThreads";
+import {
+  deriveThreadStatus,
+  mergeThreads,
+  persistedStatus,
+  workSet,
+} from "./noteThreads";
+import type { NoteThread, ThreadTurn } from "./noteThreads";
 import type {
   Note,
   NotesFile,
@@ -263,6 +268,56 @@ describe("mergeThreads", () => {
     expect(threads[1]?.status).toBe("addressed");
   });
 
+  it("derives pending when the last turn is a pending response", () => {
+    const threads = mergeThreads(
+      notesFile(note()),
+      responsesFile(response({ pending: true })),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("pending");
+    expect(threads[0]?.turns[1]?.pending).toBe(true);
+  });
+
+  it("derives addressed when a later response is not pending", () => {
+    const threads = mergeThreads(
+      notesFile(note()),
+      responsesFile(
+        response({ pending: true, at: "2026-07-01T11:00:00Z" }),
+        response({ at: "2026-07-01T12:00:00Z" }),
+      ),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("addressed");
+  });
+
+  it("derives open when a reviewer turn follows a pending response", () => {
+    const followedUp = note({
+      turns: [
+        { text: "please rename this", at: "2026-07-01T10:00:00Z" },
+        { text: "any update?", at: "2026-07-01T12:00:00Z" },
+      ],
+    });
+    const threads = mergeThreads(
+      notesFile(followedUp),
+      responsesFile(response({ pending: true, at: "2026-07-01T11:00:00Z" })),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("open");
+  });
+
+  it("keeps resolved over a pending response", () => {
+    const threads = mergeThreads(
+      notesFile(note({ status: "resolved" })),
+      responsesFile(response({ pending: true })),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("resolved");
+  });
+
   it("does not mutate the input notes", () => {
     const input = note();
     const turnsBefore = input.turns;
@@ -279,18 +334,82 @@ describe("mergeThreads", () => {
   });
 });
 
+const reviewerTurn: ThreadTurn = {
+  author: "reviewer",
+  text: "please rename this",
+  at: "2026-07-01T10:00:00Z",
+};
+const agentTurn: ThreadTurn = {
+  author: "agent",
+  text: "renamed it",
+  at: "2026-07-01T11:00:00Z",
+};
+const pendingAgentTurn: ThreadTurn = {
+  author: "agent",
+  text: "queued the rename",
+  at: "2026-07-01T11:00:00Z",
+  pending: true,
+};
+
+describe("deriveThreadStatus", () => {
+  it("lets an explicit resolve win over a pending last turn", () => {
+    expect(
+      deriveThreadStatus("resolved", [reviewerTurn, pendingAgentTurn]),
+    ).toBe("resolved");
+  });
+
+  it("is pending when a pending agent turn is last", () => {
+    expect(deriveThreadStatus("open", [reviewerTurn, pendingAgentTurn])).toBe(
+      "pending",
+    );
+  });
+
+  it("is addressed when a non-pending agent turn is last", () => {
+    expect(deriveThreadStatus("open", [reviewerTurn, agentTurn])).toBe(
+      "addressed",
+    );
+  });
+
+  it("is open when the reviewer speaks after a pending agent turn", () => {
+    expect(
+      deriveThreadStatus("addressed", [
+        reviewerTurn,
+        pendingAgentTurn,
+        { ...reviewerTurn, at: "2026-07-01T12:00:00Z" },
+      ]),
+    ).toBe("open");
+  });
+});
+
+describe("persistedStatus", () => {
+  it("stores pending as addressed and leaves the others unchanged", () => {
+    expect(persistedStatus("pending")).toBe("addressed");
+    expect(persistedStatus("open")).toBe("open");
+    expect(persistedStatus("addressed")).toBe("addressed");
+    expect(persistedStatus("resolved")).toBe("resolved");
+  });
+});
+
 describe("workSet", () => {
-  it("keeps exactly the derived-open threads, outdated included", () => {
+  it("keeps exactly the derived-open and pending threads, outdated included", () => {
     const open = note({ id: "n1", outdated: true });
     const addressed = note({ id: "n2" });
     const resolved = note({ id: "n3", status: "resolved" });
-    const threads: NoteThread[] = mergeThreads(
+    const merged: NoteThread[] = mergeThreads(
       notesFile(open, addressed, resolved),
       responsesFile(response({ noteId: "n2" })),
       alwaysResolves,
     );
+    const pendingTurns = [reviewerTurn, pendingAgentTurn];
+    const pending: NoteThread = {
+      note: note({ id: "n4", status: "addressed" }),
+      turns: pendingTurns,
+      status: deriveThreadStatus("addressed", pendingTurns),
+    };
 
-    expect(workSet(threads).map((thread) => thread.note.id)).toEqual(["n1"]);
+    expect(
+      workSet([...merged, pending]).map((thread) => thread.note.id),
+    ).toEqual(["n1", "n4"]);
   });
 
   it("returns empty for an empty input", () => {

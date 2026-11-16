@@ -50,6 +50,14 @@ import {
 } from "./noteTarget";
 import { mergeThreads, NoteThread } from "./noteThreads";
 import {
+  isPendingUnread,
+  marksFor,
+  prunedRepoMarks,
+  readMarkBranch,
+  RepoReadMarks,
+  withRepoReadMark,
+} from "./pendingRead";
+import {
   notesCollapseKeyFor,
   NotesTreeElement,
   NotesTreeProvider,
@@ -119,6 +127,23 @@ export const activate = async (
     void context.workspaceState.update(collapsedKey, [...collapsed]);
   };
 
+  // Pending-note read marks, workspace-local and never written to the notes
+  // or responses files. notesKey is the repo and branch of the rendered
+  // thread set; undefined whenever no successful notes load is rendered.
+  const pendingReadMarksKey = "deltaReview.pendingReadMarks";
+  let marks = context.workspaceState.get<RepoReadMarks>(
+    pendingReadMarksKey,
+    {},
+  );
+  let notesKey: { repo: string; branch: string } | undefined;
+  const isUnread = (thread: NoteThread): boolean =>
+    isPendingUnread(
+      thread,
+      notesKey === undefined
+        ? {}
+        : marksFor(marks, notesKey.repo, notesKey.branch),
+    );
+
   // Flat list vs directory tree, mirroring the built-in CHANGES view toggle
   const viewModeKey = "deltaReview.viewMode";
   let viewMode = context.workspaceState.get<ViewMode>(viewModeKey, "list");
@@ -172,7 +197,10 @@ export const activate = async (
   // REVIEW NOTES: sibling SCM section below the review set. File groups
   // default to expanded, so they use the bare-key-while-collapsed convention
   // of the shared collapsed set (keys namespaced `notes:<path>`).
-  const notesTreeProvider = new NotesTreeProvider((key) => collapsed.has(key));
+  const notesTreeProvider = new NotesTreeProvider(
+    (key) => collapsed.has(key),
+    isUnread,
+  );
   const notesTreeView = vscode.window.createTreeView("deltaReviewNotes", {
     treeDataProvider: notesTreeProvider,
   });
@@ -276,12 +304,34 @@ export const activate = async (
     () => git,
     () => model,
     () => void refresh(),
+    { isUnread, markRead: (thread) => markRead(thread) },
   );
   context.subscriptions.push(commentController);
 
   // The currently rendered thread set — what Clear Resolved operates on.
   // Only renderNoteThreads assigns it, so it always matches both surfaces.
   let currentNoteThreads: NoteThread[] = [];
+
+  // Re-styles in place and never prunes: rendering here would dispose the
+  // thread of a just-added note whose refresh has not landed yet
+  const markRead = (thread: NoteThread): void => {
+    if (notesKey === undefined) {
+      return;
+    }
+    const next = withRepoReadMark(
+      marks,
+      notesKey.repo,
+      notesKey.branch,
+      thread,
+    );
+    if (next === marks) {
+      return;
+    }
+    marks = next;
+    void context.workspaceState.update(pendingReadMarksKey, marks);
+    commentController.restyleThreads();
+    notesTreeProvider.setThreads(currentNoteThreads);
+  };
 
   // Renders the merged threads into both notes surfaces: the inline comment
   // threads and the REVIEW NOTES tree (with its to-handle badge). Every call
@@ -291,7 +341,7 @@ export const activate = async (
     currentNoteThreads = threads;
     commentController.renderThreads(threads);
     notesTreeProvider.setThreads(threads);
-    // Open + addressed need reviewer attention; resolved notes are done
+    // Open, addressed and pending (read or unread) are not done; resolved notes are.
     const toHandle = threads.filter(
       (thread) => thread.status !== "resolved",
     ).length;
@@ -335,6 +385,7 @@ export const activate = async (
       treeView.message =
         "Open a folder inside a git repository to start reviewing.";
       statusBarItem.hide();
+      notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
       return;
@@ -504,6 +555,49 @@ export const activate = async (
             return undefined;
           }
         };
+        // Prunes the loaded repo's marks on a successful notes load; false
+        // when a newer refresh superseded this one
+        const pruneReadMarks = async (
+          threads: readonly NoteThread[],
+        ): Promise<boolean> => {
+          let liveBranches: Set<string> | undefined;
+          if (
+            Object.keys(marks[gitForNotes.repoRoot] ?? {}).some(
+              (key) => key !== computed.branch,
+            )
+          ) {
+            try {
+              const output = await gitForNotes.run([
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads",
+              ]);
+              liveBranches = new Set(
+                output
+                  .split("\n")
+                  .filter((line) => line.startsWith("refs/heads/"))
+                  .map((line) => line.slice("refs/heads/".length)),
+              );
+            } catch {
+              liveBranches = undefined;
+            }
+            if (generation !== refreshGeneration) {
+              return false;
+            }
+          }
+          const pruned = prunedRepoMarks(
+            marks,
+            gitForNotes.repoRoot,
+            readMarkBranch(computed.branch),
+            threads,
+            liveBranches,
+          );
+          if (pruned !== marks) {
+            marks = pruned;
+            void context.workspaceState.update(pendingReadMarksKey, marks);
+          }
+          return true;
+        };
         const notesResult = await loadNotes(gitForNotes, computed.branch);
         if (generation !== refreshGeneration) {
           return;
@@ -516,6 +610,7 @@ export const activate = async (
             lastNotesFileWarning,
             `Delta Review: review notes file: ${notesResult.error} — notes are read-only until the file is fixed`,
           );
+          notesKey = undefined;
           renderNoteThreads([]);
           return;
         }
@@ -566,9 +661,28 @@ export const activate = async (
           if (generation !== refreshGeneration) {
             return;
           }
-          renderNoteThreads(mergeThreads(refreshed, responses, anchorResolves));
+          const threads = mergeThreads(refreshed, responses, anchorResolves);
+          if (!(await pruneReadMarks(threads))) {
+            return;
+          }
+          notesKey = {
+            repo: gitForNotes.repoRoot,
+            branch: readMarkBranch(computed.branch),
+          };
+          renderNoteThreads(threads);
         } else {
           // Missing or empty — clear any rendered threads
+          if (notesResult.state === "ok") {
+            if (!(await pruneReadMarks([]))) {
+              return;
+            }
+            notesKey = {
+              repo: gitForNotes.repoRoot,
+              branch: readMarkBranch(computed.branch),
+            };
+          } else {
+            notesKey = undefined;
+          }
           renderNoteThreads([]);
         }
       } catch (notesError) {
@@ -594,6 +708,7 @@ export const activate = async (
       // Fatal model errors win over any contract warning
       treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
+      notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
     }
@@ -1290,6 +1405,11 @@ export const activate = async (
     ),
 
     vscode.commands.registerCommand(
+      "deltaReview.markNoteRead",
+      (thread: vscode.CommentThread) => commentController.markNoteRead(thread),
+    ),
+
+    vscode.commands.registerCommand(
       "deltaReview.replyReopen",
       (reply: vscode.CommentReply) => commentController.replyReopen(reply),
     ),
@@ -1424,6 +1544,12 @@ export const activate = async (
     vscode.commands.registerCommand(
       "deltaReview.unresolveNoteRow",
       (element?: NotesTreeElement) => setNoteRowResolved(element, false),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.markNoteRowRead",
+      (element?: NotesTreeElement) =>
+        element?.kind === "note" && markRead(element.thread),
     ),
 
     // Unlike the thread's trash icon — which sits inside an expanded thread —

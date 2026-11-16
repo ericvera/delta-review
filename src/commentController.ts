@@ -3,9 +3,8 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
 import { Git } from "./git";
-import { escapeMarkdownText } from "./markdown";
 import { ReviewModel } from "./model";
-import { Note, NoteSide, NoteStatus } from "./notes";
+import { Note, NoteSide } from "./notes";
 import {
   clampNoteRange,
   NoteLineSource,
@@ -13,7 +12,7 @@ import {
   noteAnchorLines,
   noteTargetFor,
 } from "./noteTarget";
-import { NoteThread } from "./noteThreads";
+import { NoteThread, ThreadStatus, deriveThreadStatus } from "./noteThreads";
 import {
   appendReviewerTurn,
   createNote,
@@ -37,15 +36,17 @@ import type { CommentDisplay } from "./threadRender";
 // unresolve, reply-to-reopen). Model/git access is injected as callbacks so
 // the controller always sees the extension's current state.
 
-const statusLabels: Record<NoteStatus, string> = {
+const statusLabels: Record<ThreadStatus, string> = {
   open: "Open",
   addressed: "Addressed",
+  pending: "Pending",
   resolved: "Resolved",
 };
 
-const statusContextValues: Record<NoteStatus, string> = {
+const statusContextValues: Record<ThreadStatus, string> = {
   open: "openNote",
   addressed: "addressedNote",
+  pending: "pendingNote",
   resolved: "resolvedNote",
 };
 
@@ -60,8 +61,8 @@ interface NoteComment extends vscode.Comment {
   // The turn's `at` timestamp — stable identity for edits (indices shift
   // when another turn is deleted, `at` never changes)
   turnAt: string;
-  // The raw turn text: `body` holds display markdown (escaped, and possibly
-  // carrying the outdated snapshot block), so edit mode swaps this in instead
+  // The raw turn text: `body` holds the rendered markdown (possibly carrying
+  // the outdated snapshot block), so edit mode swaps this in instead
   turnText: string;
 }
 
@@ -96,6 +97,9 @@ export interface NoteCommentController extends vscode.Disposable {
   // just opened — the clamp needs a line count, which only exists once the
   // document is open. Range only: no dispose, no create, no git, no store.
   reclampThreadsFor: (document: vscode.TextDocument) => void;
+  // Re-styles every cached thread from its own cached display thread (read
+  // state changed). Style only: no dispose, no create, no ranges.
+  restyleThreads: () => void;
   // Handler for the deltaReview.addNote comment-input command
   addNote: (reply: vscode.CommentReply) => Promise<void>;
   // Comment-level actions on reviewer turns
@@ -113,6 +117,7 @@ export interface NoteCommentController extends vscode.Disposable {
     target: vscode.CommentThread | vscode.CommentReply,
   ) => Promise<void>;
   replyReopen: (reply: vscode.CommentReply) => Promise<void>;
+  markNoteRead: (target: vscode.CommentThread) => void;
 }
 
 const errorText = (error: unknown): string =>
@@ -137,6 +142,10 @@ export const createNoteCommentController = (
   getGit: () => Git | undefined,
   getModel: () => ReviewModel | undefined,
   onDidChangeNotes: () => void,
+  pendingRead: {
+    isUnread: (thread: NoteThread) => boolean;
+    markRead: (thread: NoteThread) => void;
+  },
 ): NoteCommentController => {
   const controller = vscode.comments.createCommentController(
     "deltaReview.notes",
@@ -215,7 +224,7 @@ export const createNoteCommentController = (
     let reviewerTurnIndex = 0;
     return thread.turns.map((turn, index) => {
       const body = new vscode.MarkdownString();
-      body.appendMarkdown(escapeMarkdownText(turn.text));
+      body.appendMarkdown(turn.text);
       if (index === 0 && thread.note.outdated) {
         // Mock 4: a dimmed one-liner with the first anchored line's original
         // text (italic is the closest to dimmed a MarkdownString gets)
@@ -297,12 +306,17 @@ export const createNoteCommentController = (
     if (!sameCommentDisplays(previousDisplays, comments.map(displayFor))) {
       commentThread.comments = comments;
     }
+    const unread = pendingRead.isUnread(thread);
     const label =
-      statusLabels[thread.status] + (thread.note.outdated ? " • Outdated" : "");
+      statusLabels[thread.status] +
+      (unread ? " • Unread" : "") +
+      (thread.note.outdated ? " • Outdated" : "");
     if (commentThread.label !== label) {
       commentThread.label = label;
     }
-    const contextValue = statusContextValues[thread.status];
+    const contextValue = unread
+      ? "pendingNoteUnread"
+      : statusContextValues[thread.status];
     if (commentThread.contextValue !== contextValue) {
       commentThread.contextValue = contextValue;
     }
@@ -316,7 +330,7 @@ export const createNoteCommentController = (
     // Invariant: this never flips a live thread false→true — VS Code would
     // then build a second reply button. The reply box appears only on a
     // freshly created thread (see restyle); here it only ever goes true→false
-    // as an addressed note reopens or resolves.
+    // as a replyable (addressed or pending) note reopens or resolves.
     commentThread.canReply = canReplyFor(thread.status);
   };
 
@@ -413,9 +427,9 @@ export const createNoteCommentController = (
 
   // The single restyle entry point for a cached thread: a reply box may only
   // appear on a newly created thread, so a not-yet-replyable thread going
-  // addressed is recreated rather than flipped in place. The recreate drops an
-  // in-progress turn edit on that thread (the typed text lives in the disposed
-  // widget either way). It never recurses — the fresh thread is replyable.
+  // replyable (addressed or pending) is recreated rather than flipped in
+  // place. The recreate drops an in-progress turn edit on that thread (the
+  // typed text lives in the disposed widget either way). It never recurses — the fresh thread is replyable.
   const restyle = (entry: ThreadEntry, noteThread: NoteThread): void => {
     if (
       shouldRecreateThread(entry.thread.canReply !== false, noteThread.status)
@@ -639,6 +653,20 @@ export const createNoteCommentController = (
     }
   };
 
+  const restyleThreads = (): void => {
+    for (const entry of threadCache.values()) {
+      styleThread(entry.thread, entry.noteThread);
+    }
+  };
+
+  const markNoteRead = (target: vscode.CommentThread): void => {
+    const noteId = threadNoteIds.get(target);
+    const entry = noteId === undefined ? undefined : threadCache.get(noteId);
+    if (entry !== undefined) {
+      pendingRead.markRead(entry.noteThread);
+    }
+  };
+
   const addNote = async (reply: vscode.CommentReply): Promise<void> => {
     const context = activeContext();
     const pending = reply.thread;
@@ -711,7 +739,7 @@ export const createNoteCommentController = (
     if (entry === undefined || noteComment.reviewerTurnIndex === undefined) {
       return;
     }
-    // The editor must open on the raw turn text, not the escaped display
+    // The editor must open on the raw turn text, not the rendered display
     // markdown (nor an outdated first turn's appended snapshot block)
     noteComment.body = noteComment.turnText;
     noteComment.mode = vscode.CommentMode.Editing;
@@ -819,7 +847,10 @@ export const createNoteCommentController = (
             entry.noteThread.turns.splice(mergedIndex, 1);
           }
           entry.noteThread.note.turns.splice(turnIndex, 1);
-          entry.noteThread.status = remaining.status;
+          entry.noteThread.status = deriveThreadStatus(
+            remaining.status,
+            entry.noteThread.turns,
+          );
           entry.noteThread.note.status = remaining.status;
           restyle(entry, entry.noteThread);
         }
@@ -876,7 +907,10 @@ export const createNoteCommentController = (
       );
       const entry = threadCache.get(noteId);
       if (entry !== undefined) {
-        entry.noteThread.status = note.status;
+        entry.noteThread.status = deriveThreadStatus(
+          note.status,
+          entry.noteThread.turns,
+        );
         entry.noteThread.note.status = note.status;
         restyle(entry, entry.noteThread);
       }
@@ -918,7 +952,10 @@ export const createNoteCommentController = (
           text: reply.text,
           at,
         });
-        entry.noteThread.status = note.status;
+        entry.noteThread.status = deriveThreadStatus(
+          note.status,
+          entry.noteThread.turns,
+        );
         entry.noteThread.note.status = note.status;
         restyle(entry, entry.noteThread);
       }
@@ -934,6 +971,7 @@ export const createNoteCommentController = (
     provenanceThreads,
     expandThread,
     reclampThreadsFor,
+    restyleThreads,
     addNote,
     editNoteTurn,
     saveNoteTurn,
@@ -943,6 +981,7 @@ export const createNoteCommentController = (
     resolveNote: (target) => setNoteResolved(target, true),
     unresolveNote: (target) => setNoteResolved(target, false),
     replyReopen,
+    markNoteRead,
     dispose: (): void => {
       // Disposing the controller disposes its threads
       threadCache.clear();

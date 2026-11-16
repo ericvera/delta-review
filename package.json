@@ -2,7 +2,7 @@
   "name": "delta-review",
   "displayName": "Delta Review",
   "description": "Incremental local code review: mark files reviewed and see only the delta since your last review.",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "publisher": "eric",
   "private": true,
   "engines": {
@@ -224,6 +224,18 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.markNoteRead",
+        "title": "Mark as Read",
+        "icon": "$(eye)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markNoteRowRead",
+        "title": "Mark as Read",
+        "icon": "$(eye)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.deleteNoteRow",
         "title": "Delete Note",
         "icon": "$(trash)",
@@ -382,13 +394,23 @@
           "group": "inline"
         },
         {
+          "command": "deltaReview.markNoteRowRead",
+          "when": "view == deltaReviewNotes && viewItem == noteRow-pendingUnread",
+          "group": "inline@0"
+        },
+        {
+          "command": "deltaReview.markNoteRowRead",
+          "when": "view == deltaReviewNotes && viewItem == noteRow-pendingUnread",
+          "group": "navigation"
+        },
+        {
           "command": "deltaReview.resolveNoteRow",
-          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed)$/",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed|pending|pendingUnread)$/",
           "group": "inline@1"
         },
         {
           "command": "deltaReview.resolveNoteRow",
-          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed)$/",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed|pending|pendingUnread)$/",
           "group": "navigation"
         },
         {
@@ -438,8 +460,13 @@
       ],
       "comments/commentThread/title": [
         {
+          "command": "deltaReview.markNoteRead",
+          "when": "commentController == deltaReview.notes && commentThread == pendingNoteUnread",
+          "group": "inline@0"
+        },
+        {
           "command": "deltaReview.resolveNote",
-          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote)$/",
+          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|pendingNote|pendingNoteUnread)$/",
           "group": "inline@1"
         },
         {
@@ -449,7 +476,7 @@
         },
         {
           "command": "deltaReview.deleteNoteThread",
-          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|resolvedNote)$/",
+          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|pendingNote|pendingNoteUnread|resolvedNote)$/",
           "group": "inline@2"
         }
       ],
@@ -461,12 +488,12 @@
         },
         {
           "command": "deltaReview.replyReopen",
-          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread == addressedNote",
+          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread =~ /^(addressedNote|pendingNote|pendingNoteUnread)$/",
           "group": "inline@1"
         },
         {
           "command": "deltaReview.resolveNote",
-          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread == addressedNote",
+          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread =~ /^(addressedNote|pendingNote|pendingNoteUnread)$/",
           "group": "inline@2"
         }
       ],
@@ -569,6 +596,14 @@
         },
         {
           "command": "deltaReview.deleteNoteRow",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markNoteRead",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markNoteRowRead",
           "when": "false"
         }
       ]
