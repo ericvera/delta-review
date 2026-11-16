@@ -4,7 +4,7 @@
   "base": "main",
   "steps": {
     "goals": "done",
-    "spec": null,
+    "spec": "done",
     "critic": null,
     "execute": null,
     "review": null,
