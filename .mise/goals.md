@@ -31,6 +31,16 @@ Not a bug fix. Two features. Nothing reproduced.
 - Reviewer edit still swaps in raw text; markdown loses the hard-line-break height trick and that is accepted.
 - Mock: Pending icon is the `clock` codicon in purple (charts.purple), purple thread accent; context values `pendingNote` / `noteRow-pending`; tooltip reads "Status: pending"; reply button stays "Reply & Reopen" on pending notes.
 
+## Owner feedback (proposal round 1)
+
+> I want to be able to see when there are "unread" notes. Today it is easy. Anything with a Claude message is something I need to read. But sometimes Claude responds with, I queued the work. This is interesting, but I want to know that this is not resolved, but there is nothing for me to do yet. In the case of pending, right now there is no way to say.. i looked at this
+
+## Open questions
+
+1. How a pending reply is marked read.
+2. Where read state lives.
+3. Badge/visual treatment of read vs unread pending.
+
 ## Proposal
 
 Issue: note bodies are always escaped, and the agent can't answer a note while keeping it visibly queued.
