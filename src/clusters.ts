@@ -51,6 +51,9 @@ export interface ClustersContract {
   // Repo-relative path → one-line remark. Always present; empty below
   // version 3
   notes: Map<string, string>;
+  // Repo-relative file or directory paths the agent still expects to change,
+  // trailing "/" stripped. Always present; any version
+  waitPaths: string[];
 }
 
 export interface ClusterBucket {
@@ -59,6 +62,8 @@ export interface ClusterBucket {
   files: ReviewFile[];
   // agent says this cluster is still expected to change; informational
   wait?: true;
+  // Members covered by the contract's waitPaths; absent when there are none
+  waitingPaths?: ReadonlySet<string>;
 }
 
 export interface ClusterModel {
@@ -113,12 +118,21 @@ export const isWaitingClusterKey = (
   clusterKey: string,
 ): boolean => clusterBucketForKey(model, clusterKey)?.wait === true;
 
+const isWaitingMember = (bucket: ClusterBucket, file: ReviewFile): boolean =>
+  bucket.wait === true || bucket.waitingPaths?.has(file.path) === true;
+
 export const isWaitingFile = (model: ClusterModel, file: ReviewFile): boolean =>
   model.clusters.some(
     (bucket) =>
-      bucket.wait === true &&
-      bucket.files.some((member) => member.path === file.path),
+      bucket.files.some((member) => member.path === file.path) &&
+      isWaitingMember(bucket, file),
   );
+
+export const everyFileWaiting = (
+  model: ClusterModel,
+  files: readonly ReviewFile[],
+): boolean =>
+  files.length > 0 && files.every((file) => isWaitingFile(model, file));
 
 // Order-preserving filter of a file list down to one review status. Returns
 // a new array; the ReviewFile objects are kept by reference, so callers keep
@@ -141,6 +155,24 @@ export const clusterBodyState = (
   return files.some((file) => file.status === FileReviewStatus.NeedsReview)
     ? "has-needs-review"
     : "all-reviewed";
+};
+
+// A cluster header dims once nothing in it is actionable: every needs-review
+// member is waiting. The hourglass marks a cluster with pending agent work,
+// which a reviewed member under waitPaths alone does not signal.
+export const clusterHeaderTone = (
+  bucket: ClusterBucket,
+): { dimmed: boolean; hourglass: boolean } => {
+  const needsReview = filterByStatus(
+    bucket.files,
+    FileReviewStatus.NeedsReview,
+  );
+  return {
+    dimmed: needsReview.every((file) => isWaitingMember(bucket, file)),
+    hourglass:
+      bucket.wait === true ||
+      needsReview.some((file) => bucket.waitingPaths?.has(file.path) === true),
+  };
 };
 
 // Context value for a cluster-kind tree row, driving which bulk actions its
@@ -457,8 +489,25 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
       }
     }
   }
-  return { ok: true, contract: { version, clusters, moves, notes } };
+  // Ungated, like a cluster's `wait`: older readers ignore the unknown key.
+  const rawWaitPaths = record.waitPaths === undefined ? [] : record.waitPaths;
+  if (!isStringArray(rawWaitPaths)) {
+    return { ok: false, error: '"waitPaths" must be an array of strings' };
+  }
+  const waitPaths = rawWaitPaths
+    .map((entry) => entry.replace(/\/+$/, ""))
+    .filter((entry) => entry.length > 0);
+  return {
+    ok: true,
+    contract: { version, clusters, moves, notes, waitPaths },
+  };
 };
+
+const isCoveredByWaitPath = (
+  waitPaths: readonly string[],
+  path: string,
+): boolean =>
+  waitPaths.some((entry) => path === entry || path.startsWith(`${entry}/`));
 
 // Resolves review-set membership into cluster buckets. Rules, in order:
 // auto-triaged files always go to the auto bucket (auto wins over
@@ -521,6 +570,16 @@ export const resolveClusterModel = (
       continue;
     }
     unclustered.push(file);
+  }
+  if (contract.waitPaths.length > 0) {
+    for (const bucket of buckets) {
+      const covered = bucket.files
+        .map((file) => file.path)
+        .filter((path) => isCoveredByWaitPath(contract.waitPaths, path));
+      if (covered.length > 0) {
+        bucket.waitingPaths = new Set(covered);
+      }
+    }
   }
   return { clusters: buckets, unclustered, auto };
 };
