@@ -18,8 +18,14 @@ Not a bug fix. Two features. Nothing reproduced.
 12. Docs/tests: DEVELOPMENT.md:155, :273; README.md:83; src/noteThreads.test.ts, src/notes.test.ts, src/markdown.test.ts, src/threadRender.test.ts.
 13. Mock condition matches (new status label, icon, thread state).
 
-## Open questions
+## Decisions
 
-1. Markdown for agent turns only, or reviewer turns too?
-2. How the agent signals pending, and whether the schema version bumps.
-3. Pending note: reply box, badge count, resolvable?
+1. Markdown renders in both reviewer notes and agent replies (comment threads and the REVIEW NOTES tooltip). Other `escapeMarkdownText` callers stay escaped.
+2. The agent marks a reply pending with an optional `pending: true` on its responses entry. No schema `version` bump; old extensions ignore the key and show Addressed. The contract's bump rule (SKILL.md:139-141) is amended to exempt additive optional keys that older readers safely ignore.
+3. A pending note keeps the reviewer's reply box, counts in the badge, is resolvable, and stays in the agent's work set (actionable) on the next run. It is visually distinct from Open and Addressed (own label, icon, thread state).
+
+## Assumptions
+
+- Pending is a fourth derived status ("pending") persisted like the others; it clears when the agent posts a non-pending reply, the reviewer resolves, or the reviewer replies (→ open).
+- Plugin version bumps for the contract text change.
+- Reviewer edit still swaps in raw text; markdown loses the hard-line-break height trick and that is accepted.
