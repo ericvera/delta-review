@@ -1,7 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Thread states</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
 <p><a href="index.html">&larr; index</a></p>
 <h1>Thread states side by side</h1>
-<p class="note">Pending is a fourth status, distinct from Open and Addressed in its label, icon/accent, and context value (<code>pendingNote</code> / <code>noteRow-pending</code>).</p>
+<p class="note">Pending is a fourth status, distinct from Open and Addressed in its label, icon/accent, and context value (<code>pendingNote</code> / <code>noteRow-pending</code>). Pending notes are unread or read. Read state is workspace-local and is not a status: the notes file still says <code>pending</code> either way.</p>
 <div class="cmp">
 <div><div class="cap">Open (reviewer spoke last): edit your own turns, no reply box</div>
 <div class="thread"><div class="thead"><span class="lbl"><span class="i-open">&#9679;</span> Open</span><span class="acts">&#10003; &#128465;</span></div>
@@ -13,8 +13,14 @@
 <div class="cmt"><div class="av">C</div><div class="who">Claude</div><div class="body"><p>Renamed in 3 files.</p></div></div>
 <div class="reply"><textarea placeholder="Reply..."></textarea><div class="btns"><span class="btn sec">Resolve</span><span class="btn">Reply &amp; Reopen</span></div></div></div></div>
 
-<div><div class="cap">Pending (Claude replied, work queued): reply box, Resolve, unresolved</div>
-<div class="thread pend"><div class="thead"><span class="lbl"><span class="i-pend">&#9719;</span> Pending</span><span class="acts">&#10003; &#128465;</span></div>
+<div><div class="cap">Pending, unread (new pending reply): highlighted clock, Mark as Read, reply box, Resolve, unresolved</div>
+<div class="thread pend"><div class="thead"><span class="lbl"><span class="i-pend-unread">&#9719;</span> Pending &bull; Unread</span><span class="acts"><span class="mar">&#128065; Mark as Read</span> &#10003; &#128465;</span></div>
+<div class="cmt"><div class="av">Y</div><div class="who">You</div><div class="body"><p>Why <code>foo</code>? Rename it if it's unclear.</p></div></div>
+<div class="cmt"><div class="av">C</div><div class="who">Claude</div><div class="body"><p>It mirrors the git API name. A rename to <code>bar</code> is queued.</p></div></div>
+<div class="reply"><textarea placeholder="Reply..."></textarea><div class="btns"><span class="btn sec">Resolve</span><span class="btn">Reply &amp; Reopen</span></div></div></div></div>
+
+<div><div class="cap">Pending, read (after Mark as Read): dimmed clock, reply box, Resolve, unresolved</div>
+<div class="thread pend read"><div class="thead"><span class="lbl"><span class="i-pend-read">&#9719;</span> Pending</span><span class="acts">&#10003; &#128465;</span></div>
 <div class="cmt"><div class="av">Y</div><div class="who">You</div><div class="body"><p>Why <code>foo</code>? Rename it if it's unclear.</p></div></div>
 <div class="cmt"><div class="av">C</div><div class="who">Claude</div><div class="body"><p>It mirrors the git API name. A rename to <code>bar</code> is queued.</p></div></div>
 <div class="reply"><textarea placeholder="Reply..."></textarea><div class="btns"><span class="btn sec">Resolve</span><span class="btn">Reply &amp; Reopen</span></div></div></div></div>
@@ -26,14 +32,15 @@
 </div>
 
 <h2>Outdated combination</h2>
-<div class="thread pend" style="margin-left:0"><div class="thead"><span class="lbl"><span class="i-pend">&#9719;</span> Pending &bull; Outdated</span><span class="acts">&#10003; &#128465;</span></div></div>
+<div class="thread pend" style="margin-left:0"><div class="thead"><span class="lbl"><span class="i-pend-unread">&#9719;</span> Pending &bull; Unread &bull; Outdated</span><span class="acts"><span class="mar">&#128065; Mark as Read</span> &#10003; &#128465;</span></div></div>
 
 <h2>Summary</h2>
 <table>
-<tr><th>Status</th><th>Thread label</th><th>Tree icon</th><th>Thread state</th><th>Reply box</th><th>Resolve</th><th>Badge</th><th>Agent work set</th></tr>
-<tr><td>open</td><td>Open</td><td class="i-open">&#9679; circle-large-filled, blue</td><td>Unresolved</td><td>no</td><td>yes</td><td>counted</td><td>yes</td></tr>
-<tr><td>addressed</td><td>Addressed</td><td class="i-addr">&#9675; circle-large-outline, yellow</td><td>Unresolved</td><td>yes</td><td>yes</td><td>counted</td><td>no</td></tr>
-<tr><td><b>pending</b></td><td><b>Pending</b></td><td class="i-pend">&#9719; <b>clock, purple</b> (guess)</td><td>Unresolved</td><td>yes</td><td>yes</td><td>counted</td><td><b>yes</b></td></tr>
-<tr><td>resolved</td><td>Resolved</td><td class="i-res">&#10003; check, green</td><td>Resolved</td><td>no</td><td>Unresolve</td><td>not counted</td><td>no</td></tr>
+<tr><th>Status</th><th>Thread label</th><th>Tree icon</th><th>Thread state</th><th>Reply box</th><th>Resolve</th><th>Badge</th><th>Agent work set</th><th>Mark as Read</th></tr>
+<tr><td>open</td><td>Open</td><td class="i-open">&#9679; circle-large-filled, blue</td><td>Unresolved</td><td>no</td><td>yes</td><td>counted</td><td>yes</td><td>no</td></tr>
+<tr><td>addressed</td><td>Addressed</td><td class="i-addr">&#9675; circle-large-outline, yellow</td><td>Unresolved</td><td>yes</td><td>yes</td><td>counted</td><td>no</td><td>no</td></tr>
+<tr><td><b>pending</b>, unread</td><td><b>Pending &bull; Unread</b></td><td><span class="i-pend-unread">&#9719;</span> <b>clock, highlighted purple</b> (guess)</td><td>Unresolved</td><td>yes</td><td>yes</td><td>counted</td><td><b>yes</b></td><td><b>yes</b></td></tr>
+<tr><td><b>pending</b>, read</td><td><b>Pending</b></td><td><span class="i-pend-read">&#9719;</span> <b>clock, dimmed</b> (guess)</td><td>Unresolved</td><td>yes</td><td>yes</td><td>counted</td><td><b>yes</b></td><td>no</td></tr>
+<tr><td>resolved</td><td>Resolved</td><td class="i-res">&#10003; check, green</td><td>Resolved</td><td>no</td><td>Unresolve</td><td>not counted</td><td>no</td><td>no</td></tr>
 </table>
 </div></body></html>

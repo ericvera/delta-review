@@ -30,6 +30,7 @@ Not a bug fix. Two features. Nothing reproduced.
 - Pending is a fourth derived status ("pending") persisted like the others; it clears when the agent posts a non-pending reply, the reviewer resolves, or the reviewer replies (→ open).
 - Plugin version bumps for the contract text change.
 - Reviewer edit still swaps in raw text; markdown loses the hard-line-break height trick and that is accepted.
+- Mock: unread pending = bright purple clock with a dot, label "Pending • Unread", bold row; read = dimmed clock, plain "Pending"; Mark as Read uses the `eye` codicon and disappears once read (no Mark as Unread); tooltip says "(unread)".
 - Read state is keyed per note to its newest agent turn, so a later pending reply is unread again.
 - Mock: Pending icon is the `clock` codicon in purple (charts.purple), purple thread accent; context values `pendingNote` / `noteRow-pending`; tooltip reads "Status: pending"; reply button stays "Reply & Reopen" on pending notes.
 

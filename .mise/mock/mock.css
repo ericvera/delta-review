@@ -52,3 +52,11 @@ a{color:var(--blue)}
 table{border-collapse:collapse;width:100%;font-size:12px}
 td,th{border:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
 th{background:var(--side)}
+.i-pend-unread{color:#d7a6ff;position:relative;font-weight:700;text-shadow:0 0 6px #b180d7aa}
+.i-pend-unread::after{content:"";position:absolute;top:-1px;right:-3px;width:6px;height:6px;border-radius:50%;background:#d7a6ff}
+.i-pend-read{color:var(--dim);opacity:.6}
+.row.unread .lbltxt{font-weight:700;color:#fff}
+.row.read .lbltxt{color:var(--dim)}
+.thread.pend.read{border-top-color:#6b5a7a}
+.mar{border:1px solid var(--border);border-radius:2px;padding:0 6px;font-size:11px;color:var(--fg);background:#2d2d30}
+.row .mar{font-size:10px}
