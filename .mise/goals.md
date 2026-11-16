@@ -23,26 +23,22 @@ Not a bug fix. Two features. Nothing reproduced.
 1. Markdown renders in both reviewer notes and agent replies (comment threads and the REVIEW NOTES tooltip). Other `escapeMarkdownText` callers stay escaped.
 2. The agent marks a reply pending with an optional `pending: true` on its responses entry. No schema `version` bump; old extensions ignore the key and show Addressed. The contract's bump rule (SKILL.md:139-141) is amended to exempt additive optional keys that older readers safely ignore.
 3. A pending note keeps the reviewer's reply box, counts in the badge, is resolvable, and stays in the agent's work set (actionable) on the next run. It is visually distinct from Open and Addressed (own label, icon, thread state).
+4. Pending replies have read/unread. A new pending reply is unread; the reviewer marks it read with an explicit **Mark as Read** action on the thread and on the REVIEW NOTES row (opening/expanding does not mark read). Read state lives only in VS Code workspace state — the notes/responses files and agents never see it. Unread pending shows a highlighted icon; read pending shows a dimmed clock. The badge counts every pending note, read or unread (badge = "not done yet").
 
 ## Assumptions
 
 - Pending is a fourth derived status ("pending") persisted like the others; it clears when the agent posts a non-pending reply, the reviewer resolves, or the reviewer replies (→ open).
 - Plugin version bumps for the contract text change.
 - Reviewer edit still swaps in raw text; markdown loses the hard-line-break height trick and that is accepted.
+- Read state is keyed per note to its newest agent turn, so a later pending reply is unread again.
 - Mock: Pending icon is the `clock` codicon in purple (charts.purple), purple thread accent; context values `pendingNote` / `noteRow-pending`; tooltip reads "Status: pending"; reply button stays "Reply & Reopen" on pending notes.
 
 ## Owner feedback (proposal round 1)
 
 > I want to be able to see when there are "unread" notes. Today it is easy. Anything with a Claude message is something I need to read. But sometimes Claude responds with, I queued the work. This is interesting, but I want to know that this is not resolved, but there is nothing for me to do yet. In the case of pending, right now there is no way to say.. i looked at this
 
-## Open questions
-
-1. How a pending reply is marked read.
-2. Where read state lives.
-3. Badge/visual treatment of read vs unread pending.
-
 ## Proposal
 
 Issue: note bodies are always escaped, and the agent can't answer a note while keeping it visibly queued.
-Approach: render reviewer and agent turns as markdown; add a `pending` status (purple clock) set by an optional `pending: true` on a response, kept actionable for the agent, counted in the badge, resolvable; amend the contract and bump the plugin version.
+Approach: render reviewer and agent turns as markdown; add a `pending` status (purple clock) set by an optional `pending: true` on a response, kept actionable for the agent, counted in the badge, resolvable, with a workspace-local Mark as Read (unread highlighted, read dimmed); amend the contract and bump the plugin version.
 Skips: nothing — spec and critic run because it adds a status and changes the agent-facing contract.
