@@ -17,7 +17,8 @@
 - Reply button stays "Reply & Reopen" on pending notes.
 - Blocked queued work: agent appends nothing and skips the note for the rest of the run (implementer addition).
 - Raw markdown loses the hard-line-break height trick.
-- Not verified in a running VS Code; prettier check on docs not run (permission denied on node_modules/.bin/prettier).
+- Not verified in a running VS Code.
+- Fix bc46069: read-mark branch keys strip a leading `heads/`; docs prettier-clean; test conventions/exceptions, mock guidance and three checklist rules moved into CLAUDE.md; .claude/mise-checklist.md deleted.
 - Reviewer flagged the trimmed .claude/mise-config.md as a minor; declined — owner chose removal.
 
 ## Amendments
