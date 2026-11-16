@@ -97,6 +97,9 @@ export interface NoteCommentController extends vscode.Disposable {
   // just opened — the clamp needs a line count, which only exists once the
   // document is open. Range only: no dispose, no create, no git, no store.
   reclampThreadsFor: (document: vscode.TextDocument) => void;
+  // Re-styles every cached thread from its own cached display thread (read
+  // state changed). Style only: no dispose, no create, no ranges.
+  restyleThreads: () => void;
   // Handler for the deltaReview.addNote comment-input command
   addNote: (reply: vscode.CommentReply) => Promise<void>;
   // Comment-level actions on reviewer turns
@@ -114,6 +117,7 @@ export interface NoteCommentController extends vscode.Disposable {
     target: vscode.CommentThread | vscode.CommentReply,
   ) => Promise<void>;
   replyReopen: (reply: vscode.CommentReply) => Promise<void>;
+  markNoteRead: (target: vscode.CommentThread) => void;
 }
 
 const errorText = (error: unknown): string =>
@@ -138,6 +142,10 @@ export const createNoteCommentController = (
   getGit: () => Git | undefined,
   getModel: () => ReviewModel | undefined,
   onDidChangeNotes: () => void,
+  pendingRead: {
+    isUnread: (thread: NoteThread) => boolean;
+    markRead: (thread: NoteThread) => void;
+  },
 ): NoteCommentController => {
   const controller = vscode.comments.createCommentController(
     "deltaReview.notes",
@@ -298,12 +306,17 @@ export const createNoteCommentController = (
     if (!sameCommentDisplays(previousDisplays, comments.map(displayFor))) {
       commentThread.comments = comments;
     }
+    const unread = pendingRead.isUnread(thread);
     const label =
-      statusLabels[thread.status] + (thread.note.outdated ? " • Outdated" : "");
+      statusLabels[thread.status] +
+      (unread ? " • Unread" : "") +
+      (thread.note.outdated ? " • Outdated" : "");
     if (commentThread.label !== label) {
       commentThread.label = label;
     }
-    const contextValue = statusContextValues[thread.status];
+    const contextValue = unread
+      ? "pendingNoteUnread"
+      : statusContextValues[thread.status];
     if (commentThread.contextValue !== contextValue) {
       commentThread.contextValue = contextValue;
     }
@@ -640,6 +653,20 @@ export const createNoteCommentController = (
     }
   };
 
+  const restyleThreads = (): void => {
+    for (const entry of threadCache.values()) {
+      styleThread(entry.thread, entry.noteThread);
+    }
+  };
+
+  const markNoteRead = (target: vscode.CommentThread): void => {
+    const noteId = threadNoteIds.get(target);
+    const entry = noteId === undefined ? undefined : threadCache.get(noteId);
+    if (entry !== undefined) {
+      pendingRead.markRead(entry.noteThread);
+    }
+  };
+
   const addNote = async (reply: vscode.CommentReply): Promise<void> => {
     const context = activeContext();
     const pending = reply.thread;
@@ -944,6 +971,7 @@ export const createNoteCommentController = (
     provenanceThreads,
     expandThread,
     reclampThreadsFor,
+    restyleThreads,
     addNote,
     editNoteTurn,
     saveNoteTurn,
@@ -953,6 +981,7 @@ export const createNoteCommentController = (
     resolveNote: (target) => setNoteResolved(target, true),
     unresolveNote: (target) => setNoteResolved(target, false),
     replyReopen,
+    markNoteRead,
     dispose: (): void => {
       // Disposing the controller disposes its threads
       threadCache.clear();

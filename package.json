@@ -224,6 +224,18 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.markNoteRead",
+        "title": "Mark as Read",
+        "icon": "$(eye)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.markNoteRowRead",
+        "title": "Mark as Read",
+        "icon": "$(eye)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.deleteNoteRow",
         "title": "Delete Note",
         "icon": "$(trash)",
@@ -382,6 +394,16 @@
           "group": "inline"
         },
         {
+          "command": "deltaReview.markNoteRowRead",
+          "when": "view == deltaReviewNotes && viewItem == noteRow-pendingUnread",
+          "group": "inline@0"
+        },
+        {
+          "command": "deltaReview.markNoteRowRead",
+          "when": "view == deltaReviewNotes && viewItem == noteRow-pendingUnread",
+          "group": "navigation"
+        },
+        {
           "command": "deltaReview.resolveNoteRow",
           "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed|pending|pendingUnread)$/",
           "group": "inline@1"
@@ -437,6 +459,11 @@
         }
       ],
       "comments/commentThread/title": [
+        {
+          "command": "deltaReview.markNoteRead",
+          "when": "commentController == deltaReview.notes && commentThread == pendingNoteUnread",
+          "group": "inline@0"
+        },
         {
           "command": "deltaReview.resolveNote",
           "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|pendingNote|pendingNoteUnread)$/",
@@ -569,6 +596,14 @@
         },
         {
           "command": "deltaReview.deleteNoteRow",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markNoteRead",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.markNoteRowRead",
           "when": "false"
         }
       ]

@@ -40,8 +40,9 @@ const noteLabel = (thread: NoteThread): string => {
 
 // Status icons: filled dot = open (yours to follow up), outline = addressed
 // (awaiting you — no half-full codicon exists), clock = pending (answered,
-// work still queued), check = resolved
-const noteIcon = (status: ThreadStatus): vscode.ThemeIcon => {
+// work still queued; purple while unread, dimmed once read — a ThemeIcon
+// cannot carry an unread-dot overlay), check = resolved
+const noteIcon = (status: ThreadStatus, unread: boolean): vscode.ThemeIcon => {
   switch (status) {
     case "open":
       return new vscode.ThemeIcon(
@@ -56,7 +57,7 @@ const noteIcon = (status: ThreadStatus): vscode.ThemeIcon => {
     case "pending":
       return new vscode.ThemeIcon(
         "clock",
-        new vscode.ThemeColor("charts.purple"),
+        new vscode.ThemeColor(unread ? "charts.purple" : "disabledForeground"),
       );
     case "resolved":
       return new vscode.ThemeIcon(
@@ -73,7 +74,10 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
   >();
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
-  constructor(private readonly isCollapsed: (key: string) => boolean) {}
+  constructor(
+    private readonly isCollapsed: (key: string) => boolean,
+    private readonly isUnread: (thread: NoteThread) => boolean,
+  ) {}
 
   setThreads(threads: NoteThread[]): void {
     this.threads = threads;
@@ -137,12 +141,14 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
     }
 
     const { thread } = element;
+    const unread = this.isUnread(thread);
+    const label = noteLabel(thread);
     const item = new vscode.TreeItem(
-      noteLabel(thread),
+      unread ? { label, highlights: [[0, label.length]] } : label,
       vscode.TreeItemCollapsibleState.None,
     );
     item.id = `note:${thread.note.id}`;
-    item.iconPath = noteIcon(thread.status);
+    item.iconPath = noteIcon(thread.status, unread);
     const descriptionParts = [`:${thread.note.currentStartLine}`];
     if (thread.note.side === "base") {
       descriptionParts.push("base");
@@ -153,14 +159,18 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
     item.description = descriptionParts.join(" ");
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(thread.turns[0]?.text ?? "");
-    tooltip.appendMarkdown(`\n\nStatus: ${thread.status}`);
+    tooltip.appendMarkdown(
+      `\n\nStatus: ${thread.status}${unread ? " (unread)" : ""}`,
+    );
     if (thread.note.outdated) {
       tooltip.appendMarkdown(
         "\n\n⚠ Outdated — the noted lines changed since the note was written",
       );
     }
     item.tooltip = tooltip;
-    item.contextValue = `noteRow-${thread.status}`;
+    item.contextValue = unread
+      ? "noteRow-pendingUnread"
+      : `noteRow-${thread.status}`;
     item.command = {
       command: "deltaReview.openNoteInDiff",
       title: "Open Note in Diff",
