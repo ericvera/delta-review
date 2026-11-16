@@ -16,19 +16,46 @@ const changeKindFor = (file: ReviewFile): ChangeKind =>
         ? "modified"
         : "added";
 
+export const WAIT_TOOLTIP = "Waiting on the agent: still expected to change.";
+
+const WAIT_QUERY = "wait";
+const WAIT_SUFFIX = `,${WAIT_QUERY}`;
+const WAIT_COLOR = new vscode.ThemeColor(
+  "gitDecoration.ignoredResourceForeground",
+);
+
 // The change kind travels in the URI query so the decoration provider can
 // answer from the URI alone
-export const createReviewItemUri = (file: ReviewFile): vscode.Uri =>
+export const createReviewItemUri = (
+  file: ReviewFile,
+  waiting = false,
+): vscode.Uri =>
   vscode.Uri.from({
     scheme: REVIEW_ITEM_SCHEME,
     path: `/${file.path}`,
-    query: changeKindFor(file),
+    query: waiting
+      ? `${changeKindFor(file)}${WAIT_SUFFIX}`
+      : changeKindFor(file),
   });
 
 // Folder rows carry no decoration (no query -> provider returns undefined),
-// matching the badge-less folders of the CHANGES tree
-export const createReviewFolderUri = (path: string): vscode.Uri =>
-  vscode.Uri.from({ scheme: REVIEW_ITEM_SCHEME, path: `/${path}` });
+// matching the badge-less folders of the CHANGES tree, unless muted for wait
+export const createReviewFolderUri = (
+  path: string,
+  waiting = false,
+): vscode.Uri =>
+  vscode.Uri.from({
+    scheme: REVIEW_ITEM_SCHEME,
+    path: `/${path}`,
+    query: waiting ? WAIT_QUERY : "",
+  });
+
+export const createWaitingClusterHeaderUri = (clusterKey: string): vscode.Uri =>
+  vscode.Uri.from({
+    scheme: REVIEW_ITEM_SCHEME,
+    path: `/cluster-header/${clusterKey}`,
+    query: WAIT_QUERY,
+  });
 
 // The Unclustered header sets both a label and this resourceUri: the label
 // wins for display while the decoration's ThemeColor still tints it, giving
@@ -75,6 +102,19 @@ const DECORATIONS: Record<ChangeKind, vscode.FileDecoration> = {
   ),
 };
 
+const WAITING_DECORATIONS = Object.fromEntries(
+  Object.entries(DECORATIONS).map(([kind, decoration]) => [
+    kind,
+    new vscode.FileDecoration(decoration.badge, WAIT_TOOLTIP, WAIT_COLOR),
+  ]),
+) as Record<ChangeKind, vscode.FileDecoration>;
+
+const WAITING_FOLDER_DECORATION = new vscode.FileDecoration(
+  undefined,
+  WAIT_TOOLTIP,
+  WAIT_COLOR,
+);
+
 export const createReviewDecorationProvider =
   (): vscode.FileDecorationProvider => ({
     provideFileDecoration: (uri) => {
@@ -83,6 +123,14 @@ export const createReviewDecorationProvider =
       }
       if (uri.query === UNCLUSTERED_HEADER_QUERY) {
         return UNCLUSTERED_HEADER_DECORATION;
+      }
+      if (uri.query === WAIT_QUERY) {
+        return WAITING_FOLDER_DECORATION;
+      }
+      if (uri.query.endsWith(WAIT_SUFFIX)) {
+        return WAITING_DECORATIONS[
+          uri.query.slice(0, -WAIT_SUFFIX.length) as ChangeKind
+        ];
       }
       return DECORATIONS[uri.query as ChangeKind];
     },

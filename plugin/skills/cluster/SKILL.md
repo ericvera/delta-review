@@ -49,7 +49,8 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
       "label": "Rename fetchUser → getUser",
       "summary": "Mechanical rename across call sites",
       "files": ["src/api.ts", "src/users.ts"],
-      "patterns": ["**/*.test.ts"]
+      "patterns": ["**/*.test.ts"],
+      "wait": true
     }
   ],
   "moves": [
@@ -80,6 +81,7 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
 - `version` — write exactly the integer `3` (the extension also accepts `1` and `2`; anything else rejects the file).
 - `clusters` — an array; each entry an object with string `label` and string `summary`.
 - `files`, `patterns` — when present, arrays of strings. Each cluster needs at least one of the two non-empty.
+- `wait` — optional boolean on a cluster. `true` means you still expect this cluster to change; the reviewer sees it muted. Omit it or write `false` once the cluster is settled. Any non-boolean value rejects the file.
 - `moves` — optional; when present, an array of objects.
 - `path`, `from` — required, non-empty strings.
 - `origin` — required, exactly `"repo"` (elsewhere in this repo) or `"external"` (another project).
@@ -112,7 +114,7 @@ Declare only on evidence: a move you performed in the invoking task, or one the 
 - `baseBlob` — on an `external` entry, record the donor file's pre-move content with `git hash-object -w <donor file>` and store the printed id; a `repo` entry takes it from the merge base per **Declaring an extraction**. Unreadable donor (the common case on a cold run) → omit rather than guess: the diff then shows the whole file as an addition, and the row cannot say verbatim or adapted.
 - `note` — prose about how the file was adapted, nothing else. **verbatim/adapted/unchanged is not a contract field**; the extension computes it from content hashes.
 
-No commit SHAs anywhere, and no blob id other than `moves[].baseBlob`. Everything in `clusters` must be derivable from the current diff on every run; `moves` and `notes` are the preserved exceptions, because neither provenance nor a reviewer's remark is recoverable from the diff.
+No commit SHAs anywhere, and no blob id other than `moves[].baseBlob`. Everything in `clusters` must be derivable from the current diff on every run; `moves`, `notes`, and a cluster's `wait` are the preserved exceptions, because neither provenance, a reviewer's remark, nor the agent's intent is recoverable from the diff.
 
 ### Declaring an extraction
 
@@ -147,6 +149,11 @@ Relocation re-finds content already substantiated; it is not inferred provenance
 - At the end of a task, the entry of a file that task touched may be rewritten.
 - Drop an entry whose path has left the review set.
 
+### Wait
+
+- Set `wait: true` on a cluster you still expect to change; clear it once the cluster is settled or plans change.
+- On a cold re-run, keep an existing `wait` only on a cluster whose label survives. A cold run sets no new `wait`.
+
 ### Conventions the extension does not reject — it fails silently
 
 - `files` entries and a move's `path` — repo-relative and `/`-separated, as `git diff --name-only` prints them. An absolute or `\`-separated path parses fine and then never matches: the file lands in "Unclustered", or you lose the declaration.
@@ -163,7 +170,7 @@ Explicit `files` beat `patterns`; the first cluster in contract order that claim
 
 ### Schema changes
 
-Any further change requires bumping `version` and updating the extension's parser (`src/clusters.ts` in the delta-review repo) in the same commit.
+Any further change requires bumping `version` and updating the extension's parser (`src/clusters.ts` in the delta-review repo) in the same commit — except a new optional key an older extension can safely ignore (like `wait`), which keeps the version.
 
 ## Default workflow: clustering the branch
 
@@ -191,7 +198,7 @@ If it exists, treat it as the baseline:
 
 - **Keep cluster labels and identity stable** — reviewers have collapse state and mental context attached to them. Do not rename or reorder gratuitously.
 - Place new or previously-unclustered files into the existing cluster they belong to, or a new one if they are a new logical change.
-- Drop `files` entries no longer in the review set. Carry `moves` and `notes` entries forward per the preservation rules in **Declaring a move** and **Notes**.
+- Drop `files` entries no longer in the review set. Carry `moves` and `notes` entries forward per the preservation rules in **Declaring a move** and **Notes**, and `wait` per **Wait**.
 - Run the re-run relocation rule in **Declaring an extraction** before declaring anything new.
 - Refresh a `label`/`summary` only where the meaning of the change actually shifted.
 
@@ -211,8 +218,9 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 
 - Every changed file should be claimed by a cluster unless it genuinely belongs to no logical change.
 - Never invent a junk-drawer cluster ("Misc", "Other"). Unclaimed files surface as "Unclustered" — that is the scope-creep detector, and hiding them defeats it.
+- Set or clear `wait` per **Wait**.
 - `label` — target **≤ 40 characters**, **50 is a hard cap**. It gets about 34 characters of a default sidebar and truncates from the right, so put the distinguishing words first and move any further detail into `summary`, which renders as a tooltip and is effectively unbounded.
 
 ### 7. Write and report
 
-Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, and any files you left unclustered (and why).
+Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the clusters flagged `wait`, and any files you left unclustered (and why).

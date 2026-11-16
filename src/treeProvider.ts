@@ -8,11 +8,15 @@ import {
   clusterCountDescription,
   clusterFilesForKey,
   filterByStatus,
+  isWaitingClusterKey,
+  isWaitingFile,
 } from "./clusters";
 import {
+  WAIT_TOOLTIP,
   createReviewFolderUri,
   createReviewItemUri,
   createUnclusteredHeaderUri,
+  createWaitingClusterHeaderUri,
 } from "./decorations";
 import { escapeMarkdownText } from "./markdown";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
@@ -463,8 +467,13 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (element.kind === "folder") {
       // Private scheme keeps git's propagated "contains changes" dot off the
       // rows — folders carry no badge, like the CHANGES tree
+      const clusterModel = this.getClusterModel();
+      const waiting =
+        element.clusterKey !== undefined &&
+        clusterModel !== undefined &&
+        isWaitingClusterKey(clusterModel, element.clusterKey);
       const item = new vscode.TreeItem(
-        createReviewFolderUri(element.path),
+        createReviewFolderUri(element.path, waiting),
         this.isCollapsed(collapseKeyFor(element), false)
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.Expanded,
@@ -486,14 +495,22 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
         ),
         reviewedScope,
       );
-      item.tooltip = element.path;
+      item.tooltip = waiting
+        ? `${element.path}\n\n${WAIT_TOOLTIP}`
+        : element.path;
       return item;
     }
 
     const { file } = element;
     // Custom scheme: file icons still resolve from the name, but only our
     // decoration provider (M/A/D letters + colors) applies, not git's
-    const item = new vscode.TreeItem(createReviewItemUri(file));
+    const clusterModel = this.getClusterModel();
+    const waiting =
+      this.isGrouped() &&
+      file.status === FileReviewStatus.NeedsReview &&
+      clusterModel !== undefined &&
+      isWaitingFile(clusterModel, file);
+    const item = new vscode.TreeItem(createReviewItemUri(file, waiting));
     item.id = `file:${file.path}`;
     item.contextValue = fileContextValue(file);
 
@@ -560,6 +577,9 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     ) {
       notes.push("Changed since last reviewed");
     }
+    if (waiting) {
+      notes.push(WAIT_TOOLTIP);
+    }
     if (notes.length > 0) {
       tooltip.appendMarkdown(notes.join("\n\n"));
     }
@@ -608,7 +628,19 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
           : clusterBucketForKey(clusterModel, element.clusterKey);
       item.label = bucket?.label ?? "";
       item.iconPath = new vscode.ThemeIcon("layers");
-      item.tooltip = bucket?.summary;
+      if (
+        bucket !== undefined &&
+        clusterModel !== undefined &&
+        isWaitingClusterKey(clusterModel, element.clusterKey)
+      ) {
+        item.resourceUri = createWaitingClusterHeaderUri(element.clusterKey);
+        item.tooltip =
+          bucket.summary === ""
+            ? WAIT_TOOLTIP
+            : `${bucket.summary}\n\n${WAIT_TOOLTIP}`;
+      } else {
+        item.tooltip = bucket?.summary;
+      }
     }
     item.description = clusterCountDescription(
       files,

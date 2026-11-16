@@ -13,6 +13,8 @@ import {
   clusterCountDescription,
   clusterFilesForKey,
   filterByStatus,
+  isWaitingClusterKey,
+  isWaitingFile,
   loadClustersContract,
   parseClustersContract,
   resolveClusterModel,
@@ -1082,6 +1084,91 @@ describe("clusterFilesForKey / clusterBucketForKey", () => {
     expect(clusterBucketForKey(model, "unclustered")).toBeUndefined();
     expect(clusterBucketForKey(model, "auto")).toBeUndefined();
     expect(clusterBucketForKey(model, "c9")).toBeUndefined();
+  });
+});
+
+describe("wait flag", () => {
+  const parseClusters = (clusters: unknown[], version = 3) => {
+    const result = parseClustersContract(JSON.stringify({ version, clusters }));
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    return result.contract.clusters;
+  };
+
+  it("keeps wait: true on a cluster", () => {
+    expect(
+      parseClusters([{ label: "A", summary: "s", files: ["a"], wait: true }]),
+    ).toEqual([
+      { label: "A", summary: "s", files: ["a"], patterns: [], wait: true },
+    ]);
+  });
+
+  it("omits wait when false or absent", () => {
+    const clusters = parseClusters([
+      { label: "A", summary: "s", files: ["a"], wait: false },
+      { label: "B", summary: "s", files: ["b"] },
+    ]);
+    expect(clusters.map((c) => "wait" in c)).toEqual([false, false]);
+  });
+
+  it("rejects a non-boolean wait", () => {
+    expect(
+      parseClustersContract(
+        JSON.stringify({
+          version: 3,
+          clusters: [{ label: "A", summary: "s", files: ["a"], wait: "yes" }],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'cluster 1 ("A"): "wait" must be a boolean',
+    });
+  });
+
+  it("accepts wait in a version 1 contract", () => {
+    expect(
+      parseClusters(
+        [{ label: "A", summary: "s", files: ["a"], wait: true }],
+        1,
+      )[0].wait,
+    ).toBe(true);
+  });
+
+  it("resolveClusterModel carries wait onto the bucket", () => {
+    const model = resolveClusterModel(
+      contract([
+        { label: "A", summary: "s", files: ["a"], patterns: [], wait: true },
+        { label: "B", summary: "s", files: ["b"], patterns: [] },
+      ]),
+      [file("a"), file("b")],
+    );
+    expect(model.clusters[0].wait).toBe(true);
+    expect("wait" in model.clusters[1]).toBe(false);
+  });
+
+  const model: ClusterModel = {
+    clusters: [
+      { label: "Waiting", summary: "w", files: [file("w.ts")], wait: true },
+      { label: "Settled", summary: "s", files: [file("s.ts")] },
+    ],
+    unclustered: [file("u.ts")],
+    auto: [file("yarn.lock", "auto")],
+  };
+
+  it("isWaitingClusterKey is true only for a flagged real cluster", () => {
+    expect(isWaitingClusterKey(model, "c0")).toBe(true);
+    expect(isWaitingClusterKey(model, "c1")).toBe(false);
+    expect(isWaitingClusterKey(model, "unclustered")).toBe(false);
+    expect(isWaitingClusterKey(model, "auto")).toBe(false);
+    expect(isWaitingClusterKey(model, "c9")).toBe(false);
+  });
+
+  it("isWaitingFile is true only for files in a flagged bucket", () => {
+    expect(isWaitingFile(model, file("w.ts"))).toBe(true);
+    expect(isWaitingFile(model, file("s.ts"))).toBe(false);
+    expect(isWaitingFile(model, file("u.ts"))).toBe(false);
+    expect(isWaitingFile(model, file("yarn.lock", "auto"))).toBe(false);
   });
 });
 
