@@ -1,0 +1,1 @@
+when looking at delta review clusters, it takes me a few seconds to differentiate between clusters that still have files that need review and those that are done. Then x/z at the end does it, but it requires a full scan rather than a glance. I would like to explore ideas to make this better.
