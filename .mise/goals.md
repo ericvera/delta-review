@@ -20,6 +20,11 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 - Done + wait-flagged cluster shows both: done icon carries review state, muted wait label carries the flag.
 - Out of scope: reordering or auto-collapsing done clusters; contract order and current expansion behavior stay.
 
+## Open questions
+
+1. Per-file/per-directory "wait" flags (owner raised): this run or a follow-up.
+2. Variant pick (A/B/C).
+
 ## Assumptions
 
 - Mock: open circle uses normal text color, not a status color.
