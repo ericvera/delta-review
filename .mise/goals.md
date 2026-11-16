@@ -29,14 +29,18 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 
 ## Assumptions
 
-- Done and waiting share one grey; that is intended under the dim rule.
+- Done and waiting share one grey; intended under the dim rule.
 - A cluster or directory whose only unreviewed files are waiting counts as nothing-to-review and dims.
 - A cluster with any unreviewed, non-waiting file stays undimmed; its waiting files dim inside it.
 - The x/z count keeps its current meaning (reviewed / total).
+- Reviewed files are not listed inside clusters today; "reviewed files dim" applies to the Reviewed bucket, whose header dims too.
+- Dimming covers cluster/folder icons as well as labels.
+- No hourglass codicon may exist; `watch` is the candidate fallback.
+- 2a: a directory gets the hourglass if anything inside is waiting; rows under a cluster-level wait only dim.
 - Unclustered and Auto rows unchanged.
 
 ## Proposal
 
-- Issue: a cluster's review state shows only in the trailing `x/z`, so telling done from pending takes a scan.
-- Approach: implement the variant the owner picks from the mock (recommend C: green check / open circle icon plus dimmed done label), logic in clusters.ts with Vitest tests, docs updated.
-- Skips spec and critic: one-module display change, no schema or contract change.
+- Issue: a cluster's review state shows only in the trailing `x/z`, so telling actionable from done/waiting takes a scan.
+- Approach: dim every row with nothing to review now (reviewed, waiting, empty) at cluster/directory/file level; hourglass marks clusters containing waiting items (2a/2b decides files/dirs); agents can flag files and directories as wait via the clusters file.
+- Skips nothing: the clusters contract changes, so spec and critic run.
