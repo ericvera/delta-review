@@ -1,0 +1,1 @@
+is it possible to render comments with markdown? Also, is there a way for the agent to respond to my notes and I can see it, but it is still marked as... some work pending. Like if I ask a question, the agent can respond an answer, but the state somehow reflects that the work went into a queue so there is more to do.
