@@ -21,11 +21,8 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 - Reviewed file rows dim too (same rule at every level).
 - Only agents set file/dir wait, via the clusters file (as cluster wait today). Reviewer-side toggle is out of scope.
 - Hourglass (or closest codicon) replaces the cluster icon when anything inside is flagged wait, whether the cluster is bright or dimmed; no "waiting" text note. Dimmed without hourglass = fully reviewed.
+- Hourglass on clusters only (2b); waiting files/directories only dim. Under a cluster, a dimmed file can only mean waiting, since reviewed files move to the Reviewed group.
 - Out of scope: reordering or auto-collapsing done clusters; contract order and current expansion behavior stay.
-
-## Open questions
-
-1. Hourglass on waiting file/directory rows too (2a) vs clusters only (2b): owner wants mocks of both.
 
 ## Assumptions
 
@@ -36,11 +33,10 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 - Reviewed files are not listed inside clusters today; "reviewed files dim" applies to the Reviewed bucket, whose header dims too.
 - Dimming covers cluster/folder icons as well as labels.
 - No hourglass codicon may exist; `watch` is the candidate fallback.
-- 2a: a directory gets the hourglass if anything inside is waiting; rows under a cluster-level wait only dim.
 - Unclustered and Auto rows unchanged.
 
 ## Proposal
 
 - Issue: a cluster's review state shows only in the trailing `x/z`, so telling actionable from done/waiting takes a scan.
-- Approach: dim every row with nothing to review now (reviewed, waiting, empty) at cluster/directory/file level; hourglass marks clusters containing waiting items (2a/2b decides files/dirs); agents can flag files and directories as wait via the clusters file.
+- Approach: dim every row with nothing to review now (reviewed, waiting, empty) at cluster/directory/file level; hourglass marks clusters containing waiting items (files/dirs only dim); agents can flag files and directories as wait via the clusters file.
 - Skips nothing: the clusters contract changes, so spec and critic run.
