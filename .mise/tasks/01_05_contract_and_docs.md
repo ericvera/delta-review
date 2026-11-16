@@ -66,7 +66,10 @@ Design decisions:
      - Append to the Entry conventions paragraph (`:111`): "`response` renders as markdown; wrap paths and identifiers in backticks."
      - Do not add `pending` to the JSON example unless a second example entry is clearer. One line in the rules is enough.
    - **Work set**: actionable iff `status` is not `"resolved"` and either the newest turn is a reviewer turn, or the newest turn is your response entry with `pending: true`. Keep the "never trust `status` alone" sentence. Note that the notes file shows a pending note as `"addressed"`.
-   - **Channel discipline**: one bullet. "A note whose newest turn is your own `pending: true` reply is skipped for the rest of the session (all watch rounds included) until a newer reviewer turn arrives — that turn makes it actionable again at once; a later invocation picks still-pending notes up via Work set." Leave the question-skip bullet (`:134`, "for the rest of the pass") unchanged.
+   - **Channel discipline**: two bullets.
+     - "After you append a `pending: true` reply, skip that note for the rest of the session (all watch rounds included) until a newer reviewer turn arrives — that turn makes it actionable again at once; a later invocation picks still-pending notes up via Work set."
+     - "When you pick up a pending note and its queued work still can't be done, append nothing — leave the existing pending reply standing. Reply only when there is new information for the reviewer or the work is done." (Another `pending: true` reply would mark the note unread again and fill the thread.)
+     Leave the question-skip bullet (`:134`, "for the rest of the pass") unchanged.
    - **Schema changes**: "an additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file) needs no `version` bump" — mirroring the qualifier in `plugin/skills/cluster/SKILL.md:173`. Every other change, including any notes-file change (additive or not), bumps `version` and updates `src/notes.ts` in the same commit: the extension rebuilds notes from known keys and re-saves them on each refresh, so an older extension would strip a newer notes key.
    - Intro sentence: the extension flips the note to **Addressed**, or **Pending** when the reply is marked pending.
 2. SKILL.md Default workflow:
@@ -78,7 +81,7 @@ Design decisions:
    - `:155`: status derivation adds "agent last with `pending: true` → **pending**", plus "persisted as `addressed` (`persistedStatus`) so older readers still parse the notes file".
    - Add one bullet in the same section covering read/unread. It is workspace state only (`deltaReview.pendingReadMarks`, per repo root then branch — per repo because the extension follows the SCM-selected repo and all repos share one `workspaceState` — keyed to the newest agent turn's `at`, pruned on successful notes loads (including zero-note loads; never on an invalid or missing notes file) only inside the loaded repo's map to present notes and that repo's existing local branches, logic in `src/pendingRead.ts`). Mark as Read re-styles in place (`restyleThreads`, `setThreads`) and never calls `renderThreads`. It never touches the contract files.
    - `:171`: update the gating list to include `pendingNote`/`pendingNoteUnread`.
-   - Manual test script: add a new step `36a` directly after step 36 (do not renumber; precedent `31a`–`31f` at `DEVELOPMENT.md:265-270`, and task 01_01 references step 46). Append a response with `"pending": true`, and check:
+   - Manual test script: add a new step `36a` directly after step 36 (do not renumber; precedent `31a`–`31f` at `DEVELOPMENT.md:260-265`, and task 01_01 references step 46). Append a response with `"pending": true`, and check:
      - The thread label shows Pending • Unread; the row keeps its note text, bold in the list highlight color (usually blue, not white), with a purple clock and the tooltip "Status: pending (unread)"; plus a reply box, Resolve available, and the badge counting it.
      - Expanding or opening it does not mark it read.
      - Mark as Read on the thread or the row dims the clock and the action disappears.
@@ -106,4 +109,4 @@ Design decisions:
   - `grep -n '"version"' plugin/.claude-plugin/plugin.json` shows `0.9.0`.
   - `grep -n "pending" plugin/skills/review-notes/SKILL.md` shows the Responses file, Work set, Channel discipline and Schema changes mentions, and no restatement in the workflow beyond a reference.
   - Read SKILL.md top to bottom to confirm each rule is stated once.
-  - Walk two watch-mode traces against the edited text: (a) agent posts `pending: true`, files change with no new reviewer turn → the note stays skipped; reviewer then replies → the next wake works the note. (b) agent asks a question, reviewer replies → the next round answers it (DEVELOPMENT.md step 36).
+  - Walk two watch-mode traces against the edited text: (a) agent posts `pending: true`, files change with no new reviewer turn → the note stays skipped; reviewer then replies → the next wake works the note. (b) agent asks a question, reviewer replies → the next round answers it (DEVELOPMENT.md step 36). (c) a later invocation picks up a pending note whose work is still blocked → it appends nothing and the existing pending reply stands.

@@ -59,7 +59,8 @@ Other derivation rules:
 - Document `pending` in the Responses file section.
 - Responses-file Entry conventions: `response` renders as markdown; wrap paths and identifiers in backticks.
 - Change the Work set rule to: a note is actionable iff it is not resolved and its newest turn is either a reviewer turn or your response with `pending: true`.
-- Channel discipline: a note whose newest turn is your own pending reply is skipped for the rest of the session, including across watch-mode rounds, until a newer reviewer turn arrives; that turn lifts the skip at once. Still-pending notes are picked up on the next invocation. The existing question skip keeps its pass scope. Questions to the reviewer are never pending.
+- Channel discipline: after the agent appends a pending reply, that note is skipped for the rest of the session, including across watch-mode rounds, until a newer reviewer turn arrives; that turn lifts the skip at once. Still-pending notes are picked up on the next invocation. The existing question skip keeps its pass scope. Questions to the reviewer are never pending.
+- A picked-up pending note whose queued work still can't be done gets no new reply; the existing pending reply stands. The agent replies only with new information for the reviewer or when the work is done.
 - Schema changes: an additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file) needs no `version` bump. The notes file keeps the bump rule, because the extension re-saves parsed notes and would strip unknown keys.
 - Bump `plugin/.claude-plugin/plugin.json` to 0.9.0.
 
