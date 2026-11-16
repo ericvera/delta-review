@@ -20,7 +20,7 @@ Produce the clusters contract the Delta Review VS Code extension renders in its 
 Two situations:
 
 - **End of a task you performed** — use what you already know to name and group the clusters, to declare the moves and extractions you made, and to note what the reviewer should know per file.
-- **Cold, on an existing branch** — infer the clusters from diff content (`git diff <merge-base>` and the untracked files), not file names. Infer no provenance: declare only the moves and extractions the user describes, and preserve the declarations and notes already in the file.
+- **Cold, on an existing branch** — infer the clusters from diff content (`git diff <merge-base>` and the untracked files), not file names. Infer no provenance: declare only the moves and extractions the user describes, and keep the preserved exceptions listed under **Declaring a move**.
 
 ## Contract
 
@@ -81,7 +81,7 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
 - `version` — write exactly the integer `3` (the extension also accepts `1` and `2`; anything else rejects the file).
 - `clusters` — an array; each entry an object with string `label` and string `summary`.
 - `files`, `patterns` — when present, arrays of strings. Each cluster needs at least one of the two non-empty.
-- `wait` — optional boolean on a cluster. `true` means you still expect this cluster to change; the reviewer sees it muted. Omit it or write `false` once the cluster is settled. Any non-boolean value rejects the file.
+- `wait` — optional boolean on a cluster; `true` means you still expect it to change, and the reviewer sees it muted. Any non-boolean value rejects the file. See **Wait**.
 - `moves` — optional; when present, an array of objects.
 - `path`, `from` — required, non-empty strings.
 - `origin` — required, exactly `"repo"` (elsewhere in this repo) or `"external"` (another project).

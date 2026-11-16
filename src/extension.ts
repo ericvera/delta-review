@@ -880,6 +880,50 @@ export const activate = async (
       const timer = setTimeout(() => finish(undefined), timeoutMs);
     });
 
+  // Title -> listener adopting a rebuild's tab that opens after its wait
+  // timed out, so the entry and memo match what the late tab shows
+  const lateClusterChangesTabs = new Map<string, vscode.Disposable>();
+  const cancelLateClusterChangesTab = (title: string): void => {
+    lateClusterChangesTabs.get(title)?.dispose();
+    lateClusterChangesTabs.delete(title);
+  };
+  context.subscriptions.push({
+    dispose: () => {
+      for (const title of [...lateClusterChangesTabs.keys()]) {
+        cancelLateClusterChangesTab(title);
+      }
+    },
+  });
+
+  // An old tab still open beside the late one leaves the entry alone: the
+  // mark command refuses duplicates, and the next sync rebuilds once the
+  // memo is cleared and a single tab remains
+  const watchLateClusterChangesTab = (
+    title: string,
+    before: Set<vscode.Tab>,
+    next: ClusterChangesEntry,
+  ): void => {
+    cancelLateClusterChangesTab(title);
+    const listener = vscode.window.tabGroups.onDidChangeTabs((event) => {
+      const late = [...event.opened, ...event.changed].some(
+        (candidate) =>
+          isClusterChangesLabel(candidate.label, title) &&
+          !isStableTabInput(candidate.input) &&
+          !before.has(candidate),
+      );
+      if (!late) {
+        return;
+      }
+      cancelLateClusterChangesTab(title);
+      failedRebuildSignature.delete(title);
+      if (clusterChangesTabsFor(title).every((tab) => !before.has(tab))) {
+        clusterChangesTabs.set(title, next);
+      }
+      updateClusterChangesContext();
+    });
+    lateClusterChangesTabs.set(title, listener);
+  };
+
   const clusterChangesQueue = createSerialQueue();
 
   const rebuildClusterChanges = async (
@@ -899,6 +943,7 @@ export const activate = async (
       entry.label,
       files,
     );
+    cancelLateClusterChangesTab(title);
     try {
       rebuildingTitle = title;
       const waiting = waitForNewClusterChangesTab(title, before, next);
@@ -920,6 +965,7 @@ export const activate = async (
           title,
           clusterChangesSignature(files).join("\n"),
         );
+        watchLateClusterChangesTab(title, before, next);
         void vscode.window.showInformationMessage(
           refreshFailedMessage(entry.label),
         );
@@ -1535,43 +1581,48 @@ export const activate = async (
 
     vscode.commands.registerCommand(
       "deltaReview.openClusterChanges",
-      async (element?: ReviewTreeElement) => {
-        if (
-          git === undefined ||
-          model === undefined ||
-          clusterModel === undefined ||
-          element?.kind !== "cluster"
-        ) {
-          return;
-        }
-        const activeGit = git;
-        const branch = model.branch;
-        const label = clusterLabelForKey(clusterModel, element.clusterKey);
-        const files = clusterChangesFiles(
-          clusterFilesForKey(clusterModel, element.clusterKey),
-        );
-        if (files.length === 0) {
-          void vscode.window.showInformationMessage(
-            nothingToReviewMessage(label),
+      (element?: ReviewTreeElement) =>
+        clusterChangesQueue.run(async () => {
+          if (
+            git === undefined ||
+            model === undefined ||
+            clusterModel === undefined ||
+            element?.kind !== "cluster"
+          ) {
+            return;
+          }
+          const activeGit = git;
+          const branch = model.branch;
+          const label = clusterLabelForKey(clusterModel, element.clusterKey);
+          const files = clusterChangesFiles(
+            clusterFilesForKey(clusterModel, element.clusterKey),
           );
-          return;
-        }
-        const title = clusterChangesTitle(clusterModel, element.clusterKey);
-        const stale = clusterChangesTabsFor(title);
-        if (stale.length > 0 && !(await vscode.window.tabGroups.close(stale))) {
-          return;
-        }
-        const { entry, resources } = buildClusterChanges(
-          activeGit,
-          branch,
-          element.clusterKey,
-          label,
-          files,
-        );
-        clusterChangesTabs.set(title, entry);
-        await showClusterChanges(title, resources);
-        updateClusterChangesContext();
-      },
+          if (files.length === 0) {
+            void vscode.window.showInformationMessage(
+              nothingToReviewMessage(label),
+            );
+            return;
+          }
+          const title = clusterChangesTitle(clusterModel, element.clusterKey);
+          cancelLateClusterChangesTab(title);
+          const stale = clusterChangesTabsFor(title);
+          if (
+            stale.length > 0 &&
+            !(await vscode.window.tabGroups.close(stale))
+          ) {
+            return;
+          }
+          const { entry, resources } = buildClusterChanges(
+            activeGit,
+            branch,
+            element.clusterKey,
+            label,
+            files,
+          );
+          clusterChangesTabs.set(title, entry);
+          await showClusterChanges(title, resources);
+          updateClusterChangesContext();
+        }),
     ),
 
     // editor/title passes (resource, { groupId }): the resource is the
