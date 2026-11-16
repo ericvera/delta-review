@@ -12,13 +12,12 @@
 - Rebuild moves keyboard focus to the combined diff (no stable API to preserve focus) — accepted.
 - Rebuild opens as a preview and may replace an unrelated preview tab in the group — accepted.
 
-## Known minor issues (not fixed)
+## Review fixes (0ec7bbd)
 
-- Open Cluster Changes on the same cluster during an in-flight rebuild can leave two same-title tabs; Mark Cluster Reviewed refuses until one is closed.
-- A rebuild that times out and then opens late in place of a preview tab can leave a stale entry; Mark Cluster Reviewed may miss shown files but never marks hidden ones.
-- SKILL.md:84 restates the **Wait** set/clear rule (stated once rule).
-- SKILL.md:23 cold-run line lists only declarations and notes as preserved, omitting `wait`.
-- DEVELOPMENT.md:83 tooltip order omits the new wait line.
+- Open Cluster Changes now runs on the rebuild queue, so it waits for any in-flight rebuild (no duplicate same-title tabs).
+- A tab that opens after a rebuild timeout is re-adopted (or the failure memo cleared), so Mark Cluster Reviewed matches what the tab shows.
+- SKILL.md: `wait` field entry trimmed to type/meaning; cold-run line points to the preserved exceptions. DEVELOPMENT.md tooltip order includes the wait line.
+- Verify: unit tests can't cover these (VS Code API code); exercise via DEVELOPMENT.md steps 31c/31f — open Cluster Changes twice quickly while marking files.
 
 ## Amendments
 
