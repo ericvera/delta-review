@@ -53,6 +53,7 @@ import {
   isPendingUnread,
   marksFor,
   prunedRepoMarks,
+  readMarkBranch,
   RepoReadMarks,
   withRepoReadMark,
 } from "./pendingRead";
@@ -587,7 +588,7 @@ export const activate = async (
           const pruned = prunedRepoMarks(
             marks,
             gitForNotes.repoRoot,
-            computed.branch,
+            readMarkBranch(computed.branch),
             threads,
             liveBranches,
           );
@@ -664,7 +665,10 @@ export const activate = async (
           if (!(await pruneReadMarks(threads))) {
             return;
           }
-          notesKey = { repo: gitForNotes.repoRoot, branch: computed.branch };
+          notesKey = {
+            repo: gitForNotes.repoRoot,
+            branch: readMarkBranch(computed.branch),
+          };
           renderNoteThreads(threads);
         } else {
           // Missing or empty — clear any rendered threads
@@ -672,7 +676,10 @@ export const activate = async (
             if (!(await pruneReadMarks([]))) {
               return;
             }
-            notesKey = { repo: gitForNotes.repoRoot, branch: computed.branch };
+            notesKey = {
+              repo: gitForNotes.repoRoot,
+              branch: readMarkBranch(computed.branch),
+            };
           } else {
             notesKey = undefined;
           }

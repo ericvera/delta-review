@@ -8,6 +8,7 @@ import {
   prunedBranchMarks,
   prunedReadMarks,
   prunedRepoMarks,
+  readMarkBranch,
   withReadMark,
   withRepoReadMark,
 } from "./pendingRead";
@@ -217,5 +218,15 @@ describe("withRepoReadMark / marksFor", () => {
   it("returns the input when the thread has no agent turn", () => {
     const all: RepoReadMarks = { "/a": { main: { n1: "a" } } };
     expect(withRepoReadMark(all, "/a", "main", threadOf([]))).toBe(all);
+  });
+});
+
+describe("readMarkBranch", () => {
+  it("strips the heads/ prefix rev-parse adds when a tag shares the name", () => {
+    expect(readMarkBranch("heads/feat/x")).toBe("feat/x");
+  });
+
+  it("leaves an unambiguous branch name unchanged", () => {
+    expect(readMarkBranch("feat/x")).toBe("feat/x");
   });
 });

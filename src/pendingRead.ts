@@ -14,6 +14,12 @@ export type BranchReadMarks = Readonly<Record<string, PendingReadMarks>>;
 // repoRoot → branch marks
 export type RepoReadMarks = Readonly<Record<string, BranchReadMarks>>;
 
+// `git rev-parse --abbrev-ref HEAD` prints `heads/<name>` when a tag shares
+// the branch's name; live branches are bare `refs/heads/` names, so an
+// unstripped key would be pruned as dead once the reviewer switches away.
+export const readMarkBranch = (branch: string): string =>
+  branch.startsWith("heads/") ? branch.slice("heads/".length) : branch;
+
 export const newestAgentTurnAt = (thread: NoteThread): string | undefined => {
   for (let index = thread.turns.length - 1; index >= 0; index--) {
     const turn = thread.turns[index];
