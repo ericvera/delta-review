@@ -20,7 +20,7 @@ Let an agent's responses-file entry carry an optional `pending: true`. Parse it,
   - `canReplyFor("pending") === true` in `src/threadRender.ts`.
   - Thread context value `pendingNote` and row context value `noteRow-pending`.
 - Task 01_04 adds the unread variants `pendingNoteUnread` and `noteRow-pendingUnread`. This task's `when` clauses already include them, so 01_04 only adds its new commands.
-- `ResponseEntry` is at `src/notes.ts:61-66`, and `parseResponseEntry` at `:229-282`. The parser rebuilds each entry from known keys only, so unknown keys are dropped. That is why older extensions ignore `pending`.
+- `ResponseEntry` is at `src/notes.ts:61-66`, and `parseResponseEntry` at `:240-285`. The parser rebuilds each entry from known keys only, so unknown keys are dropped. That is why older extensions ignore `pending`.
 - Pattern to follow for an optional boolean flag: clusters `wait` at `src/clusters.ts:260-261` (reject non-boolean with `"wait" must be a boolean`) and `:276` (keep the key only when `true`).
 - In `mergeThreads`, agent turns are built at `src/noteThreads.ts:56-62`.
 - Menus in `package.json`:
@@ -70,7 +70,7 @@ Let an agent's responses-file entry carry an optional `pending: true`. Parse it,
     - A later non-pending response → `addressed`.
     - A later reviewer turn → `open`.
     - A resolved note with a pending response → `resolved`.
-  - `src/notesStore.test.ts` (`describe("refreshDerived")`, near `:1000`, using `writeResponseEntries([{ noteId, pending: true }])` from `:111`):
+  - `src/notesStore.test.ts` (`describe("refreshDerived")`, `:861`, using `writeResponseEntries([{ noteId, pending: true }])` from `:111`):
     - The persisted notes-file status is `"addressed"` while the merged thread status is `pending`.
     - Add a `setResolved(..., false)` case (near `:559`) showing that unresolve over a pending response persists `"addressed"`.
 - Substitute check for the menus: `grep -n "pendingNote" package.json` shows the four updated thread clauses, and `grep -n "pendingUnread" package.json` shows the two row clauses.

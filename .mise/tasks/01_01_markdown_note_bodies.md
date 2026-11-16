@@ -30,7 +30,7 @@ Render review-note turns, both the reviewer's and Claude's, as markdown in the i
 
 ## Implementation details
 
-1. In `src/commentController.ts`, change `commentsFor` to call `body.appendMarkdown(turn.text)`. Keep the outdated suffix (`\n\n*line was: …*`) exactly as it is. Drop the `escapeMarkdownText` import if it becomes unused. Update the `NoteComment.turnText` comment ("`body` holds display markdown (escaped, …") so it says the body is the rendered markdown.
+1. In `src/commentController.ts`, change `commentsFor` to call `body.appendMarkdown(turn.text)`. Keep the outdated suffix (`\n\n*line was: …*`) exactly as it is. Drop the `escapeMarkdownText` import if it becomes unused. Update the `NoteComment.turnText` comment ("`body` holds display markdown (escaped, …") so it says the body is the rendered markdown. Also update the `editNoteTurn` comment at `src/commentController.ts:714` ("not the escaped display markdown") to say "not the rendered display markdown".
 2. In `src/notesTreeProvider.ts:151`, append `thread.turns[0]?.text ?? ""` raw. Drop the import if it becomes unused.
 3. In `src/markdown.ts`, the header comment says "in review note bodies". Reword it to name the surfaces that still use it: file and move notes in the review tree, provenance, and move display. Leave the rest of the comment alone.
 4. DEVELOPMENT.md "Long notes" section (around lines 192-198):

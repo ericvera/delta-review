@@ -51,7 +51,7 @@ Introduce a fourth derived thread status, `pending`, which is "the agent answere
 4. `src/commentController.ts`:
    - `statusLabels` and `statusContextValues` become `Record<ThreadStatus, string>`, adding `pending: "Pending"` and `pending: "pendingNote"`. The `state` stays Unresolved for pending, since only resolved is Resolved.
    - At the three eager-restyle sites, set `entry.noteThread.status = deriveThreadStatus(note.status, entry.noteThread.turns)` (using `remaining` or `note` as named at each site). Keep the `entry.noteThread.note.status = …status` assignment as the persisted value.
-   - Update the restyle comments that say "addressed" (e.g. `:316-319`, `:412-415`) to "replyable (addressed or pending)".
+   - Update the restyle comments that say "addressed" (e.g. `:316-319`, the `restyle` comment at `:414-418`) to "replyable (addressed or pending)".
 5. `src/notesTreeProvider.ts`:
    - `noteIcon(status: ThreadStatus)` adds `case "pending": new vscode.ThemeIcon("clock", new vscode.ThemeColor("charts.purple"))`, and updates the comment.
    - The tooltip line and `contextValue` already interpolate `thread.status`, so they yield "Status: pending" and `noteRow-pending` with no change. Confirm that they type-check.

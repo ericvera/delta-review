@@ -46,7 +46,7 @@ Other derivation rules:
 
 **Read state.** A new pure module, `src/pendingRead.ts`, defines `PendingReadMarks = Record<noteId, agentTurnAt>` and exports `newestAgentTurnAt`, `isPendingUnread`, `withReadMark`, and `prunedReadMarks`.
 - `src/extension.ts` stores marks per branch in `context.workspaceState` under `deltaReview.pendingReadMarks` (`Record<branch, PendingReadMarks>`).
-- On a successful notes load (the `mergeThreads` render site), it prunes the current branch's marks to the note ids present in the thread set, and writes only if something changed.
+- On a successful notes load (the `mergeThreads` render site), it prunes the current branch's marks to the note ids present in the thread set. When the map holds other branches, it also drops entries for branches with no local `refs/heads/<branch>` (one `git for-each-ref` call, skipped when the current branch is the only key; a git failure skips only that branch pruning). Empty per-branch maps are dropped. It writes only if something changed.
 - It injects `isUnread(thread)` into `NotesTreeProvider` (a new constructor parameter) and `{ isUnread, markRead }` into `createNoteCommentController` (a new fourth parameter).
 - `markRead` writes the mark, persists it, and calls `renderNoteThreads(currentNoteThreads)`, which re-styles both surfaces. `styleThread` writes only the fields that changed.
 - New commands: `deltaReview.markNoteRead` (thread title, inline) and `deltaReview.markNoteRowRead` (row inline and context). Both are hidden from the command palette.
@@ -56,7 +56,7 @@ Other derivation rules:
 **Contract (`plugin/skills/review-notes/SKILL.md`).**
 - Document `pending` in the Responses file section.
 - Change the Work set rule to: a note is actionable iff it is not resolved and its newest turn is either a reviewer turn or your response with `pending: true`.
-- Channel discipline: a note you mark pending is skipped for the rest of the session, including across watch-mode rounds, and picked up on the next invocation. Questions to the reviewer are never pending.
+- Channel discipline: a note whose newest turn is your own pending reply is skipped for the rest of the session, including across watch-mode rounds, until a newer reviewer turn arrives; that turn lifts the skip at once. Still-pending notes are picked up on the next invocation. The existing question skip keeps its pass scope. Questions to the reviewer are never pending.
 - Schema changes: exempt additive optional keys that older readers ignore.
 - Bump `plugin/.claude-plugin/plugin.json` to 0.9.0.
 

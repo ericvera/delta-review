@@ -42,6 +42,7 @@ Design decisions:
 - Key `deltaReview.pendingReadMarks`, value `Record<branch, Record<noteId, agentTurnAt>>`.
 - A note is unread iff its status is `pending` and its mark is not equal to its newest agent turn's `at`.
 - Prune the current branch's marks to note ids present in the thread set, on a successful notes load only, and write only when something changed.
+- On the same load, drop the entries of branches that no longer exist locally, so the map does not grow across deleted branches. Only run the git branch listing when the map has a key other than the current branch. Empty per-branch maps are dropped.
 - The badge rule stays "not resolved", so every pending note counts, read or unread.
 - No Mark as Unread.
 - The context values are `pendingNote` (read), `pendingNoteUnread`, `noteRow-pending` (read) and `noteRow-pendingUnread`.
@@ -59,6 +60,8 @@ Design decisions:
    - `isPendingUnread(thread, marks): boolean` returns `thread.status === "pending" && marks[thread.note.id] !== newestAgentTurnAt(thread)`.
    - `withReadMark(marks, thread): PendingReadMarks` returns a new object with that note's entry set to `newestAgentTurnAt(thread)`. If there is none, it returns `marks` unchanged.
    - `prunedReadMarks(marks, threads): PendingReadMarks` keeps only entries whose id is a note in `threads`, and returns the same object when nothing was dropped.
+   - `export type BranchReadMarks = Readonly<Record<string, PendingReadMarks>>` (branch → marks).
+   - `prunedBranchMarks(all: BranchReadMarks, branch: string, threads: readonly NoteThread[], liveBranches: ReadonlySet<string> | undefined): BranchReadMarks` prunes `all[branch]` with `prunedReadMarks`, drops every other key not in `liveBranches` (when `liveBranches` is undefined, other keys are kept), and drops any key whose map is empty (including `branch`). It returns the same object when nothing changed.
 2. `src/commentController.ts`:
    - Add a fourth factory parameter `pendingRead: { isUnread: (thread: NoteThread) => boolean; markRead: (thread: NoteThread) => void }`.
    - In `styleThread`, let `unread = pendingRead.isUnread(thread)`. The label is `statusLabels[status] + (unread ? " • Unread" : "") + (outdated ? " • Outdated" : "")`. The contextValue is `unread ? "pendingNoteUnread" : statusContextValues[status]`.
@@ -71,8 +74,10 @@ Design decisions:
    - Load the marks near the other workspace-state reads (`:113-140`) under key `deltaReview.pendingReadMarks`.
    - Keep `let notesBranch: string | undefined`, set to `computed.branch` at the `:569` render and to `undefined` at every `renderNoteThreads([])` site.
    - `isUnread = (thread) => isPendingUnread(thread, notesBranch === undefined ? {} : marks[notesBranch] ?? {})`. Pass it to `NotesTreeProvider` and the controller.
-   - `markRead(thread)`: return if `notesBranch` is undefined. Otherwise set `marks[notesBranch] = withReadMark(...)`, call `void context.workspaceState.update(...)`, then `renderNoteThreads(currentNoteThreads)`.
-   - At `:569`, before rendering, prune `marks[computed.branch]` with `prunedReadMarks`. Persist only if the result differs by identity.
+   - `markRead(thread)`: return if `notesBranch` is undefined. Otherwise set `marks = { ...marks, [notesBranch]: withReadMark(marks[notesBranch] ?? {}, thread) }`, call `void context.workspaceState.update(...)`, then `renderNoteThreads(currentNoteThreads)`.
+   - At `:569`, before rendering, bind `const threads = mergeThreads(refreshed, responses, anchorResolves)`, replace `marks` with `prunedBranchMarks(marks, computed.branch, threads, liveBranches)`, then `renderNoteThreads(threads)`. Persist only if the result differs by identity.
+   - `liveBranches`: when `Object.keys(marks).some((key) => key !== computed.branch)`, run `gitForNotes.run(["for-each-ref", "--format=%(refname)", "refs/heads"])` and build a set of each line with the `refs/heads/` prefix stripped (do not use `%(refname:short)`; it can print `heads/<name>` for ambiguous names). Otherwise pass `undefined`. Wrap that call in its own `try/catch` that falls back to `undefined`, so a git failure never reaches the notes-warning `catch`. Check `generation !== refreshGeneration` after the `await` and return if stale, as the surrounding code does.
+   - Hold `marks` in a `let` (`BranchReadMarks`) so pruning can replace it.
    - Register `deltaReview.markNoteRead` (`(thread: vscode.CommentThread) => commentController.markNoteRead(thread)`) and `deltaReview.markNoteRowRead` (`(element?: NotesTreeElement) => element?.kind === "note" && markRead(element.thread)`).
    - Update the badge comment at `:295` to "Open, addressed and pending (read or unread) are not done; resolved notes are."
 5. `package.json`:
@@ -85,6 +90,7 @@ Design decisions:
 ## Gotchas
 
 - Do not mark read on `expandThread`, `openNoteInDiff`, or tree selection.
+- Branch keys are `computed.branch` (the abbreviated branch name), and they must match the stripped `refs/heads/` names. A detached HEAD or a branch whose ref is missing simply has its marks dropped.
 - `renderNoteThreads(currentNoteThreads)` must not prune. Prune only at the successful-load site, because a broken notes file renders `[]` and must not wipe the marks.
 - `styleThread` already skips unchanged writes. A label or contextValue change on mark-read does not touch `canReply`, so no recreate happens.
 - The `TreeItem` constructor accepts `string | TreeItemLabel`. Keep `item.id` unchanged, so the row identity stays stable across read/unread.
@@ -97,6 +103,7 @@ Design decisions:
   - `isPendingUnread`: unmarked pending → true; marked at the newest agent `at` → false; marked at an older agent `at` (a newer pending reply arrived) → true; non-pending statuses → false.
   - `withReadMark`: sets the newest agent `at`; a thread with no agent turn returns the input.
   - `prunedReadMarks`: drops ids absent from the threads, and returns the same object when nothing was dropped.
+  - `prunedBranchMarks`: drops a branch absent from `liveBranches`; keeps other branches when `liveBranches` is undefined; drops a branch whose map becomes empty; prunes the current branch's ids; returns the same object when nothing changed.
 - Build threads with `mergeThreads` from `src/noteThreads.ts`, using fixtures like `src/noteThreads.test.ts:12-41`.
 - Substitute check: `grep -n "markNoteRead\|markNoteRowRead" package.json src/extension.ts` shows the command, menu, palette and registration entries.
 - Do not launch a VS Code test instance.
