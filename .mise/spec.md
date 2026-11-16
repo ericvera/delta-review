@@ -13,7 +13,7 @@
   - Unread shows a purple clock, a highlighted (bold) row label, the thread label "Pending • Unread", and the tooltip "Status: pending (unread)".
   - Read shows a dimmed clock, the label "Pending", and the tooltip "Status: pending".
   - Read state lives only in VS Code workspace state, keyed per note to the newest agent turn's `at`, so a later pending reply is unread again. The notes and responses files and agents never see it.
-- No responses-file `version` bump. Old extensions ignore `pending` and show Addressed. The contract's schema-change rule is amended to exempt additive optional keys in the responses file only, because the extension never rewrites that file. The notes file stays under the bump rule: the extension rebuilds notes from known keys (`parseNoteEntry`, `src/notes.ts:215-233`) and re-saves them on every refresh (`saveNotes`, `src/notesStore.ts:209`), so an older extension would strip a newer per-note key. The plugin version bumps 0.8.0 → 0.9.0.
+- No responses-file `version` bump. Old extensions ignore `pending` and show Addressed. The contract's schema-change rule is amended to exempt an additive optional key in the responses file that an older extension can safely ignore, because the extension drops unknown keys and never rewrites that file. The notes file stays under the bump rule: the extension rebuilds notes from known keys (`parseNoteEntry`, `src/notes.ts:215-233`) and re-saves them on every refresh (`saveNotes`, `src/notesStore.ts:209`), so an older extension would strip a newer per-note key. The plugin version bumps 0.8.0 → 0.9.0.
 
 ## Design
 
@@ -57,16 +57,17 @@ Other derivation rules:
 
 **Contract (`plugin/skills/review-notes/SKILL.md`).**
 - Document `pending` in the Responses file section.
+- Responses-file Entry conventions: `response` renders as markdown; wrap paths and identifiers in backticks.
 - Change the Work set rule to: a note is actionable iff it is not resolved and its newest turn is either a reviewer turn or your response with `pending: true`.
 - Channel discipline: a note whose newest turn is your own pending reply is skipped for the rest of the session, including across watch-mode rounds, until a newer reviewer turn arrives; that turn lifts the skip at once. Still-pending notes are picked up on the next invocation. The existing question skip keeps its pass scope. Questions to the reviewer are never pending.
-- Schema changes: exempt additive optional keys in the responses file only (the extension never rewrites it). The notes file keeps the bump rule, because the extension re-saves parsed notes and would strip unknown keys.
+- Schema changes: an additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file) needs no `version` bump. The notes file keeps the bump rule, because the extension re-saves parsed notes and would strip unknown keys.
 - Bump `plugin/.claude-plugin/plugin.json` to 0.9.0.
 
 **Removed.** Note bodies are no longer escaped in threads or the tooltip. DEVELOPMENT.md's "no escape hatch / escapeMarkdownText verbatim" statement for turns is removed (task 01_01).
 
 ## Hard-to-undo
 
-- Public agent-facing contract change: the responses file gains an optional `pending` key, the Work set rule changes, and the schema-change rule is amended to allow additive optional responses-file keys without a `version` bump (notes-file changes still bump `version`). Agents on plugin 0.9.0 write files that older extensions read as Addressed.
+- Public agent-facing contract change: the responses file gains an optional `pending` key, the Work set rule changes, and the schema-change rule is amended to allow additive optional responses-file keys that an older extension can safely ignore without a `version` bump (notes-file changes still bump `version`). Agents on plugin 0.9.0 write files that older extensions read as Addressed.
 - Plugin version bump 0.8.0 → 0.9.0 (`plugin/.claude-plugin/plugin.json`).
 - New persisted workspace-state key `deltaReview.pendingReadMarks`. Users' VS Code storage gets data that later versions must keep reading or ignore.
 - The notes-file schema is not changed: pending persists as `"addressed"`.
