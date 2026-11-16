@@ -80,7 +80,8 @@ Creating notes:
 
 Lifecycle:
 
-- **Open** → the note needs work. **Addressed** → the agent replied; a reply box appears so you can **Reply & Reopen** if the fix isn't right. **Resolved** → you accepted it (Resolve/Unresolve from the thread title; Delete Thread removes it entirely).
+- **Open** → the note needs work. **Addressed** → the agent replied; a reply box appears so you can **Reply & Reopen** if the fix isn't right. **Pending** → the agent answered but queued more work; you can read, reply, or resolve, and **Mark as Read** clears its unread highlight. **Resolved** → you accepted it (Resolve/Unresolve from the thread title; Delete Thread removes it entirely).
+- Notes and replies render as markdown.
 - Notes follow the code: edits above shift them, edits to the noted lines flag them **Outdated** (with the original line shown), and they survive commits, amends, and rebases.
 
 Agent loop:
@@ -93,7 +94,7 @@ REVIEW NOTES view:
 
 - A sibling section in the Source Control sidebar lists every note, grouped by file with status icons.
 - Click a note to open its diff with the cursor on the noted line and the thread expanded.
-- The **Clear Resolved** title button clears resolved notes (they are archived to `.git/delta-review/archive-<branch>.json` for tooling); the badge counts notes still needing your attention.
+- The **Clear Resolved** title button clears resolved notes (they are archived to `.git/delta-review/archive-<branch>.json` for tooling); the badge counts every note not yet resolved, pending ones included.
 - Notes are per-branch, live inside `.git`, and are never pushed — like all Delta Review state.
 
 ## Settings

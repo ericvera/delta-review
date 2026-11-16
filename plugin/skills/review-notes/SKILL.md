@@ -15,7 +15,7 @@ description: >-
 
 # Review Notes
 
-Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. A third file, the **archive**, is history the extension writes when the reviewer clears resolved notes and nobody in this loop reads. Loop: the reviewer notes diff lines → you handle one note and append its response → the extension shows your reply, flips the note to **Addressed**, and relocates it via your anchor.
+Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. A third file, the **archive**, is history the extension writes when the reviewer clears resolved notes and nobody in this loop reads. Loop: the reviewer notes diff lines → you handle one note and append its response → the extension shows your reply, flips the note to **Addressed** (or **Pending** when the reply is marked pending), and relocates it via your anchor.
 
 ## Contract
 
@@ -100,6 +100,7 @@ Parser rejections (one bad entry rejects the whole file; the reviewer sees a war
 - `version` must be exactly the integer `1`; `responses` must be an array.
 - Each entry: an object with non-empty string `noteId`, non-empty string `response`, non-empty string `at`.
 - `anchor` optional; when present: non-empty string `file`, integer `line` >= 1, string `snapshot`.
+- `pending` optional; when present must be a boolean.
 
 Silent failures — not rejected, so you must get these right:
 
@@ -108,7 +109,7 @@ Silent failures — not rejected, so you must get these right:
 - `anchor.file`: repo-relative, `/`-separated — never absolute, no `\`, no `.` or `..` segments. `anchor.line`: 1-based in the current working tree. Bad path shape, missing file, or out-of-range line → dangling: your response text still shows, but the note is not relocated.
 - `anchor.snapshot` is not validated against the file — it is stored as-is as the note's new authoritative `snapshot`. It must be the exact current text of `anchor.line`; a wrong value still relocates the note and silently corrupts its anchor.
 
-Entry conventions: `response` is concise — what you changed and where, written for a human reading a comment thread. Include `anchor` whenever the addressed code has a clear location (working-tree coordinates); omit it only when there is none (code deleted, change spans many places).
+Entry conventions: `response` is concise — what you changed and where, written for a human reading a comment thread. Include `anchor` whenever the addressed code has a clear location (working-tree coordinates); omit it only when there is none (code deleted, change spans many places). `response` renders as markdown; wrap paths and identifiers in backticks. `pending: true` marks a reply that leaves work queued for a later run — the reviewer sees the answer and a Pending status; omit it when the note is done or when you ask the reviewer a question.
 
 ### Archive file (read-only history)
 
@@ -121,9 +122,9 @@ Entry conventions: `response` is concise — what you changed and where, written
 Any driver that responds to notes must compute the work set this way. A note is **actionable** iff:
 
 - `status` is not `"resolved"`, and
-- the newest turn across both files is a reviewer turn — the latest `at` in the note's `turns` is newer than every one of your response entries for that `noteId`.
+- the newest turn across both files is either a reviewer turn — the latest `at` in the note's `turns` is newer than every one of your response entries for that `noteId` — or your response entry with `pending: true`.
 
-Never trust `status` alone (the extension that refreshes it may not be running); the timestamp comparison is what prevents re-addressing a note you already answered.
+The notes file shows a pending note as `"addressed"`. Never trust `status` alone (the extension that refreshes it may not be running); the timestamp comparison is what prevents re-addressing a note you already answered.
 
 ### Channel discipline
 
@@ -132,20 +133,22 @@ Binds any driver that responds to notes. Read-only drivers (summarize, triage, d
 - The thread is the conversation. All substantive content is a response entry: what you changed and where, why, pushback or won't-fix rationale, a target you could not locate, and clarifying questions to the reviewer. The caller conversation never carries per-note outcomes, rationale, or fix lists.
 - Explain-only replies are legitimate: a response entry is one turn, with or without a code change.
 - A note needing a reviewer decision: append the question as a response entry, then skip that note for the rest of the pass. The reviewer's thread reply makes it actionable again on a later run (Work set).
+- After you append a `pending: true` reply, skip that note for the rest of the session (all watch rounds included) until a newer reviewer turn arrives — that turn makes it actionable again at once; a later invocation picks still-pending notes up via Work set.
+- When you pick up a pending note and its queued work still can't be done, append nothing — leave the existing pending reply standing and skip the note exactly as if you had just appended it. Reply only when there is new information for the reviewer or the work is done.
 - The caller conversation carries exactly two things: a bare status line — counts (e.g. fixes vs replies/questions) and a pointer to Delta Review — and blockers the thread cannot carry: a missing or invalid notes file, a corrupt or unwritable responses file.
 - A pass that made no fixes because every actionable note got an in-thread question says exactly that in the status line (questions asked; reply in Delta Review — plus "and re-run" only when the pass ends), so it does not read as a stall.
 - A driver that keeps running across rounds emits one status line per round that did work, none for rounds with no work, and blockers as they arise.
 
 ### Schema changes
 
-Changing the schema requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version other than 1. `src/notes.ts` also owns the archive's parser, which validates only `version` and `notes`.
+An additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file, like `pending`) needs no `version` bump. Every other change, including any notes-file change (additive or not), requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version other than 1, and it rebuilds notes from known keys and re-saves them on each refresh, so an older extension would strip a newer notes key. `src/notes.ts` also owns the archive's parser, which validates only `version` and `notes`.
 
 ## Default workflow: addressing the notes
 
 The default when the user asks to address their review notes; other skills or instructions may drive different behavior on the same contract (summarize, triage, custom fix policies) — the Contract still governs all file access. One note per iteration: address, respond, re-read, repeat.
 
 1. **Locate and read the notes** per the Contract. Missing file or empty `notes` array → report "no review notes on this branch" and stop. Corrupt JSON → stop per the Contract.
-2. **Compute and order the work set** from both files per the Contract, excluding notes skipped earlier this pass per Channel discipline. Order: notes whose thread already holds your prior responses (reviewer follow-ups) first, then brand-new notes; within each class, existing file/line order. Empty → step 6.
+2. **Compute and order the work set** from both files per the Contract, excluding notes skipped per Channel discipline. Order: notes whose thread already holds your prior responses (reviewer follow-ups) first, then brand-new notes; within each class, existing file/line order. Empty → step 6.
 3. **Take the first note**: read its whole thread (`turns` plus your prior responses, interleaved oldest → newest by `at`), locate the target per the Contract's reading semantics, and make the change the newest reviewer turn asks for, following project conventions — or compose the reply or question that turn calls for, per Channel discipline.
 4. **Respond immediately**: append that one note's entry per the Contract's entry conventions and write rules, before moving on. Never batch responses.
 5. **Re-read the notes file** — the reviewer may have added notes or replied while you worked — and repeat from step 2.
@@ -170,6 +173,6 @@ Entered when invoked with `watch` (`/delta:review-notes watch`, "watch my review
    ```
 
 3. Monitor expiry with no hash change is not a wake and not an end: re-arm the same loop with the same `START` — no re-read, no report.
-4. On wake: re-read per the Contract and recompute the Work set. Empty → wait again (extension write-backs of derived fields wake the loop without adding work). Otherwise run steps 2–5, report per Channel discipline, and wait again.
+4. On wake: re-read per the Contract and recompute the Work set minus notes skipped per Channel discipline. Empty → wait again (extension write-backs of derived fields wake the loop without adding work). Otherwise run steps 2–5, report per Channel discipline, and wait again.
 
 Monitor tool unavailable → run one normal pass and say watch mode is unavailable.
