@@ -14,8 +14,8 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 - `deltaReview.__inspect` (src/extension.ts:~2025-2045) returns nothing about cluster headers; e2e verification of header icon/color would need it extended.
 - Nothing hard to undo; no contract/schema change.
 
-## Open questions
+## Decisions
 
-1. Which signal(s) to explore (mock variants side by side vs. a single pick).
-2. Done + wait-flagged cluster: which styling wins.
-3. Reorder/collapse done clusters: in or out of scope.
+- Mock shows variants side by side for comparison: status icon (green check when done, open circle when files pending), dimmed label on done clusters, and both combined.
+- Done + wait-flagged cluster shows both: done icon carries review state, muted wait label carries the flag.
+- Out of scope: reordering or auto-collapsing done clusters; contract order and current expansion behavior stay.
