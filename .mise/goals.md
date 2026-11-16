@@ -18,13 +18,14 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 
 - Rule (owner): dimmed = nothing to review right now (fully reviewed, waiting, or empty), at every level: clusters, directories, files. Not dimmed = ok to review. No status icons.
 - In scope: agents can flag individual files and directories as "wait", not only clusters (contract change; spec and critic run).
+- Reviewed file rows dim too (same rule at every level).
+- Only agents set file/dir wait, via the clusters file (as cluster wait today). Reviewer-side toggle is out of scope.
 - Out of scope: reordering or auto-collapsing done clusters; contract order and current expansion behavior stay.
 
 ## Open questions
 
-1. Reviewed file rows dimmed too, or only clusters/directories.
-2. Who sets file/dir wait: agent via clusters file only, or also the reviewer from the tree.
-3. Whether a dimmed row says why (done vs waiting) beyond the x/z count.
+1. Why-dimmed signal: owner floated an hourglass icon on clusters containing any waiting item, in place of a "waiting" text note.
+2. Whether the hourglass also marks waiting file/directory rows.
 
 ## Assumptions
 
