@@ -3,7 +3,6 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
 import { Git } from "./git";
-import { escapeMarkdownText } from "./markdown";
 import { ReviewModel } from "./model";
 import { Note, NoteSide, NoteStatus } from "./notes";
 import {
@@ -60,8 +59,8 @@ interface NoteComment extends vscode.Comment {
   // The turn's `at` timestamp — stable identity for edits (indices shift
   // when another turn is deleted, `at` never changes)
   turnAt: string;
-  // The raw turn text: `body` holds display markdown (escaped, and possibly
-  // carrying the outdated snapshot block), so edit mode swaps this in instead
+  // The raw turn text: `body` holds the rendered markdown (possibly carrying
+  // the outdated snapshot block), so edit mode swaps this in instead
   turnText: string;
 }
 
@@ -215,7 +214,7 @@ export const createNoteCommentController = (
     let reviewerTurnIndex = 0;
     return thread.turns.map((turn, index) => {
       const body = new vscode.MarkdownString();
-      body.appendMarkdown(escapeMarkdownText(turn.text));
+      body.appendMarkdown(turn.text);
       if (index === 0 && thread.note.outdated) {
         // Mock 4: a dimmed one-liner with the first anchored line's original
         // text (italic is the closest to dimmed a MarkdownString gets)
@@ -711,7 +710,7 @@ export const createNoteCommentController = (
     if (entry === undefined || noteComment.reviewerTurnIndex === undefined) {
       return;
     }
-    // The editor must open on the raw turn text, not the escaped display
+    // The editor must open on the raw turn text, not the rendered display
     // markdown (nor an outdated first turn's appended snapshot block)
     noteComment.body = noteComment.turnText;
     noteComment.mode = vscode.CommentMode.Editing;

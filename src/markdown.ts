@@ -1,4 +1,5 @@
-// Escapes plain text for rendering as markdown in review note bodies.
+// Escapes plain text for rendering as markdown in the review tree's file and
+// move notes, provenance, and move display.
 // Based on VS Code's MarkdownString.appendText pipeline, but with its
 // blanket space -> &nbsp; substitution narrowed so ordinary interior
 // single spaces stay plain and the rendered text can wrap:
