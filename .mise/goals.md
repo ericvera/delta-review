@@ -20,12 +20,12 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 - In scope: agents can flag individual files and directories as "wait", not only clusters (contract change; spec and critic run).
 - Reviewed file rows dim too (same rule at every level).
 - Only agents set file/dir wait, via the clusters file (as cluster wait today). Reviewer-side toggle is out of scope.
+- Hourglass (or closest codicon) replaces the cluster icon when anything inside is flagged wait, whether the cluster is bright or dimmed; no "waiting" text note. Dimmed without hourglass = fully reviewed.
 - Out of scope: reordering or auto-collapsing done clusters; contract order and current expansion behavior stay.
 
 ## Open questions
 
-1. Why-dimmed signal: owner floated an hourglass icon on clusters containing any waiting item, in place of a "waiting" text note.
-2. Whether the hourglass also marks waiting file/directory rows.
+1. Hourglass on waiting file/directory rows too (2a) vs clusters only (2b): owner wants mocks of both.
 
 ## Assumptions
 
