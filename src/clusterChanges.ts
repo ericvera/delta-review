@@ -88,20 +88,25 @@ export const sameClusterChangesSource = (
 ): boolean =>
   entry.repoRoot === current.repoRoot && entry.branch === current.branch;
 
+type ClusterChangesIdentity = ClusterChangesSource & {
+  title: string;
+  label: string;
+};
+
+const sameClusterChanges = (
+  entry: ClusterChangesIdentity,
+  current: ClusterChangesIdentity,
+): boolean =>
+  sameClusterChangesSource(entry, current) &&
+  current.label === entry.label &&
+  current.title === entry.title;
+
 export const clusterChangesMarkPaths = (
-  entry: ClusterChangesSource & {
-    title: string;
-    label: string;
-    paths: readonly string[];
-  },
-  current: ClusterChangesSource & { title: string; label: string },
+  entry: ClusterChangesIdentity & { paths: readonly string[] },
+  current: ClusterChangesIdentity,
   clusterFiles: readonly ReviewFile[],
 ): { paths: string[] } | { message: string } => {
-  if (
-    !sameClusterChangesSource(entry, current) ||
-    current.label !== entry.label ||
-    current.title !== entry.title
-  ) {
+  if (!sameClusterChanges(entry, current)) {
     return { message: changedClusterMessage(entry.label) };
   }
   const shown = new Set(entry.paths);
@@ -111,6 +116,42 @@ export const clusterChangesMarkPaths = (
   return paths.length > 0
     ? { paths }
     : { message: nothingToReviewMessage(entry.label) };
+};
+
+export const refreshFailedMessage = (label: string): string =>
+  `Couldn't refresh '${label}'. Reopen it from the Delta Review pane.`;
+
+export const clusterChangesSignature = (
+  files: readonly ReviewFile[],
+): string[] =>
+  files.map((file) =>
+    [
+      file.path,
+      file.diffBasePath,
+      file.diffBaseSha ?? "empty",
+      file.deleted ? "D" : "",
+    ].join("\0"),
+  );
+
+export type ClusterChangesRebuild =
+  | { kind: "changed-cluster" }
+  | { kind: "unchanged" }
+  | { kind: "rebuild"; files: ReviewFile[] };
+
+export const clusterChangesRebuild = (
+  entry: ClusterChangesIdentity & { signature: readonly string[] },
+  current: ClusterChangesIdentity,
+  clusterFiles: readonly ReviewFile[],
+): ClusterChangesRebuild => {
+  if (!sameClusterChanges(entry, current)) {
+    return { kind: "changed-cluster" };
+  }
+  const files = clusterChangesFiles(clusterFiles);
+  const signature = clusterChangesSignature(files);
+  return signature.length === entry.signature.length &&
+    signature.every((part, index) => part === entry.signature[index])
+    ? { kind: "unchanged" }
+    : { kind: "rebuild", files };
 };
 
 export type DiffDocument =

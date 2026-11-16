@@ -19,6 +19,8 @@ export interface ClusterDefinition {
   files: string[];
   // picomatch globs, evaluated in cluster order for files not listed explicitly
   patterns: string[];
+  // agent says this cluster is still expected to change; informational
+  wait?: true;
 }
 
 // A 1-based, inclusive line span of the origin file.
@@ -55,6 +57,8 @@ export interface ClusterBucket {
   label: string;
   summary: string;
   files: ReviewFile[];
+  // agent says this cluster is still expected to change; informational
+  wait?: true;
 }
 
 export interface ClusterModel {
@@ -103,6 +107,18 @@ export const clusterFilesForKey = (
   }
   return clusterBucketForKey(model, clusterKey)?.files ?? [];
 };
+
+export const isWaitingClusterKey = (
+  model: ClusterModel,
+  clusterKey: string,
+): boolean => clusterBucketForKey(model, clusterKey)?.wait === true;
+
+export const isWaitingFile = (model: ClusterModel, file: ReviewFile): boolean =>
+  model.clusters.some(
+    (bucket) =>
+      bucket.wait === true &&
+      bucket.files.some((member) => member.path === file.path),
+  );
 
 // Order-preserving filter of a file list down to one review status. Returns
 // a new array; the ReviewFile objects are kept by reference, so callers keep
@@ -241,6 +257,9 @@ const parseCluster = (
   if (entry.patterns !== undefined && !isStringArray(entry.patterns)) {
     return { error: `${where2}: "patterns" must be an array of strings` };
   }
+  if (entry.wait !== undefined && typeof entry.wait !== "boolean") {
+    return { error: `${where2}: "wait" must be a boolean` };
+  }
   const files = entry.files ?? [];
   const patterns = entry.patterns ?? [];
   if (files.length === 0 && patterns.length === 0) {
@@ -249,7 +268,13 @@ const parseCluster = (
     };
   }
   return {
-    cluster: { label: entry.label, summary: entry.summary, files, patterns },
+    cluster: {
+      label: entry.label,
+      summary: entry.summary,
+      files,
+      patterns,
+      ...(entry.wait === true ? { wait: true } : {}),
+    },
   };
 };
 
@@ -476,6 +501,7 @@ export const resolveClusterModel = (
     label: cluster.label,
     summary: cluster.summary,
     files: [],
+    ...(cluster.wait === true ? { wait: true } : {}),
   }));
   const unclustered: ReviewFile[] = [];
   const auto: ReviewFile[] = [];
