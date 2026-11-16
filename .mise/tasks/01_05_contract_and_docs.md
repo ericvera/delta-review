@@ -17,7 +17,8 @@ What the extension does after tasks 01_02–01_04:
 - The responses-file entry accepts an optional boolean `pending`. Any other type rejects the whole file with `"pending" must be a boolean`. `pending: false` equals absent.
 - A note whose newest turn is an agent reply with `pending: true` derives status **pending**. It shows a purple clock and the label "Pending", keeps the reply box ("Reply & Reopen"), is resolvable, and counts in the view badge.
 - In the notes file, pending persists as `"addressed"` (`persistedStatus` in `src/noteThreads.ts`), so the notes-file schema is unchanged.
-- Read/unread is local to VS Code workspace state (`deltaReview.pendingReadMarks`, logic in `src/pendingRead.ts`), keyed per note to the newest agent turn's `at`. Mark as Read (`deltaReview.markNoteRead` / `deltaReview.markNoteRowRead`) appears only on unread pending threads and rows. Unread rows show a bold label and the label "Pending • Unread". Read rows show a dimmed clock.
+- Read/unread is local to VS Code workspace state (`deltaReview.pendingReadMarks`, per repo root and branch, logic in `src/pendingRead.ts`), keyed per note to the newest agent turn's `at`. Mark as Read (`deltaReview.markNoteRead` / `deltaReview.markNoteRowRead`) appears only on unread pending threads and rows; it re-styles in place (`restyleThreads` on the controller plus `notesTreeProvider.setThreads`) and never calls `renderThreads`.
+- Unread: the comment thread's label is "Pending • Unread"; the REVIEW NOTES row keeps its `noteLabel` text but renders bold, with a purple clock and the tooltip "Status: pending (unread)". Read: thread label "Pending", dimmed clock, tooltip "Status: pending".
 - Older extensions drop the unknown key and show Addressed.
 - Task 01_01 made turns render as markdown and already updated DEVELOPMENT.md "Long notes".
 
@@ -73,11 +74,11 @@ Design decisions:
 3. `plugin/.claude-plugin/plugin.json`: `"version": "0.9.0"`.
 4. DEVELOPMENT.md:
    - `:141`: `{ noteId, response, at, anchor?, pending? }`.
-   - `:160`: status derivation adds "agent last with `pending: true` → **pending**", plus "persisted as `addressed` (`persistedStatus`) so older readers still parse the notes file".
-   - Add one bullet in the same section covering read/unread. It is workspace state only (`deltaReview.pendingReadMarks`, per branch, keyed to the newest agent turn's `at`, pruned on successful notes loads to present notes and existing local branches, logic in `src/pendingRead.ts`), and it never touches the contract files.
-   - `:177`: update the gating list to include `pendingNote`/`pendingNoteUnread`.
+   - `:155`: status derivation adds "agent last with `pending: true` → **pending**", plus "persisted as `addressed` (`persistedStatus`) so older readers still parse the notes file".
+   - Add one bullet in the same section covering read/unread. It is workspace state only (`deltaReview.pendingReadMarks`, per repo root then branch — per repo because the extension follows the SCM-selected repo and all repos share one `workspaceState` — keyed to the newest agent turn's `at`, pruned on successful notes loads only inside the loaded repo's map to present notes and that repo's existing local branches, logic in `src/pendingRead.ts`). Mark as Read re-styles in place (`restyleThreads`, `setThreads`) and never calls `renderThreads`. It never touches the contract files.
+   - `:171`: update the gating list to include `pendingNote`/`pendingNoteUnread`.
    - Manual test script: add a step after 36. Append a response with `"pending": true`, and check:
-     - The thread shows Pending • Unread with a purple clock, a bold row, the tooltip "Status: pending (unread)", a reply box, Resolve available, and the badge counting it.
+     - The thread label shows Pending • Unread; the row keeps its note text, bold, with a purple clock and the tooltip "Status: pending (unread)"; plus a reply box, Resolve available, and the badge counting it.
      - Expanding or opening it does not mark it read.
      - Mark as Read on the thread or the row dims the clock and the action disappears.
      - Another pending reply makes it unread again.
