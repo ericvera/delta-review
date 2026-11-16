@@ -16,20 +16,22 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 
 ## Decisions
 
-- Mock shows variants side by side for comparison: status icon (green check when done, open circle when files pending), dimmed label on done clusters, and both combined.
-- Done + wait-flagged cluster shows both: done icon carries review state, muted wait label carries the flag.
+- Rule (owner): dimmed = nothing to review right now (fully reviewed, waiting, or empty), at every level: clusters, directories, files. Not dimmed = ok to review. No status icons.
+- In scope: agents can flag individual files and directories as "wait", not only clusters (contract change; spec and critic run).
 - Out of scope: reordering or auto-collapsing done clusters; contract order and current expansion behavior stay.
 
 ## Open questions
 
-1. Per-file/per-directory "wait" flags (owner raised): this run or a follow-up.
-2. Variant pick (A/B/C).
+1. Reviewed file rows dimmed too, or only clusters/directories.
+2. Who sets file/dir wait: agent via clusters file only, or also the reviewer from the tree.
+3. Whether a dimmed row says why (done vs waiting) beyond the x/z count.
 
 ## Assumptions
 
-- Mock: open circle uses normal text color, not a status color.
-- Mock: empty clusters keep the `layers` icon.
-- Mock: done labels reuse the wait grey, so in variant B a done cluster and a pending + wait cluster look identical.
+- Done and waiting share one grey; that is intended under the dim rule.
+- A cluster or directory whose only unreviewed files are waiting counts as nothing-to-review and dims.
+- A cluster with any unreviewed, non-waiting file stays undimmed; its waiting files dim inside it.
+- The x/z count keeps its current meaning (reviewed / total).
 - Unclustered and Auto rows unchanged.
 
 ## Proposal
