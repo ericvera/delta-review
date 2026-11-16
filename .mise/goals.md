@@ -19,3 +19,16 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 - Mock shows variants side by side for comparison: status icon (green check when done, open circle when files pending), dimmed label on done clusters, and both combined.
 - Done + wait-flagged cluster shows both: done icon carries review state, muted wait label carries the flag.
 - Out of scope: reordering or auto-collapsing done clusters; contract order and current expansion behavior stay.
+
+## Assumptions
+
+- Mock: open circle uses normal text color, not a status color.
+- Mock: empty clusters keep the `layers` icon.
+- Mock: done labels reuse the wait grey, so in variant B a done cluster and a pending + wait cluster look identical.
+- Unclustered and Auto rows unchanged.
+
+## Proposal
+
+- Issue: a cluster's review state shows only in the trailing `x/z`, so telling done from pending takes a scan.
+- Approach: implement the variant the owner picks from the mock (recommend C: green check / open circle icon plus dimmed done label), logic in clusters.ts with Vitest tests, docs updated.
+- Skips spec and critic: one-module display change, no schema or contract change.

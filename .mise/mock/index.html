@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Index - Delta Review mock</title>
+<link rel="stylesheet" href="style.css"></head><body><nav><a href="index.html" class=cur>Index</a> <a href="current.html">Current</a> <a href="variant-a.html">A: status icon</a> <a href="variant-b.html">B: dimmed label</a> <a href="variant-c.html">C: combined</a> <a href="compare.html">Side by side</a></nav><main><h1>Delta Review: cluster review status at a glance</h1>
+<p class="lead">Mock of the Delta Review SCM view in grouped-by-cluster mode. Each screen renders the same sample branch so variants compare row for row. Cluster order and expansion are unchanged (contract order; done clusters stay expanded showing "All files reviewed.").</p>
+<ul class="index"><li><a href="current.html">Current behavior</a>: Baseline for comparison: every cluster uses the same <code>layers</code> icon; the <code>x/z</code> count is the only review-state signal; wait clusters have a muted label.</li><li><a href="variant-a.html">Variant A: status icon</a>: The cluster icon shows review state: a green check when every file is reviewed, an open circle while files still need review. The label stays full brightness unless wait-flagged.</li><li><a href="variant-b.html">Variant B: dimmed done label</a>: Keeps the <code>layers</code> icon; done clusters get a muted label (same muted color as wait). Note: a done cluster and a wait-flagged pending cluster look alike, since both are muted.</li><li><a href="variant-c.html">Variant C: icon + dimmed label</a>: Both signals: green check plus muted label when done; open circle and full-brightness label while files are pending. A wait flag keeps its muted label; the icon still carries review state.</li><li><a href="compare.html">Side by side</a>: all four renderings next to each other.</li></ul>
+<h2>States covered</h2><ul class="states">
+<li><b>Cluster status predicates</b> 2/5: files pending (row shown in hover state with inline actions)</li>
+<li><b>README and DEVELOPMENT docs</b> 4/4: fully reviewed</li>
+<li><b>Header decoration provider</b> 3/3: fully reviewed and wait-flagged</li>
+<li><b>Inspect command extension</b> 1/2: files pending and wait-flagged</li>
+<li><b>Manual test script</b> 0/2: nothing reviewed yet</li>
+<li><b>Legacy tint helpers</b> 0/0: empty cluster (no files in the change)</li>
+<li><b>Package manifest</b> 1/1: fully reviewed (row shown in hover state)</li>
+<li><b>Unclustered</b>, <b>Auto</b>: unchanged in every variant</li>
+</ul></main></body></html>
