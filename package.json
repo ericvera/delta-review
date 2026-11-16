@@ -383,12 +383,12 @@
         },
         {
           "command": "deltaReview.resolveNoteRow",
-          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed)$/",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed|pending|pendingUnread)$/",
           "group": "inline@1"
         },
         {
           "command": "deltaReview.resolveNoteRow",
-          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed)$/",
+          "when": "view == deltaReviewNotes && viewItem =~ /^noteRow-(open|addressed|pending|pendingUnread)$/",
           "group": "navigation"
         },
         {
@@ -439,7 +439,7 @@
       "comments/commentThread/title": [
         {
           "command": "deltaReview.resolveNote",
-          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote)$/",
+          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|pendingNote|pendingNoteUnread)$/",
           "group": "inline@1"
         },
         {
@@ -449,7 +449,7 @@
         },
         {
           "command": "deltaReview.deleteNoteThread",
-          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|resolvedNote)$/",
+          "when": "commentController == deltaReview.notes && commentThread =~ /^(openNote|addressedNote|pendingNote|pendingNoteUnread|resolvedNote)$/",
           "group": "inline@2"
         }
       ],
@@ -461,12 +461,12 @@
         },
         {
           "command": "deltaReview.replyReopen",
-          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread == addressedNote",
+          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread =~ /^(addressedNote|pendingNote|pendingNoteUnread)$/",
           "group": "inline@1"
         },
         {
           "command": "deltaReview.resolveNote",
-          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread == addressedNote",
+          "when": "commentController == deltaReview.notes && !commentThreadIsEmpty && commentThread =~ /^(addressedNote|pendingNote|pendingNoteUnread)$/",
           "group": "inline@2"
         }
       ],

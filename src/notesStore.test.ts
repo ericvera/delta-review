@@ -42,6 +42,7 @@ import {
   setResolved,
   writeContentBlob,
 } from "./notesStore";
+import { mergeThreads } from "./noteThreads";
 import { reviewRefForBranch, writeReviewState } from "./reviewState";
 
 // Real temp git repos: ref and blob behavior (anchoring, gc survival,
@@ -571,6 +572,14 @@ describe("setResolved", () => {
     expect(updated.status).toBe("addressed");
   });
 
+  it("unresolve over a pending response persists addressed", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeResponseEntries([{ noteId: note.id, pending: true }]);
+    await setResolved(git, "main", note.id, true);
+    const updated = await setResolved(git, "main", note.id, false);
+    expect(updated.status).toBe("addressed");
+  });
+
   it("unresolve without responses → open", async () => {
     const note = await createNote(git, "main", draft());
     await setResolved(git, "main", note.id, true);
@@ -1009,6 +1018,23 @@ describe("refreshDerived", () => {
     );
     expect(refreshed.notes[0].status).toBe("addressed");
     expect((await loadedNotes()).notes[0].status).toBe("addressed");
+  });
+
+  it("persists addressed while the merged thread status is pending", async () => {
+    const note = await createNote(git, "main", draft());
+    await writeResponseEntries([{ noteId: note.id, pending: true }]);
+    const responses = await loadedResponses();
+    const refreshed = await refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      responses,
+      refreshOptions(),
+    );
+    expect(refreshed.notes[0].status).toBe("addressed");
+    expect((await loadedNotes()).notes[0].status).toBe("addressed");
+    const threads = mergeThreads(refreshed, responses, () => true);
+    expect(threads[0]?.status).toBe("pending");
   });
 
   it("does not mutate the input file and skips identical re-saves", async () => {

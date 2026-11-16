@@ -268,6 +268,56 @@ describe("mergeThreads", () => {
     expect(threads[1]?.status).toBe("addressed");
   });
 
+  it("derives pending when the last turn is a pending response", () => {
+    const threads = mergeThreads(
+      notesFile(note()),
+      responsesFile(response({ pending: true })),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("pending");
+    expect(threads[0]?.turns[1]?.pending).toBe(true);
+  });
+
+  it("derives addressed when a later response is not pending", () => {
+    const threads = mergeThreads(
+      notesFile(note()),
+      responsesFile(
+        response({ pending: true, at: "2026-07-01T11:00:00Z" }),
+        response({ at: "2026-07-01T12:00:00Z" }),
+      ),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("addressed");
+  });
+
+  it("derives open when a reviewer turn follows a pending response", () => {
+    const followedUp = note({
+      turns: [
+        { text: "please rename this", at: "2026-07-01T10:00:00Z" },
+        { text: "any update?", at: "2026-07-01T12:00:00Z" },
+      ],
+    });
+    const threads = mergeThreads(
+      notesFile(followedUp),
+      responsesFile(response({ pending: true, at: "2026-07-01T11:00:00Z" })),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("open");
+  });
+
+  it("keeps resolved over a pending response", () => {
+    const threads = mergeThreads(
+      notesFile(note({ status: "resolved" })),
+      responsesFile(response({ pending: true })),
+      alwaysResolves,
+    );
+
+    expect(threads[0]?.status).toBe("resolved");
+  });
+
   it("does not mutate the input notes", () => {
     const input = note();
     const turnsBefore = input.turns;

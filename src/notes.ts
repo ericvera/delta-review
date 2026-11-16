@@ -63,6 +63,8 @@ export interface ResponseEntry {
   response: string;
   at: string;
   anchor?: ResponseAnchor;
+  // The reply leaves work queued; the note derives pending.
+  pending?: true;
 }
 
 export interface ResponsesFile {
@@ -255,11 +257,17 @@ const parseResponseEntry = (
   if (!isNonEmptyString(value.at)) {
     return { error: `${where2}: "at" must be a non-empty string` };
   }
+  if (value.pending !== undefined && typeof value.pending !== "boolean") {
+    return { error: `${where2}: "pending" must be a boolean` };
+  }
   const entry: ResponseEntry = {
     noteId: value.noteId,
     response: value.response,
     at: value.at,
   };
+  if (value.pending === true) {
+    entry.pending = true;
+  }
   if (value.anchor !== undefined) {
     if (!isRecord(value.anchor)) {
       return { error: `${where2}: "anchor" must be an object` };

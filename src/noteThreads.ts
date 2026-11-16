@@ -83,6 +83,9 @@ export const mergeThreads = (
     if (entry.anchor !== undefined) {
       turn.anchor = entry.anchor;
     }
+    if (entry.pending === true) {
+      turn.pending = true;
+    }
     const group = agentTurnsByNoteId.get(entry.noteId);
     if (group === undefined) {
       agentTurnsByNoteId.set(entry.noteId, [turn]);

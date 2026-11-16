@@ -365,6 +365,30 @@ describe("parseResponsesFile", () => {
     });
   });
 
+  it("round-trips an entry with pending: true", () => {
+    const result = parseResponsesFile(responseWith({ pending: true }));
+    expect(result).toEqual({
+      ok: true,
+      file: { version: 1, responses: [{ ...validResponse, pending: true }] },
+    });
+  });
+
+  it("parses pending: false to an entry without the key", () => {
+    const result = parseResponsesFile(responseWith({ pending: false }));
+    expect(result).toEqual({
+      ok: true,
+      file: { version: 1, responses: [validResponse] },
+    });
+  });
+
+  it("rejects a non-boolean pending", () => {
+    const result = parseResponsesFile(responseWith({ pending: "yes" }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('"pending" must be a boolean');
+    }
+  });
+
   it("accepts an anchor with an empty snapshot line", () => {
     const result = parseResponsesFile(
       responseWith({ anchor: { file: "a.ts", line: 1, snapshot: "" } }),
