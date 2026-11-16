@@ -2016,6 +2016,30 @@ export const activate = async (
   // DELTA_REVIEW_TEST=1 and deliberately absent from package.json's
   // contributes.commands, so no shipped build exposes it.
   if (process.env.DELTA_REVIEW_TEST === "1") {
+    const collectTreeRows = (element?: ReviewTreeElement): unknown[] =>
+      treeProvider.getChildren(element).flatMap((child) => {
+        const item = treeProvider.getTreeItem(child);
+        const label =
+          typeof item.label === "string"
+            ? item.label
+            : (item.label?.label ??
+              (item.resourceUri === undefined
+                ? undefined
+                : basename(item.resourceUri.path)));
+        const icon =
+          item.iconPath instanceof vscode.ThemeIcon ? item.iconPath : undefined;
+        return [
+          {
+            id: item.id,
+            label,
+            description: item.description,
+            icon: icon?.id,
+            iconColor: icon?.color?.id,
+            query: item.resourceUri?.query,
+          },
+          ...collectTreeRows(child),
+        ];
+      });
     context.subscriptions.push(
       vscode.commands.registerCommand("deltaReview.__inspect", () => {
         const files = model?.files ?? [];
@@ -2039,6 +2063,7 @@ export const activate = async (
           ),
           notesBadge: notesTreeView.badge,
           clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
+          treeRows: collectTreeRows(),
         };
       }),
     );

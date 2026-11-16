@@ -72,7 +72,8 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
   ],
   "notes": {
     "src/new/config.ts": "Extracted verbatim; only the import block changed"
-  }
+  },
+  "waitPaths": ["src/cache", "src/api.ts"]
 }
 ```
 
@@ -82,6 +83,7 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
 - `clusters` — an array; each entry an object with string `label` and string `summary`.
 - `files`, `patterns` — when present, arrays of strings. Each cluster needs at least one of the two non-empty.
 - `wait` — optional boolean on a cluster; `true` means you still expect it to change, and the reviewer sees it muted. Any non-boolean value rejects the file. See **Wait**.
+- `waitPaths` — optional top-level array of repo-relative file or directory paths you still expect to change; a directory entry covers every file under it. A non-array or any non-string entry rejects the file. See **Wait**.
 - `moves` — optional; when present, an array of objects.
 - `path`, `from` — required, non-empty strings.
 - `origin` — required, exactly `"repo"` (elsewhere in this repo) or `"external"` (another project).
@@ -99,6 +101,7 @@ Unknown keys are ignored. Accepted but silently dropped — costing you the decl
 - A second entry for an already-declared `path` — first wins.
 - An entry whose `path` is outside the extension's review set.
 - A `notes` key naming a path outside the extension's review set.
+- A `waitPaths` entry covering no clustered file in the review set (Unclustered and Auto files never show as waiting).
 
 ### Which review set a move's `path` must name
 
@@ -114,7 +117,7 @@ Declare only on evidence: a move you performed in the invoking task, or one the 
 - `baseBlob` — on an `external` entry, record the donor file's pre-move content with `git hash-object -w <donor file>` and store the printed id; a `repo` entry takes it from the merge base per **Declaring an extraction**. Unreadable donor (the common case on a cold run) → omit rather than guess: the diff then shows the whole file as an addition, and the row cannot say verbatim or adapted.
 - `note` — prose about how the file was adapted, nothing else. **verbatim/adapted/unchanged is not a contract field**; the extension computes it from content hashes.
 
-No commit SHAs anywhere, and no blob id other than `moves[].baseBlob`. Everything in `clusters` must be derivable from the current diff on every run; `moves`, `notes`, and a cluster's `wait` are the preserved exceptions, because neither provenance, a reviewer's remark, nor the agent's intent is recoverable from the diff.
+No commit SHAs anywhere, and no blob id other than `moves[].baseBlob`. Everything in `clusters` must be derivable from the current diff on every run; `moves`, `notes`, a cluster's `wait`, and `waitPaths` are the preserved exceptions, because neither provenance, a reviewer's remark, nor the agent's intent is recoverable from the diff.
 
 ### Declaring an extraction
 
@@ -153,10 +156,13 @@ Relocation re-finds content already substantiated; it is not inferred provenance
 
 - Set `wait: true` on a cluster you still expect to change; clear it once the cluster is settled or plans change.
 - On a cold re-run, keep an existing `wait` only on a cluster whose label survives. A cold run sets no new `wait`.
+- List a file or directory in `waitPaths` when only part of a cluster is still expected to change; use the cluster's `wait` when all of it is. Remove an entry once that path is settled.
+- On a cold re-run, keep a `waitPaths` entry only while it still covers a file in the review set. A cold run adds no entry.
 
 ### Conventions the extension does not reject — it fails silently
 
 - `files` entries and a move's `path` — repo-relative and `/`-separated, as `git diff --name-only` prints them. An absolute or `\`-separated path parses fine and then never matches: the file lands in "Unclustered", or you lose the declaration.
+- `waitPaths` entries — repo-relative and `/`-separated like `files`; an absolute or `\`-separated entry never matches.
 - `patterns` — picomatch globs; one that fails to compile is ignored. Use them **only** for glob-shaped catch-alls (`**/*.test.ts`, `docs/**`) and list everything else in `files`.
 - A move's `from` — `/`-separated; repo-relative for `origin: "repo"`, otherwise whatever names the file in the donor project. A repo `from` naming no path at the merge base silently costs the origin's base content.
 
@@ -198,7 +204,7 @@ If it exists, treat it as the baseline:
 
 - **Keep cluster labels and identity stable** — reviewers have collapse state and mental context attached to them. Do not rename or reorder gratuitously.
 - Place new or previously-unclustered files into the existing cluster they belong to, or a new one if they are a new logical change.
-- Drop `files` entries no longer in the review set. Carry `moves` and `notes` entries forward per the preservation rules in **Declaring a move** and **Notes**, and `wait` per **Wait**.
+- Drop `files` entries no longer in the review set. Carry `moves` and `notes` entries forward per the preservation rules in **Declaring a move** and **Notes**, and `wait` and `waitPaths` per **Wait**.
 - Run the re-run relocation rule in **Declaring an extraction** before declaring anything new.
 - Refresh a `label`/`summary` only where the meaning of the change actually shifted.
 
@@ -218,9 +224,9 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 
 - Every changed file should be claimed by a cluster unless it genuinely belongs to no logical change.
 - Never invent a junk-drawer cluster ("Misc", "Other"). Unclaimed files surface as "Unclustered" — that is the scope-creep detector, and hiding them defeats it.
-- Set or clear `wait` per **Wait**.
+- Set or clear `wait` and `waitPaths` entries per **Wait**.
 - `label` — target **≤ 40 characters**, **50 is a hard cap**. It gets about 34 characters of a default sidebar and truncates from the right, so put the distinguishing words first and move any further detail into `summary`, which renders as a tooltip and is effectively unbounded.
 
 ### 7. Write and report
 
-Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the clusters flagged `wait`, and any files you left unclustered (and why).
+Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the clusters flagged `wait` and the paths in `waitPaths`, and any files you left unclustered (and why).

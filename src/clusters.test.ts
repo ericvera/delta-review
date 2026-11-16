@@ -12,6 +12,8 @@ import {
   clusterContextValue,
   clusterCountDescription,
   clusterFilesForKey,
+  clusterHeaderTone,
+  everyFileWaiting,
   filterByStatus,
   isWaitingClusterKey,
   isWaitingFile,
@@ -57,18 +59,25 @@ const contract = (
   clusters,
   moves: [],
   notes: new Map(),
+  waitPaths: [],
 });
 
 const contractV2 = (
   clusters: ClustersContract["clusters"],
   moves: ClustersContract["moves"] = [],
-): ClustersContract => ({ version: 2, clusters, moves, notes: new Map() });
+): ClustersContract => ({
+  version: 2,
+  clusters,
+  moves,
+  notes: new Map(),
+  waitPaths: [],
+});
 
 const contractV3 = (
   clusters: ClustersContract["clusters"],
   moves: ClustersContract["moves"] = [],
   notes: ClustersContract["notes"] = new Map(),
-): ClustersContract => ({ version: 3, clusters, moves, notes });
+): ClustersContract => ({ version: 3, clusters, moves, notes, waitPaths: [] });
 
 const move = (
   path: string,
@@ -1169,6 +1178,187 @@ describe("wait flag", () => {
     expect(isWaitingFile(model, file("s.ts"))).toBe(false);
     expect(isWaitingFile(model, file("u.ts"))).toBe(false);
     expect(isWaitingFile(model, file("yarn.lock", "auto"))).toBe(false);
+  });
+});
+
+describe("waitPaths", () => {
+  const parse = (body: Record<string, unknown>, version = 3) =>
+    parseClustersContract(JSON.stringify({ version, clusters: [], ...body }));
+
+  it.each([1, 2, 3])("parses waitPaths in version %i", (version) => {
+    const result = parse({ waitPaths: ["src/a.ts", "lib"] }, version);
+    expect(result.ok && result.contract.waitPaths).toEqual(["src/a.ts", "lib"]);
+  });
+
+  it("defaults to an empty list when absent", () => {
+    const result = parse({});
+    expect(result.ok && result.contract.waitPaths).toEqual([]);
+  });
+
+  it("strips trailing slashes and drops entries left empty", () => {
+    const result = parse({ waitPaths: ["src/cache/", "lib//", "/", ""] });
+    expect(result.ok && result.contract.waitPaths).toEqual([
+      "src/cache",
+      "lib",
+    ]);
+  });
+
+  it.each([["src"], [null], [{ path: "src" }], [["src", 3]], [[null]]])(
+    "rejects %j",
+    (waitPaths) => {
+      expect(parse({ waitPaths })).toEqual({
+        ok: false,
+        error: '"waitPaths" must be an array of strings',
+      });
+    },
+  );
+
+  const resolve = (waitPaths: string[], files: ReviewFile[]) =>
+    resolveClusterModel(
+      {
+        ...contract([
+          { label: "A", summary: "s", files: [], patterns: ["src/**"] },
+          { label: "B", summary: "s", files: ["src2/x.ts"], patterns: [] },
+        ]),
+        waitPaths,
+      },
+      files,
+    );
+
+  it("resolveClusterModel stamps members covered by file and directory entries", () => {
+    const model = resolve(
+      ["src/cache", "src/api.ts"],
+      [
+        file("src/api.ts"),
+        file("src/cache/a.ts"),
+        file("src/cache/deep/b.ts"),
+        file("src/other.ts"),
+        file("src2/x.ts"),
+      ],
+    );
+    expect(model.clusters[0].waitingPaths).toEqual(
+      new Set(["src/api.ts", "src/cache/a.ts", "src/cache/deep/b.ts"]),
+    );
+    expect("waitingPaths" in model.clusters[1]).toBe(false);
+  });
+
+  it("a directory entry does not cover a sibling sharing its prefix", () => {
+    const model = resolve(["src"], [file("src2/x.ts")]);
+    expect("waitingPaths" in model.clusters[1]).toBe(false);
+  });
+
+  it("never stamps covered Unclustered or Auto files", () => {
+    const model = resolve(
+      ["docs", "gen"],
+      [file("docs/a.md"), file("gen/b.ts", "auto"), file("src/gen.ts")],
+    );
+    expect(model.unclustered.map((f) => f.path)).toEqual(["docs/a.md"]);
+    expect(model.auto.map((f) => f.path)).toEqual(["gen/b.ts"]);
+    expect(model.clusters.some((b) => "waitingPaths" in b)).toBe(false);
+    expect(isWaitingFile(model, file("docs/a.md"))).toBe(false);
+    expect(isWaitingFile(model, file("gen/b.ts", "auto"))).toBe(false);
+  });
+
+  it("isWaitingFile is true for a waitingPaths member", () => {
+    const model = resolve(["src/a.ts"], [file("src/a.ts"), file("src/b.ts")]);
+    expect(isWaitingFile(model, file("src/a.ts"))).toBe(true);
+    expect(isWaitingFile(model, file("src/b.ts"))).toBe(false);
+  });
+});
+
+describe("clusterHeaderTone", () => {
+  const bucket = (
+    files: ReviewFile[],
+    extra: { wait?: true; waitingPaths?: string[] } = {},
+  ) => ({
+    label: "A",
+    summary: "s",
+    files,
+    ...(extra.wait ? { wait: extra.wait } : {}),
+    ...(extra.waitingPaths
+      ? { waitingPaths: new Set(extra.waitingPaths) }
+      : {}),
+  });
+
+  it("dims an empty bucket without an hourglass", () => {
+    expect(clusterHeaderTone(bucket([]))).toEqual({
+      dimmed: true,
+      hourglass: false,
+    });
+  });
+
+  it("dims an all-reviewed bucket without an hourglass", () => {
+    expect(
+      clusterHeaderTone(bucket([reviewedFile("a"), reviewedFile("b")])),
+    ).toEqual({ dimmed: true, hourglass: false });
+  });
+
+  it("does not dim with a non-waiting needs-review member", () => {
+    expect(clusterHeaderTone(bucket([file("a"), reviewedFile("b")]))).toEqual({
+      dimmed: false,
+      hourglass: false,
+    });
+  });
+
+  it("dims with an hourglass when every needs-review member is waiting", () => {
+    expect(
+      clusterHeaderTone(
+        bucket([file("a"), file("b"), reviewedFile("c")], {
+          waitingPaths: ["a", "b"],
+        }),
+      ),
+    ).toEqual({ dimmed: true, hourglass: true });
+  });
+
+  it("shows an hourglass without dimming for a mix of waiting and not", () => {
+    expect(
+      clusterHeaderTone(
+        bucket([file("a"), file("b")], { waitingPaths: ["a"] }),
+      ),
+    ).toEqual({ dimmed: false, hourglass: true });
+  });
+
+  it("dims with an hourglass for a wait cluster with needs-review members", () => {
+    expect(clusterHeaderTone(bucket([file("a")], { wait: true }))).toEqual({
+      dimmed: true,
+      hourglass: true,
+    });
+  });
+
+  it("shows no hourglass when only a reviewed member is waiting", () => {
+    expect(
+      clusterHeaderTone(
+        bucket([reviewedFile("a"), file("b")], { waitingPaths: ["a"] }),
+      ),
+    ).toEqual({ dimmed: false, hourglass: false });
+  });
+});
+
+describe("everyFileWaiting", () => {
+  const model: ClusterModel = {
+    clusters: [
+      {
+        label: "A",
+        summary: "s",
+        files: [file("a"), file("b")],
+        waitingPaths: new Set(["a"]),
+      },
+      { label: "W", summary: "s", files: [file("w")], wait: true },
+    ],
+    unclustered: [],
+    auto: [],
+  };
+
+  it("is false for an empty list", () => {
+    expect(everyFileWaiting(model, [])).toBe(false);
+  });
+
+  it("is true when every file is waiting", () => {
+    expect(everyFileWaiting(model, [file("a"), file("w")])).toBe(true);
+  });
+
+  it("is false when one file is not waiting", () => {
+    expect(everyFileWaiting(model, [file("a"), file("b")])).toBe(false);
   });
 });
 
