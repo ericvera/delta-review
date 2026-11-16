@@ -3,6 +3,8 @@ import {
   changedClusterMessage,
   clusterChangesFiles,
   clusterChangesMarkPaths,
+  clusterChangesRebuild,
+  clusterChangesSignature,
   clusterChangesTitle,
   clusterLabelForKey,
   fileForDiffDocument,
@@ -284,5 +286,107 @@ describe("isRowAlreadySelected", () => {
     expect(isRowAlreadySelected(["a", "b"], "b")).toBe(true);
     expect(isRowAlreadySelected(["a"], "b")).toBe(false);
     expect(isRowAlreadySelected([], "a")).toBe(false);
+  });
+});
+
+describe("clusterChangesSignature", () => {
+  it("encodes path, base path, base sha, and deletion in order", () => {
+    expect(clusterChangesSignature([file("a"), file("b")])).toEqual([
+      "a\0a\0abc\0",
+      "b\0b\0abc\0",
+    ]);
+  });
+
+  it("is order-sensitive", () => {
+    expect(clusterChangesSignature([file("b"), file("a")])).not.toEqual(
+      clusterChangesSignature([file("a"), file("b")]),
+    );
+  });
+
+  it("changes with diffBaseSha, diffBasePath, or deleted", () => {
+    const [base] = clusterChangesSignature([file("a")]);
+    expect(
+      clusterChangesSignature([file("a", { diffBaseSha: "def" })])[0],
+    ).not.toBe(base);
+    expect(
+      clusterChangesSignature([file("a", { diffBasePath: "old/a" })])[0],
+    ).not.toBe(base);
+    expect(clusterChangesSignature([file("a", { deleted: true })])[0]).not.toBe(
+      base,
+    );
+  });
+
+  it("encodes an undefined sha as empty", () => {
+    expect(
+      clusterChangesSignature([file("a", { diffBaseSha: undefined })]),
+    ).toEqual(["a\0a\0empty\0"]);
+  });
+});
+
+describe("clusterChangesRebuild", () => {
+  const current = {
+    title: "Cluster Changes: Core",
+    label: "Core",
+    repoRoot: "/repo",
+    branch: "feat",
+  };
+  const opened = [file("a"), file("b")];
+  const entry = { ...current, signature: clusterChangesSignature(opened) };
+
+  it("reports a changed cluster for a different label, title, repoRoot, or branch", () => {
+    for (const change of [
+      { label: "UI" },
+      { title: "Cluster Changes: UI" },
+      { repoRoot: "/other" },
+      { branch: "main" },
+    ]) {
+      expect(
+        clusterChangesRebuild(entry, { ...current, ...change }, opened),
+      ).toEqual({ kind: "changed-cluster" });
+    }
+  });
+
+  it("is unchanged when needs-review files and bases match", () => {
+    expect(clusterChangesRebuild(entry, current, opened)).toEqual({
+      kind: "unchanged",
+    });
+    expect(
+      clusterChangesRebuild(entry, current, [
+        ...opened,
+        file("c", { status: FileReviewStatus.Reviewed }),
+      ]),
+    ).toEqual({ kind: "unchanged" });
+  });
+
+  it("rebuilds with the remaining files when one was marked reviewed", () => {
+    const b = file("b");
+    expect(
+      clusterChangesRebuild(entry, current, [
+        file("a", { status: FileReviewStatus.Reviewed }),
+        b,
+      ]),
+    ).toEqual({ kind: "rebuild", files: [b] });
+  });
+
+  it("rebuilds with no files when none remain", () => {
+    expect(
+      clusterChangesRebuild(
+        entry,
+        current,
+        opened.map((f) => ({ ...f, status: FileReviewStatus.Reviewed })),
+      ),
+    ).toEqual({ kind: "rebuild", files: [] });
+  });
+
+  it("rebuilds when a reviewed file became needs-review against a snapshot", () => {
+    const c = file("c", {
+      diffBaseSha: "snap",
+      diffBaseIsReviewedSnapshot: true,
+      hasReviewSnapshot: true,
+    });
+    expect(clusterChangesRebuild(entry, current, [...opened, c])).toEqual({
+      kind: "rebuild",
+      files: [...opened, c],
+    });
   });
 });
