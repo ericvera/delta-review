@@ -29,3 +29,10 @@ Not a bug fix. Two features. Nothing reproduced.
 - Pending is a fourth derived status ("pending") persisted like the others; it clears when the agent posts a non-pending reply, the reviewer resolves, or the reviewer replies (→ open).
 - Plugin version bumps for the contract text change.
 - Reviewer edit still swaps in raw text; markdown loses the hard-line-break height trick and that is accepted.
+- Mock: Pending icon is the `clock` codicon in purple (charts.purple), purple thread accent; context values `pendingNote` / `noteRow-pending`; tooltip reads "Status: pending"; reply button stays "Reply & Reopen" on pending notes.
+
+## Proposal
+
+Issue: note bodies are always escaped, and the agent can't answer a note while keeping it visibly queued.
+Approach: render reviewer and agent turns as markdown; add a `pending` status (purple clock) set by an optional `pending: true` on a response, kept actionable for the agent, counted in the badge, resolvable; amend the contract and bump the plugin version.
+Skips: nothing — spec and critic run because it adds a status and changes the agent-facing contract.

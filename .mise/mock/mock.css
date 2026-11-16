@@ -1,0 +1,54 @@
+:root{--bg:#1e1e1e;--side:#252526;--panel:#1f1f1f;--border:#3c3c3c;--fg:#cccccc;--dim:#8b8b8b;--blue:#3794ff;--yellow:#cca700;--green:#89d185;--purple:#b180d7;--add:#23863633;--del:#da363333;--accent:#0e639c}
+*{box-sizing:border-box}
+body{margin:0;background:#111;color:var(--fg);font:13px -apple-system,"Segoe UI",sans-serif}
+.page{max-width:1100px;margin:24px auto;padding:0 16px}
+h1{font-size:18px;font-weight:600}
+h2{font-size:14px;font-weight:600;margin-top:28px;color:#e0e0e0}
+.note{color:var(--dim);font-size:12px;border-left:3px solid var(--accent);padding:6px 10px;background:#1a1a1a;margin:8px 0}
+a{color:var(--blue)}
+.win{display:flex;border:1px solid var(--border);background:var(--bg);min-height:420px}
+.sidebar{width:300px;background:var(--side);border-right:1px solid var(--border)}
+.sidebar .hdr{padding:8px 12px;font-size:11px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
+.badge{background:var(--accent);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;font-weight:600}
+.row{display:flex;align-items:center;gap:6px;padding:2px 12px;height:22px;white-space:nowrap}
+.row.l1{padding-left:28px}
+.row:hover,.row.sel{background:#37373d}
+.row .desc{color:var(--dim);font-size:12px}
+.row .acts{margin-left:auto;color:var(--dim);display:none;gap:6px}
+.row:hover .acts,.row.sel .acts{display:flex}
+.ico{width:14px;text-align:center;font-size:12px}
+.i-open{color:var(--blue)} .i-addr{color:var(--yellow)} .i-pend{color:var(--purple)} .i-res{color:var(--green)}
+.editor{flex:1;font:12px Menlo,monospace;position:relative}
+.tabs{background:var(--side);height:30px;display:flex;align-items:center;padding:0 12px;font:13px -apple-system,sans-serif;border-bottom:1px solid var(--border)}
+.ln{display:flex;line-height:19px}
+.ln .n{width:44px;text-align:right;padding-right:12px;color:#6e7681}
+.ln.add{background:var(--add)}
+.thread{margin:4px 12px 8px 56px;border:1px solid var(--border);border-top:2px solid var(--blue);background:var(--panel);font:13px -apple-system,sans-serif;max-width:620px}
+.thread.addr{border-top-color:var(--yellow)} .thread.pend{border-top-color:var(--purple)} .thread.res{border-top-color:var(--green)}
+.thead{display:flex;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border);gap:8px}
+.thead .lbl{font-weight:600}
+.thead .acts{margin-left:auto;color:var(--dim);display:flex;gap:10px}
+.cmt{padding:8px 10px 8px 40px;position:relative;border-bottom:1px solid #2a2a2a}
+.cmt .av{position:absolute;left:10px;top:9px;width:22px;height:22px;border-radius:50%;background:#444;display:flex;align-items:center;justify-content:center;font-size:11px}
+.cmt .who{font-weight:600}
+.cmt .who .t{color:var(--dim);font-weight:400;font-size:12px;margin-left:6px}
+.cmt .body{margin-top:4px;line-height:1.45}
+.cmt .body p{margin:4px 0}
+.cmt .body code{background:#ffffff1a;padding:1px 4px;border-radius:3px;font:12px Menlo,monospace}
+.cmt .body pre{background:#0d0d0d;padding:6px 8px;border-radius:3px;font:12px Menlo,monospace;margin:6px 0}
+.cmt .body ul{margin:4px 0;padding-left:20px}
+.cmt .body blockquote{margin:4px 0;padding-left:8px;border-left:3px solid #555;color:var(--dim)}
+.raw{white-space:pre-wrap;font:12px Menlo,monospace;color:#bbb}
+.reply{padding:8px 10px}
+.reply textarea{width:100%;height:44px;background:#313131;border:1px solid var(--border);color:var(--fg);font:13px -apple-system,sans-serif;padding:6px}
+.btns{display:flex;justify-content:flex-end;gap:6px;margin-top:6px}
+.btn{background:var(--accent);color:#fff;padding:3px 10px;border-radius:2px;font-size:12px}
+.btn.sec{background:#3a3d41}
+.tip{position:absolute;background:#252526;border:1px solid #454545;box-shadow:0 2px 8px #000a;padding:8px 10px;width:320px;font:13px -apple-system,sans-serif;line-height:1.45;z-index:5}
+.tip code{background:#ffffff1a;padding:1px 4px;border-radius:3px;font:12px Menlo,monospace}
+.tip p{margin:4px 0}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cmp .cap{color:var(--dim);font-size:12px;margin-bottom:4px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+td,th{border:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--side)}

@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><title>REVIEW NOTES view</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
+<p><a href="index.html">&larr; index</a></p>
+<h1>REVIEW NOTES view</h1>
+<p class="note">The new Pending icon is a purple clock. The badge counts open, addressed, and pending notes (here 3 of 4). Pending rows get the same inline actions as open and addressed rows (Resolve, Delete). The tooltip renders the first turn as markdown, and its status line reads "pending".</p>
+<div class="win"><div class="sidebar" style="position:relative">
+<div class="hdr">REVIEW NOTES <span class="badge">3</span></div>
+<div class="row">&#9662; <span>git.ts</span> <span class="desc">src &middot; 2</span></div>
+<div class="row l1"><span class="ico i-open">&#9679;</span>Why is retries hard-coded? <span class="desc">:41</span></div>
+<div class="row l1"><span class="ico i-res">&#10003;</span>Typo in comment <span class="desc">:88</span><span class="acts">&#8634; &#128465;</span></div>
+<div class="row">&#9662; <span>notesStore.ts</span> <span class="desc">src &middot; 2</span></div>
+<div class="row l1 sel"><span class="ico i-pend">&#9719;</span>Does this run on every keystroke? <span class="desc">:715</span><span class="acts">&#10003; &#128465;</span></div>
+<div class="row l1"><span class="ico i-addr">&#9675;</span>Rename foo to bar <span class="desc">:482</span></div>
+<div class="tip" style="left:120px;top:150px">
+<p>Does this run on every keystroke? If so, can we <b>debounce</b> it? Also, add a test.</p>
+<p>Status: pending</p>
+</div>
+</div>
+<div class="editor"><div class="tabs">notesStore.ts (Base &harr; Working)</div><div class="ln add"><span class="n">715</span>  refreshDerived(): void {</div></div>
+</div>
+<p class="note">Before, the same tooltip shows the literal text <code>can we **debounce** it?</code></p>
+</div></body></html>
