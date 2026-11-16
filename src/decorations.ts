@@ -18,43 +18,50 @@ const changeKindFor = (file: ReviewFile): ChangeKind =>
 
 export const WAIT_TOOLTIP = "Waiting on the agent: still expected to change.";
 
-const WAIT_QUERY = "wait";
-const WAIT_SUFFIX = `,${WAIT_QUERY}`;
-const WAIT_COLOR = new vscode.ThemeColor(
+export const SOME_WAITING_TOOLTIP =
+  "Some files are waiting on the agent: still expected to change.";
+
+const DIM_QUERY = "dim";
+const WAIT_SUFFIX = ",wait";
+const DIM_SUFFIX = `,${DIM_QUERY}`;
+export const DIM_COLOR = new vscode.ThemeColor(
   "gitDecoration.ignoredResourceForeground",
 );
+
+export type ReviewItemTone = "normal" | "waiting" | "dimmed";
 
 // The change kind travels in the URI query so the decoration provider can
 // answer from the URI alone
 export const createReviewItemUri = (
   file: ReviewFile,
-  waiting = false,
+  tone: ReviewItemTone = "normal",
 ): vscode.Uri =>
   vscode.Uri.from({
     scheme: REVIEW_ITEM_SCHEME,
     path: `/${file.path}`,
-    query: waiting
-      ? `${changeKindFor(file)}${WAIT_SUFFIX}`
-      : changeKindFor(file),
+    query:
+      changeKindFor(file) +
+      (tone === "waiting" ? WAIT_SUFFIX : tone === "dimmed" ? DIM_SUFFIX : ""),
   });
 
 // Folder rows carry no decoration (no query -> provider returns undefined),
-// matching the badge-less folders of the CHANGES tree, unless muted for wait
+// matching the badge-less folders of the CHANGES tree, unless dimmed
 export const createReviewFolderUri = (
   path: string,
-  waiting = false,
+  dimmed = false,
 ): vscode.Uri =>
   vscode.Uri.from({
     scheme: REVIEW_ITEM_SCHEME,
     path: `/${path}`,
-    query: waiting ? WAIT_QUERY : "",
+    query: dimmed ? DIM_QUERY : "",
   });
 
-export const createWaitingClusterHeaderUri = (clusterKey: string): vscode.Uri =>
+// The /header/ prefix keeps a header's decoration off any file named like it
+export const createDimmedHeaderUri = (id: string): vscode.Uri =>
   vscode.Uri.from({
     scheme: REVIEW_ITEM_SCHEME,
-    path: `/cluster-header/${clusterKey}`,
-    query: WAIT_QUERY,
+    path: `/header/${id}`,
+    query: DIM_QUERY,
   });
 
 // The Unclustered header sets both a label and this resourceUri: the label
@@ -105,14 +112,21 @@ const DECORATIONS: Record<ChangeKind, vscode.FileDecoration> = {
 const WAITING_DECORATIONS = Object.fromEntries(
   Object.entries(DECORATIONS).map(([kind, decoration]) => [
     kind,
-    new vscode.FileDecoration(decoration.badge, WAIT_TOOLTIP, WAIT_COLOR),
+    new vscode.FileDecoration(decoration.badge, WAIT_TOOLTIP, DIM_COLOR),
   ]),
 ) as Record<ChangeKind, vscode.FileDecoration>;
 
-const WAITING_FOLDER_DECORATION = new vscode.FileDecoration(
+const DIMMED_DECORATIONS = Object.fromEntries(
+  Object.entries(DECORATIONS).map(([kind, decoration]) => [
+    kind,
+    new vscode.FileDecoration(decoration.badge, decoration.tooltip, DIM_COLOR),
+  ]),
+) as Record<ChangeKind, vscode.FileDecoration>;
+
+const DIMMED_ROW_DECORATION = new vscode.FileDecoration(
   undefined,
-  WAIT_TOOLTIP,
-  WAIT_COLOR,
+  undefined,
+  DIM_COLOR,
 );
 
 export const createReviewDecorationProvider =
@@ -124,12 +138,17 @@ export const createReviewDecorationProvider =
       if (uri.query === UNCLUSTERED_HEADER_QUERY) {
         return UNCLUSTERED_HEADER_DECORATION;
       }
-      if (uri.query === WAIT_QUERY) {
-        return WAITING_FOLDER_DECORATION;
+      if (uri.query === DIM_QUERY) {
+        return DIMMED_ROW_DECORATION;
       }
       if (uri.query.endsWith(WAIT_SUFFIX)) {
         return WAITING_DECORATIONS[
           uri.query.slice(0, -WAIT_SUFFIX.length) as ChangeKind
+        ];
+      }
+      if (uri.query.endsWith(DIM_SUFFIX)) {
+        return DIMMED_DECORATIONS[
+          uri.query.slice(0, -DIM_SUFFIX.length) as ChangeKind
         ];
       }
       return DECORATIONS[uri.query as ChangeKind];

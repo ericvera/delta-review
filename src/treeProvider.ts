@@ -7,16 +7,20 @@ import {
   clusterContextValue,
   clusterCountDescription,
   clusterFilesForKey,
+  clusterHeaderTone,
+  everyFileWaiting,
   filterByStatus,
-  isWaitingClusterKey,
   isWaitingFile,
 } from "./clusters";
 import {
+  DIM_COLOR,
+  ReviewItemTone,
+  SOME_WAITING_TOOLTIP,
   WAIT_TOOLTIP,
+  createDimmedHeaderUri,
   createReviewFolderUri,
   createReviewItemUri,
   createUnclusteredHeaderUri,
-  createWaitingClusterHeaderUri,
 } from "./decorations";
 import { escapeMarkdownText } from "./markdown";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
@@ -440,7 +444,8 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.Expanded,
       );
-      item.iconPath = new vscode.ThemeIcon("check");
+      item.iconPath = new vscode.ThemeIcon("check", DIM_COLOR);
+      item.resourceUri = createDimmedHeaderUri("reviewed-bucket");
       // Plain count over the whole model — auto files included
       item.description = String(
         this.model === undefined
@@ -467,13 +472,19 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (element.kind === "folder") {
       // Private scheme keeps git's propagated "contains changes" dot off the
       // rows — folders carry no badge, like the CHANGES tree
+      const scopeFiles = this.folderScopeFiles(element).filter((file) =>
+        file.path.startsWith(`${element.path}/`),
+      );
       const clusterModel = this.getClusterModel();
       const waiting =
         element.clusterKey !== undefined &&
         clusterModel !== undefined &&
-        isWaitingClusterKey(clusterModel, element.clusterKey);
+        everyFileWaiting(clusterModel, scopeFiles);
       const item = new vscode.TreeItem(
-        createReviewFolderUri(element.path, waiting),
+        createReviewFolderUri(
+          element.path,
+          waiting || element.inReviewedBucket === true,
+        ),
         this.isCollapsed(collapseKeyFor(element), false)
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.Expanded,
@@ -489,12 +500,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
           element.status === FileReviewStatus.Reviewed);
       // Scoped to what this row actually renders, so a needs-review folder
       // never reports on the same paths shown under the Reviewed group
-      item.contextValue = folderContextValue(
-        this.folderScopeFiles(element).filter((file) =>
-          file.path.startsWith(`${element.path}/`),
-        ),
-        reviewedScope,
-      );
+      item.contextValue = folderContextValue(scopeFiles, reviewedScope);
       item.tooltip = waiting
         ? `${element.path}\n\n${WAIT_TOOLTIP}`
         : element.path;
@@ -505,12 +511,19 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     // Custom scheme: file icons still resolve from the name, but only our
     // decoration provider (M/A/D letters + colors) applies, not git's
     const clusterModel = this.getClusterModel();
-    const waiting =
-      this.isGrouped() &&
-      file.status === FileReviewStatus.NeedsReview &&
-      clusterModel !== undefined &&
-      isWaitingFile(clusterModel, file);
-    const item = new vscode.TreeItem(createReviewItemUri(file, waiting));
+    let tone: ReviewItemTone = "normal";
+    if (this.isGrouped()) {
+      if (
+        file.status === FileReviewStatus.NeedsReview &&
+        clusterModel !== undefined &&
+        isWaitingFile(clusterModel, file)
+      ) {
+        tone = "waiting";
+      } else if (file.status === FileReviewStatus.Reviewed) {
+        tone = "dimmed";
+      }
+    }
+    const item = new vscode.TreeItem(createReviewItemUri(file, tone));
     item.id = `file:${file.path}`;
     item.contextValue = fileContextValue(file);
 
@@ -577,7 +590,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     ) {
       notes.push("Changed since last reviewed");
     }
-    if (waiting) {
+    if (tone === "waiting") {
       notes.push(WAIT_TOOLTIP);
     }
     if (notes.length > 0) {
@@ -627,19 +640,32 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
           ? undefined
           : clusterBucketForKey(clusterModel, element.clusterKey);
       item.label = bucket?.label ?? "";
-      item.iconPath = new vscode.ThemeIcon("layers");
-      if (
-        bucket !== undefined &&
-        clusterModel !== undefined &&
-        isWaitingClusterKey(clusterModel, element.clusterKey)
-      ) {
-        item.resourceUri = createWaitingClusterHeaderUri(element.clusterKey);
-        item.tooltip =
-          bucket.summary === ""
-            ? WAIT_TOOLTIP
-            : `${bucket.summary}\n\n${WAIT_TOOLTIP}`;
-      } else {
+      const tone =
+        bucket === undefined
+          ? { dimmed: false, hourglass: false }
+          : clusterHeaderTone(bucket);
+      item.iconPath = new vscode.ThemeIcon(
+        tone.hourglass ? "watch" : "layers",
+        tone.dimmed ? DIM_COLOR : undefined,
+      );
+      if (tone.dimmed) {
+        item.resourceUri = createDimmedHeaderUri(
+          `cluster-${element.clusterKey}`,
+        );
+      }
+      const waitLine =
+        bucket?.wait === true
+          ? WAIT_TOOLTIP
+          : tone.hourglass
+            ? SOME_WAITING_TOOLTIP
+            : undefined;
+      if (waitLine === undefined) {
         item.tooltip = bucket?.summary;
+      } else {
+        item.tooltip =
+          bucket?.summary === undefined || bucket.summary === ""
+            ? waitLine
+            : `${bucket.summary}\n\n${waitLine}`;
       }
     }
     item.description = clusterCountDescription(
