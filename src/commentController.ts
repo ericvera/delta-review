@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
 import { Git } from "./git";
 import { ReviewModel } from "./model";
-import { Note, NoteSide, NoteStatus } from "./notes";
+import { Note, NoteSide } from "./notes";
 import {
   clampNoteRange,
   NoteLineSource,
@@ -12,7 +12,7 @@ import {
   noteAnchorLines,
   noteTargetFor,
 } from "./noteTarget";
-import { NoteThread } from "./noteThreads";
+import { NoteThread, ThreadStatus, deriveThreadStatus } from "./noteThreads";
 import {
   appendReviewerTurn,
   createNote,
@@ -36,15 +36,17 @@ import type { CommentDisplay } from "./threadRender";
 // unresolve, reply-to-reopen). Model/git access is injected as callbacks so
 // the controller always sees the extension's current state.
 
-const statusLabels: Record<NoteStatus, string> = {
+const statusLabels: Record<ThreadStatus, string> = {
   open: "Open",
   addressed: "Addressed",
+  pending: "Pending",
   resolved: "Resolved",
 };
 
-const statusContextValues: Record<NoteStatus, string> = {
+const statusContextValues: Record<ThreadStatus, string> = {
   open: "openNote",
   addressed: "addressedNote",
+  pending: "pendingNote",
   resolved: "resolvedNote",
 };
 
@@ -315,7 +317,7 @@ export const createNoteCommentController = (
     // Invariant: this never flips a live thread false→true — VS Code would
     // then build a second reply button. The reply box appears only on a
     // freshly created thread (see restyle); here it only ever goes true→false
-    // as an addressed note reopens or resolves.
+    // as a replyable (addressed or pending) note reopens or resolves.
     commentThread.canReply = canReplyFor(thread.status);
   };
 
@@ -412,9 +414,9 @@ export const createNoteCommentController = (
 
   // The single restyle entry point for a cached thread: a reply box may only
   // appear on a newly created thread, so a not-yet-replyable thread going
-  // addressed is recreated rather than flipped in place. The recreate drops an
-  // in-progress turn edit on that thread (the typed text lives in the disposed
-  // widget either way). It never recurses — the fresh thread is replyable.
+  // replyable (addressed or pending) is recreated rather than flipped in
+  // place. The recreate drops an in-progress turn edit on that thread (the
+  // typed text lives in the disposed widget either way). It never recurses — the fresh thread is replyable.
   const restyle = (entry: ThreadEntry, noteThread: NoteThread): void => {
     if (
       shouldRecreateThread(entry.thread.canReply !== false, noteThread.status)
@@ -818,7 +820,10 @@ export const createNoteCommentController = (
             entry.noteThread.turns.splice(mergedIndex, 1);
           }
           entry.noteThread.note.turns.splice(turnIndex, 1);
-          entry.noteThread.status = remaining.status;
+          entry.noteThread.status = deriveThreadStatus(
+            remaining.status,
+            entry.noteThread.turns,
+          );
           entry.noteThread.note.status = remaining.status;
           restyle(entry, entry.noteThread);
         }
@@ -875,7 +880,10 @@ export const createNoteCommentController = (
       );
       const entry = threadCache.get(noteId);
       if (entry !== undefined) {
-        entry.noteThread.status = note.status;
+        entry.noteThread.status = deriveThreadStatus(
+          note.status,
+          entry.noteThread.turns,
+        );
         entry.noteThread.note.status = note.status;
         restyle(entry, entry.noteThread);
       }
@@ -917,7 +925,10 @@ export const createNoteCommentController = (
           text: reply.text,
           at,
         });
-        entry.noteThread.status = note.status;
+        entry.noteThread.status = deriveThreadStatus(
+          note.status,
+          entry.noteThread.turns,
+        );
         entry.noteThread.note.status = note.status;
         restyle(entry, entry.noteThread);
       }

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import type { Git } from "./git";
 import { mapRangeThroughHunks, parseUnifiedDiffHunks } from "./noteAnchor";
-import { mergeThreads } from "./noteThreads";
+import { mergeThreads, persistedStatus } from "./noteThreads";
 import {
   archiveFileName,
   notesFileName,
@@ -496,7 +496,7 @@ const recomputeStatus = async (
     () => false,
   )[0];
   if (thread !== undefined) {
-    note.status = thread.status;
+    note.status = persistedStatus(thread.status);
   }
 };
 
@@ -714,7 +714,7 @@ export const refreshDerived = async (
   for (const [index, note] of file.notes.entries()) {
     const thread = threads[index];
     if (thread !== undefined) {
-      note.status = thread.status;
+      note.status = persistedStatus(thread.status);
     }
     let currentBlob: string | undefined;
     if (note.side === "working") {

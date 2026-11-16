@@ -18,14 +18,18 @@ export type ThreadTurn = {
   // ISO-8601 UTC timestamp
   at: string;
   anchor?: ResponseAnchor;
+  // agent turns only: the reply leaves work queued
+  pending?: true;
 };
+
+export type ThreadStatus = NoteStatus | "pending";
 
 export interface NoteThread {
   note: Note;
   turns: ThreadTurn[];
-  // Derived: explicit resolve wins, else last speaker (agent → addressed,
-  // reviewer → open)
-  status: NoteStatus;
+  // Derived: explicit resolve wins, else last speaker (pending agent →
+  // pending, agent → addressed, reviewer → open)
+  status: ThreadStatus;
   // Newest applied (non-dangling) anchor; consumers use it for relocation
   // and the base→working side flip
   effectiveAnchor?: ResponseAnchor;
@@ -41,6 +45,25 @@ const compareTurns = (a: ThreadTurn, b: ThreadTurn): number => {
   }
   return timeA - timeB;
 };
+
+export const deriveThreadStatus = (
+  noteStatus: NoteStatus,
+  turns: readonly ThreadTurn[],
+): ThreadStatus => {
+  if (noteStatus === "resolved") {
+    return "resolved";
+  }
+  const lastTurn = turns[turns.length - 1];
+  if (lastTurn === undefined || lastTurn.author !== "agent") {
+    return "open";
+  }
+  return lastTurn.pending === true ? "pending" : "addressed";
+};
+
+// Pending is stored as addressed: older extensions reject unknown status
+// values in the notes file.
+export const persistedStatus = (status: ThreadStatus): NoteStatus =>
+  status === "pending" ? "addressed" : status;
 
 // Merges notes and responses into display threads. Responses referencing
 // unknown note ids are dropped; a missing/invalid responses file (undefined)
@@ -77,15 +100,7 @@ export const mergeThreads = (
     const agentTurns = agentTurnsByNoteId.get(note.id) ?? [];
     const turns = [...reviewerTurns, ...agentTurns].sort(compareTurns);
 
-    // A note always has at least one reviewer turn (enforced by the parser),
-    // so the merged list is never empty.
-    const lastTurn = turns[turns.length - 1];
-    const status: NoteStatus =
-      note.status === "resolved"
-        ? "resolved"
-        : lastTurn !== undefined && lastTurn.author === "agent"
-          ? "addressed"
-          : "open";
+    const status = deriveThreadStatus(note.status, turns);
 
     let effectiveAnchor: ResponseAnchor | undefined;
     for (let index = turns.length - 1; index >= 0; index--) {
@@ -109,7 +124,10 @@ export const mergeThreads = (
   });
 };
 
-// Threads still needing reviewer-visible work: derived status open. Outdated
-// is a flag, not a status — it never removes a thread from the work set.
+// Threads still needing work, mirroring the contract's actionable rule:
+// derived status open or pending. Outdated is a flag, not a status — it never
+// removes a thread from the work set.
 export const workSet = (threads: NoteThread[]): NoteThread[] =>
-  threads.filter((thread) => thread.status === "open");
+  threads.filter(
+    (thread) => thread.status === "open" || thread.status === "pending",
+  );

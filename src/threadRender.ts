@@ -1,14 +1,15 @@
-import type { NoteStatus } from "./notes";
+import type { ThreadStatus } from "./noteThreads";
 
 // Rendering decisions for inline note threads, kept free of the vscode API so
 // they stay unit-testable: when the VS Code thread has to be recreated rather
 // than restyled, and whether a rendered comment list actually changed.
 
-// The reply box doubles as the reopen affordance and only exists on addressed
-// threads: on open threads the reviewer edits their own turns instead, and
-// resolved threads must be unresolved first.
-export const canReplyFor = (status: NoteStatus): boolean =>
-  status === "addressed";
+// The reply box doubles as the reopen affordance and only exists on threads
+// the agent answered (addressed or pending): on open threads the reviewer
+// edits their own turns instead, and resolved threads must be unresolved
+// first.
+export const canReplyFor = (status: ThreadStatus): boolean =>
+  status === "addressed" || status === "pending";
 
 // VS Code duplicates a thread's reply button when `canReply` flips false→true
 // on a live thread: the lazily built reply form's async initialization and the
@@ -17,7 +18,7 @@ export const canReplyFor = (status: NoteStatus): boolean =>
 // ever appear via dispose + recreate.
 export const shouldRecreateThread = (
   currentCanReply: boolean,
-  nextStatus: NoteStatus,
+  nextStatus: ThreadStatus,
 ): boolean => !currentCanReply && canReplyFor(nextStatus);
 
 // A rendered comment reduced to the fields VS Code is sent. `bodyIsMarkdown`

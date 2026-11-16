@@ -1,7 +1,6 @@
 import { basename, dirname } from "node:path";
 import * as vscode from "vscode";
-import type { NoteStatus } from "./notes";
-import type { NoteThread } from "./noteThreads";
+import type { NoteThread, ThreadStatus } from "./noteThreads";
 
 // REVIEW NOTES tree: notes grouped by file, rendered as a sibling SCM section
 // of the DELTA REVIEW view. Deliberately decoupled from ReviewTreeProvider —
@@ -40,8 +39,9 @@ const noteLabel = (thread: NoteThread): string => {
 };
 
 // Status icons: filled dot = open (yours to follow up), outline = addressed
-// (awaiting you — no half-full codicon exists), check = resolved
-const noteIcon = (status: NoteStatus): vscode.ThemeIcon => {
+// (awaiting you — no half-full codicon exists), clock = pending (answered,
+// work still queued), check = resolved
+const noteIcon = (status: ThreadStatus): vscode.ThemeIcon => {
   switch (status) {
     case "open":
       return new vscode.ThemeIcon(
@@ -52,6 +52,11 @@ const noteIcon = (status: NoteStatus): vscode.ThemeIcon => {
       return new vscode.ThemeIcon(
         "circle-large-outline",
         new vscode.ThemeColor("charts.yellow"),
+      );
+    case "pending":
+      return new vscode.ThemeIcon(
+        "clock",
+        new vscode.ThemeColor("charts.purple"),
       );
     case "resolved":
       return new vscode.ThemeIcon(

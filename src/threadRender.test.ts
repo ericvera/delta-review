@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NoteStatus } from "./notes";
+import type { ThreadStatus } from "./noteThreads";
 import {
   canReplyFor,
   sameCommentDisplays,
@@ -7,7 +7,7 @@ import {
 } from "./threadRender";
 import type { CommentDisplay } from "./threadRender";
 
-const statuses: NoteStatus[] = ["open", "addressed", "resolved"];
+const statuses: ThreadStatus[] = ["open", "addressed", "pending", "resolved"];
 
 // Preview mode; the numeric values mirror vscode.CommentMode
 const PREVIEW = 1;
@@ -28,15 +28,16 @@ const display = (overrides: Partial<CommentDisplay> = {}): CommentDisplay => ({
 });
 
 describe("canReplyFor", () => {
-  it("is true only for addressed", () => {
+  it("is true only for addressed and pending", () => {
     expect(canReplyFor("open")).toBe(false);
     expect(canReplyFor("addressed")).toBe(true);
+    expect(canReplyFor("pending")).toBe(true);
     expect(canReplyFor("resolved")).toBe(false);
   });
 });
 
 describe("shouldRecreateThread", () => {
-  const cases: [NoteStatus, NoteStatus, boolean][] = [
+  const cases: [ThreadStatus, ThreadStatus, boolean][] = [
     ["open", "addressed", true],
     ["resolved", "addressed", true],
     ["addressed", "addressed", false],
@@ -53,6 +54,14 @@ describe("shouldRecreateThread", () => {
       expect(shouldRecreateThread(canReplyFor(current), next)).toBe(expected);
     });
   }
+
+  it("recreates a non-replyable thread going pending", () => {
+    expect(shouldRecreateThread(false, "pending")).toBe(true);
+  });
+
+  it("restyles an already replyable thread going pending in place", () => {
+    expect(shouldRecreateThread(true, "pending")).toBe(false);
+  });
 
   it("never recreates a thread that is already replyable", () => {
     for (const next of statuses) {
