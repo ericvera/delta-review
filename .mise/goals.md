@@ -31,7 +31,7 @@ when looking at delta review clusters, it takes me a few seconds to differentiat
 - A cluster with any unreviewed, non-waiting file stays undimmed; its waiting files dim inside it.
 - The x/z count keeps its current meaning (reviewed / total).
 - Reviewed files are not listed inside clusters today; "reviewed files dim" applies to the Reviewed bucket, whose header dims too.
-- Dimming covers cluster/folder icons as well as labels.
+- Dimming covers the cluster icon and labels; folder/file icons come from the file icon theme and cannot take a color, so on those rows only the label (and badge) dims.
 - No hourglass codicon may exist; `watch` is the candidate fallback.
 - Unclustered and Auto rows unchanged.
 
