@@ -11,4 +11,7 @@ the "watch" icon was a really bad idea. Is there a better icon?
 ## Open questions
 
 1. Which codicon replaces `watch`?
-2. Rename the `hourglass` field to match?
+
+## Decisions
+
+- Rename `clusterHeaderTone`'s `hourglass` field to `waiting`; update its tests.
