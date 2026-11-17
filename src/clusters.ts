@@ -158,18 +158,18 @@ export const clusterBodyState = (
 };
 
 // A cluster header dims once nothing in it is actionable: every needs-review
-// member is waiting. The hourglass marks a cluster with pending agent work,
+// member is waiting. The waiting icon marks a cluster with pending agent work,
 // which a reviewed member under waitPaths alone does not signal.
 export const clusterHeaderTone = (
   bucket: ClusterBucket,
-): { dimmed: boolean; hourglass: boolean } => {
+): { dimmed: boolean; waiting: boolean } => {
   const needsReview = filterByStatus(
     bucket.files,
     FileReviewStatus.NeedsReview,
   );
   return {
     dimmed: needsReview.every((file) => isWaitingMember(bucket, file)),
-    hourglass:
+    waiting:
       bucket.wait === true ||
       needsReview.some((file) => bucket.waitingPaths?.has(file.path) === true),
   };

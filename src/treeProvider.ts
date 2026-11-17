@@ -642,10 +642,10 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       item.label = bucket?.label ?? "";
       const tone =
         bucket === undefined
-          ? { dimmed: false, hourglass: false }
+          ? { dimmed: false, waiting: false }
           : clusterHeaderTone(bucket);
       item.iconPath = new vscode.ThemeIcon(
-        tone.hourglass ? "watch" : "layers",
+        tone.waiting ? "agent" : "layers",
         tone.dimmed ? DIM_COLOR : undefined,
       );
       if (tone.dimmed) {
@@ -656,7 +656,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       const waitLine =
         bucket?.wait === true
           ? WAIT_TOOLTIP
-          : tone.hourglass
+          : tone.waiting
             ? SOME_WAITING_TOOLTIP
             : undefined;
       if (waitLine === undefined) {

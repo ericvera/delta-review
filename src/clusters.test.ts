@@ -1280,57 +1280,57 @@ describe("clusterHeaderTone", () => {
       : {}),
   });
 
-  it("dims an empty bucket without an hourglass", () => {
+  it("dims an empty bucket without a waiting icon", () => {
     expect(clusterHeaderTone(bucket([]))).toEqual({
       dimmed: true,
-      hourglass: false,
+      waiting: false,
     });
   });
 
-  it("dims an all-reviewed bucket without an hourglass", () => {
+  it("dims an all-reviewed bucket without a waiting icon", () => {
     expect(
       clusterHeaderTone(bucket([reviewedFile("a"), reviewedFile("b")])),
-    ).toEqual({ dimmed: true, hourglass: false });
+    ).toEqual({ dimmed: true, waiting: false });
   });
 
   it("does not dim with a non-waiting needs-review member", () => {
     expect(clusterHeaderTone(bucket([file("a"), reviewedFile("b")]))).toEqual({
       dimmed: false,
-      hourglass: false,
+      waiting: false,
     });
   });
 
-  it("dims with an hourglass when every needs-review member is waiting", () => {
+  it("dims with a waiting icon when every needs-review member is waiting", () => {
     expect(
       clusterHeaderTone(
         bucket([file("a"), file("b"), reviewedFile("c")], {
           waitingPaths: ["a", "b"],
         }),
       ),
-    ).toEqual({ dimmed: true, hourglass: true });
+    ).toEqual({ dimmed: true, waiting: true });
   });
 
-  it("shows an hourglass without dimming for a mix of waiting and not", () => {
+  it("shows a waiting icon without dimming for a mix of waiting and not", () => {
     expect(
       clusterHeaderTone(
         bucket([file("a"), file("b")], { waitingPaths: ["a"] }),
       ),
-    ).toEqual({ dimmed: false, hourglass: true });
+    ).toEqual({ dimmed: false, waiting: true });
   });
 
-  it("dims with an hourglass for a wait cluster with needs-review members", () => {
+  it("dims with a waiting icon for a wait cluster with needs-review members", () => {
     expect(clusterHeaderTone(bucket([file("a")], { wait: true }))).toEqual({
       dimmed: true,
-      hourglass: true,
+      waiting: true,
     });
   });
 
-  it("shows no hourglass when only a reviewed member is waiting", () => {
+  it("shows no waiting icon when only a reviewed member is waiting", () => {
     expect(
       clusterHeaderTone(
         bucket([reviewedFile("a"), file("b")], { waitingPaths: ["a"] }),
       ),
-    ).toEqual({ dimmed: false, hourglass: false });
+    ).toEqual({ dimmed: false, waiting: false });
   });
 });
 

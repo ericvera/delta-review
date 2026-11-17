@@ -65,7 +65,7 @@ The plugin ships two skills: `/delta:cluster` (this section) and `/delta:review-
 - The same contract declares moves: a file moved within the repo, or ported in from another project — the case git cannot detect at all, since the origin was never in your history. It also declares extractions: the file a new one was carved out of, and which of its lines.
 - Provenance is declared, never inferred: Claude records only the moves and extractions it made or that you described — it never guesses one from the diff. (The panel still recognizes ordinary git renames on its own, contract or not.)
 - Claude can also leave a one-line remark on any file. That remark and the file's origin ride together in a pinned, read-only comment at the top of its diff — context before the code, with nothing to reply to or resolve.
-- A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last. Clusters with nothing left to review (done, waiting on the agent, or empty) render dimmed, and a `watch` (hourglass-style) icon marks a cluster still waiting on the agent.
+- A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last. Clusters with nothing left to review (done, waiting on the agent, or empty) render dimmed, and an `agent` icon marks a cluster still waiting on the agent.
 - A cluster row's `$(diff-multiple)` action opens all its needs-review files in one combined diff, each against its own base.
 - Grouping is pure presentation — toggling it never changes what's marked reviewed.
 
