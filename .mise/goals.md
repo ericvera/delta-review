@@ -11,16 +11,16 @@ the "watch" icon was a really bad idea. Is there a better icon?
 ## Decisions
 
 - Rename `clusterHeaderTone`'s `hourglass` field to `waiting`; update its tests.
-- Icon: built-in `claude` codicon (in VS Code since ≤1.115; engine is ^1.140). Applies to waiting cluster headers only; dims via existing DIM_COLOR.
+- Icon: built-in `agent` codicon (VS Code's vendor-neutral agent icon, in VS Code since ≤1.115; engine is ^1.140). Applies to waiting cluster headers only; dims via existing DIM_COLOR.
 
 ## Assumptions
 
 - Tooltips (WAIT_TOOLTIP, SOME_WAITING_TOOLTIP) unchanged.
-- Docs naming `watch` (README.md:68, DEVELOPMENT.md:132, :267) updated to `claude`.
+- Docs naming `watch` (README.md:68, DEVELOPMENT.md:132, :267) updated to `agent`.
 - Icon swap is visual-only: manual check in dev host, no test; field rename covered by existing tests.
 
 ## Proposal
 
 - Issue: waiting cluster headers use `watch`, which reads poorly and sits too close to the notes tree's `clock`.
-- Fix: swap to the `claude` codicon, rename `hourglass` → `waiting` (with tests), update the three doc lines.
+- Fix: swap to the `agent` codicon, rename `hourglass` → `waiting` (with tests), update the three doc lines.
 - Skips: spec and critic (one module, no schema/API change).
