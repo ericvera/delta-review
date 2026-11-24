@@ -34,6 +34,7 @@ import {
   fileContextValue,
   folderContextValue,
 } from "./rowContext";
+import { SKIM_TOOLTIP, withLevelTag } from "./reviewLevel";
 import { parentOf, treeLevel } from "./treeParents";
 import { Triage } from "./triage";
 
@@ -524,15 +525,18 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       showDirectory && directory !== "." ? directory : undefined;
     // The origin segment ("← [donor] <origin> · adapted") is assembled by the
     // display module; every abbreviation rule lives there, none here
-    item.description = buildRowDescription({
-      path: file.path,
-      directoryText,
-      movedFrom: file.movedFrom,
-      moveOrigin: file.moveOrigin,
-      donor: file.donor,
-      moveClassification: file.moveClassification,
-      originLines: file.originLines,
-    });
+    item.description = withLevelTag(
+      file.reviewLevel,
+      buildRowDescription({
+        path: file.path,
+        directoryText,
+        movedFrom: file.movedFrom,
+        moveOrigin: file.moveOrigin,
+        donor: file.donor,
+        moveClassification: file.moveClassification,
+        originLines: file.originLines,
+      }),
+    );
     // Hover always leads with the full repo-relative path (the row usually
     // truncates it), with any status notes on separate lines
     const tooltip = new vscode.MarkdownString();
@@ -556,6 +560,9 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (file.fileNote !== undefined && file.fileNote !== "") {
       // Contract text, escaped for the same reason as the move note
       notes.push(escapeMarkdownText(file.fileNote));
+    }
+    if (file.reviewLevel === "skim") {
+      notes.push(SKIM_TOOLTIP);
     }
     // Worded by the display module, alongside the row and title forms
     const statusLine = buildTooltipStatusLine({
