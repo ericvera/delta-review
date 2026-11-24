@@ -14,8 +14,23 @@ I have another skill that defines different uses for the functionalities in delt
 - Release: skill-only changes bump plugin/.claude-plugin/plugin.json `version` (0.11.0 → 0.12.0); extension package.json (0.17.0) unchanged.
 - No Vitest test applies (no src change); checks are yarn lint / yarn build.
 
-## Open questions
+## Decisions
 
-1. Where guidance comes from (args, user message, calling skill) and precedence.
-2. Which rules guidance may replace (grouping, order, levels, notes content; also wait, label length, no-junk-drawer?).
-3. Notes document shape under guidance (title only + caller's sections, or keep Reading order).
+- Guidance sources: `/delta:cluster` arguments, the user's message, or a calling skill's instructions. Precedence: user > calling skill > defaults.
+- Guidance may replace everything not binding: grouping, `files` order, levels, wait flags, label length, the no-junk-drawer rule, notes content and document shape. Always binding regardless of guidance: schema/validation, location, atomic write, move/extraction evidence, document slug, rename/delete reply duty.
+- Under guidance the notes document is a title plus whatever sections the guidance asks for; `## Reading order` and `## Check` appear only if requested.
+
+## Assumptions
+
+- Overridable rules move out of the Contract into the Default workflow (or the Contract marks them as defaults), per CLAUDE.md's Contract/Default-workflow rule; each rule stated once.
+- Wording follows the review-notes precedent (plugin/skills/review-notes/SKILL.md:151).
+- The workflow's final report step still applies under guidance unless the guidance says otherwise.
+- Frontmatter description gains a trigger for running with caller/user guidance.
+- plugin/.claude-plugin/plugin.json bumps 0.11.0 → 0.12.0; extension version unchanged; no src or test change.
+- No mock: no extension UI change.
+
+## Proposal
+
+Issue: delta:cluster's Contract hard-binds grouping, order, levels, wait, notes content and document shape, so a user or calling skill can't steer them.
+Approach: in plugin/skills/cluster/SKILL.md, keep file-integrity rules binding, move the rest to the Default workflow as defaults that guidance (user > calling skill > defaults) replaces, shrink the guided notes document to title + requested sections; bump plugin to 0.12.0.
+Skips: spec and critic (single doc file, no schema/API change).
