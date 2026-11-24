@@ -3,9 +3,9 @@
   "started": "2026-11-24T17:21:51.675Z",
   "base": "main",
   "steps": {
-    "goals": null,
-    "spec": null,
-    "critic": null,
+    "goals": "done",
+    "spec": "skipped",
+    "critic": "skipped",
     "execute": null,
     "review": null,
     "gate": null
