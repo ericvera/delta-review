@@ -22,9 +22,7 @@ Evaluate the following. I look forward to seeing the mocks.
 
 ## Decisions
 
+- Notes on a cluster notes document anchor to the selected line range, like code notes; agent replies use the existing responses file; the notes file format gets a version bump.
+
 - Documents: the agent writes markdown files beside the contracts under `<git common dir>/delta-review/` (never committed); each cluster names its notes file, the branch document has a fixed name; the watcher widens to `*.md`.
 - Contract order applies in list mode only; tree (folder) mode keeps folders-first alphabetical.
-
-## Open questions
-
-3. How are notes on a cluster notes document anchored and versioned?
