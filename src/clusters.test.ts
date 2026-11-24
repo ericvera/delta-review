@@ -44,6 +44,7 @@ const file = (path: string, triage: Triage = "normal"): ReviewFile => ({
   moveClassification: undefined,
   originContentUnavailable: false,
   triage,
+  reviewLevel: "review",
 });
 
 const reviewedFile = (path: string, triage: Triage = "normal"): ReviewFile => ({
@@ -59,6 +60,8 @@ const contract = (
   clusters,
   moves: [],
   notes: new Map(),
+  lineNotes: new Map(),
+  levels: new Map(),
   waitPaths: [],
 });
 
@@ -70,6 +73,8 @@ const contractV2 = (
   clusters,
   moves,
   notes: new Map(),
+  lineNotes: new Map(),
+  levels: new Map(),
   waitPaths: [],
 });
 
@@ -77,7 +82,28 @@ const contractV3 = (
   clusters: ClustersContract["clusters"],
   moves: ClustersContract["moves"] = [],
   notes: ClustersContract["notes"] = new Map(),
-): ClustersContract => ({ version: 3, clusters, moves, notes, waitPaths: [] });
+): ClustersContract => ({
+  version: 3,
+  clusters,
+  moves,
+  notes,
+  lineNotes: new Map(),
+  levels: new Map(),
+  waitPaths: [],
+});
+
+const contractV4 = (
+  fields: Partial<Omit<ClustersContract, "version">> = {},
+): ClustersContract => ({
+  version: 4,
+  clusters: [],
+  moves: [],
+  notes: new Map(),
+  lineNotes: new Map(),
+  levels: new Map(),
+  waitPaths: [],
+  ...fields,
+});
 
 const move = (
   path: string,
@@ -188,13 +214,13 @@ describe("parseClustersContract", () => {
     const result = parseClustersContract(JSON.stringify({ clusters: [] }));
     expect(result).toEqual({
       ok: false,
-      error: 'missing "version" (extension supports 1, 2 and 3)',
+      error: 'missing "version" (extension supports 1, 2, 3 and 4)',
     });
   });
 
   it.each([
-    [0, "unsupported version 0 (extension supports 1, 2 and 3)"],
-    ["1", 'unsupported version "1" (extension supports 1, 2 and 3)'],
+    [0, "unsupported version 0 (extension supports 1, 2, 3 and 4)"],
+    ["1", 'unsupported version "1" (extension supports 1, 2, 3 and 4)'],
   ])("rejects version %j", (version, error) => {
     const result = parseClustersContract(
       JSON.stringify({ version, clusters: [] }),
@@ -312,13 +338,20 @@ describe("parseClustersContract", () => {
     expect(result).toEqual({ ok: true, contract: contractV3([]) });
   });
 
-  it("rejects version 4, naming all three supported versions", () => {
+  it("accepts a version 4 contract", () => {
     const result = parseClustersContract(
       JSON.stringify({ version: 4, clusters: [] }),
     );
+    expect(result).toEqual({ ok: true, contract: contractV4() });
+  });
+
+  it("rejects version 5, naming all four supported versions", () => {
+    const result = parseClustersContract(
+      JSON.stringify({ version: 5, clusters: [] }),
+    );
     expect(result).toEqual({
       ok: false,
-      error: "unsupported version 4 (extension supports 1, 2 and 3)",
+      error: "unsupported version 5 (extension supports 1, 2, 3 and 4)",
     });
   });
 });
@@ -899,6 +932,198 @@ describe("parseClustersContract notes", () => {
         }),
       ),
     ).toEqual({ ok: false, error: "move 1 must be an object" });
+  });
+});
+
+describe("parseClustersContract version 4 notes", () => {
+  const parseNotesV4 = (notes: unknown): ParseClustersResult =>
+    parseClustersContract(JSON.stringify({ version: 4, clusters: [], notes }));
+
+  it("keeps a string value as a file-level note", () => {
+    expect(parseNotesV4({ "a.ts": "remark" })).toEqual({
+      ok: true,
+      contract: contractV4({ notes: new Map([["a.ts", "remark"]]) }),
+    });
+  });
+
+  it("joins an array of strings with one space", () => {
+    expect(parseNotesV4({ "a.ts": ["first", "second"] })).toEqual({
+      ok: true,
+      contract: contractV4({ notes: new Map([["a.ts", "first second"]]) }),
+    });
+  });
+
+  it("splits ranged items from file-level strings", () => {
+    expect(
+      parseNotesV4({
+        "a.ts": [
+          "overall",
+          { text: "tricky loop", lines: [10, 14] },
+          { text: "one line", lines: [3, 3] },
+        ],
+      }),
+    ).toEqual({
+      ok: true,
+      contract: contractV4({
+        notes: new Map([["a.ts", "overall"]]),
+        lineNotes: new Map([
+          [
+            "a.ts",
+            [
+              { lines: [10, 14], text: "tricky loop" },
+              { lines: [3, 3], text: "one line" },
+            ],
+          ],
+        ]),
+      }),
+    });
+  });
+
+  it("drops empty strings and empty-text items", () => {
+    expect(
+      parseNotesV4({
+        "a.ts": ["", { text: "", lines: [1, 2] }, "kept"],
+        "b.ts": [],
+        "c.ts": "",
+      }),
+    ).toEqual({
+      ok: true,
+      contract: contractV4({ notes: new Map([["a.ts", "kept"]]) }),
+    });
+  });
+
+  it.each([
+    ["a number", 7],
+    ["null", null],
+    ["an object", { text: "x", lines: [1, 2] }],
+  ])("rejects a value that is %s", (_name, value) => {
+    expect(parseNotesV4({ "a.ts": value })).toEqual({
+      ok: false,
+      error: 'notes["a.ts"] must be a string or an array',
+    });
+  });
+
+  it.each([
+    ["a number", 7],
+    ["null", null],
+    ["an object without text", { lines: [1, 2] }],
+    ["an object with non-string text", { text: 3, lines: [1, 2] }],
+  ])("rejects an item that is %s", (_name, item) => {
+    expect(parseNotesV4({ "a.ts": ["ok", item] })).toEqual({
+      ok: false,
+      error:
+        'notes["a.ts"][1] must be a string or an object with "text" and "lines"',
+    });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["not an array", "1-2"],
+    ["too short", [1]],
+    ["too long", [1, 2, 3]],
+    ["non-integer", [1.5, 2]],
+    ["a string pair", ["1", "2"]],
+    ["starting below 1", [0, 2]],
+    ["ending before its start", [5, 4]],
+  ])("rejects lines that are %s", (_name, lines) => {
+    expect(parseNotesV4({ "a.ts": [{ text: "x", lines }] })).toEqual({
+      ok: false,
+      error:
+        'notes["a.ts"][0]: "lines" must be a [start, end] pair of integers with 1 <= start <= end',
+    });
+  });
+
+  it("rejects an array value in a version 3 contract with the string rule", () => {
+    expect(
+      parseClustersContract(
+        JSON.stringify({
+          version: 3,
+          clusters: [],
+          notes: { "a.ts": [{ text: "x", lines: [1, 2] }] },
+        }),
+      ),
+    ).toEqual({ ok: false, error: 'notes["a.ts"] must be a string' });
+  });
+
+  it("keeps fromLines and baseBlob on a version 4 repo move", () => {
+    expect(
+      parseClustersContract(
+        JSON.stringify({
+          version: 4,
+          clusters: [],
+          moves: [
+            {
+              path: "src/new.ts",
+              from: "src/old.ts",
+              origin: "repo",
+              baseBlob: "a".repeat(40),
+              fromLines: [[120, 180]],
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      contract: contractV4({
+        moves: [
+          move("src/new.ts", "src/old.ts", "repo", {
+            baseBlob: "a".repeat(40),
+            fromLines: [[120, 180]],
+          }),
+        ],
+      }),
+    });
+  });
+});
+
+describe("parseClustersContract levels", () => {
+  const parseLevels = (version: number, levels: unknown): ParseClustersResult =>
+    parseClustersContract(JSON.stringify({ version, clusters: [], levels }));
+
+  it("parses levels at version 3", () => {
+    const result = parseLevels(3, { "a.ts": "skim", "b.ts": "review" });
+    expect(result.ok && result.contract.levels).toEqual(
+      new Map([
+        ["a.ts", "skim"],
+        ["b.ts", "review"],
+      ]),
+    );
+  });
+
+  it("parses levels at version 1", () => {
+    const result = parseLevels(1, { "a.ts": "skim" });
+    expect(result.ok && result.contract.levels).toEqual(
+      new Map([["a.ts", "skim"]]),
+    );
+  });
+
+  it("parses levels at version 4", () => {
+    expect(parseLevels(4, { "a.ts": "skim" })).toEqual({
+      ok: true,
+      contract: contractV4({ levels: new Map([["a.ts", "skim"]]) }),
+    });
+  });
+
+  it.each([
+    ["an unknown word", "deep"],
+    ["a number", 1],
+    ["null", null],
+  ])("rejects a level that is %s", (_name, value) => {
+    expect(parseLevels(1, { "a.ts": value })).toEqual({
+      ok: false,
+      error: 'levels["a.ts"] must be "review" or "skim"',
+    });
+  });
+
+  it.each([
+    ["an array", ["a.ts"]],
+    ["null", null],
+    ["a string", "skim"],
+  ])("rejects levels that are %s", (_name, levels) => {
+    expect(parseLevels(2, levels)).toEqual({
+      ok: false,
+      error: '"levels" must be an object',
+    });
   });
 });
 
@@ -1626,12 +1851,12 @@ describe("loadClustersContract", () => {
   it("returns invalid with the parse error for a bad contract", async () => {
     await writeContract(
       "clusters-main.json",
-      JSON.stringify({ version: 4, clusters: [] }),
+      JSON.stringify({ version: 5, clusters: [] }),
     );
     const result = await loadClustersContract(gitWithCommonDir(".git"), "main");
     expect(result).toEqual({
       state: "invalid",
-      error: "unsupported version 4 (extension supports 1, 2 and 3)",
+      error: "unsupported version 5 (extension supports 1, 2, 3 and 4)",
     });
   });
 

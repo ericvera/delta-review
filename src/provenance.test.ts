@@ -35,6 +35,7 @@ const file = (
   moveClassification: undefined,
   originContentUnavailable: false,
   triage: "normal",
+  reviewLevel: "review",
   ...overrides,
 });
 

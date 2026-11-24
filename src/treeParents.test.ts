@@ -31,6 +31,7 @@ const file = (
   moveClassification: undefined,
   originContentUnavailable: false,
   triage: options.triage ?? "normal",
+  reviewLevel: "review",
 });
 
 const reviewed = (path: string, triage: Triage = "normal"): ReviewFile => ({

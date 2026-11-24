@@ -19,8 +19,10 @@ import {
 import {
   ClusterModel,
   clusterFilesForKey,
+  LineNote,
   loadClustersContract,
   resolveClusterModel,
+  ReviewLevel,
 } from "./clusters";
 import { createNoteCommentController } from "./commentController";
 import {
@@ -419,6 +421,14 @@ export const activate = async (
         contractResult.state === "ok"
           ? contractResult.contract.notes
           : new Map<string, string>();
+      const lineNotes =
+        contractResult.state === "ok"
+          ? contractResult.contract.lineNotes
+          : new Map<string, LineNote[]>();
+      const levels =
+        contractResult.state === "ok"
+          ? contractResult.contract.levels
+          : new Map<string, ReviewLevel>();
       // Slices this refresh writes go into its own copy and reach the shared
       // cache only once anchored, so a refresh superseded midway leaves no
       // unanchored sha behind for a later one to reuse
@@ -428,6 +438,8 @@ export const activate = async (
         branch,
         moves,
         notes,
+        lineNotes,
+        levels,
         hashCache,
         sliceCache: refreshSliceCache,
       });
@@ -464,6 +476,8 @@ export const activate = async (
             branch,
             moves,
             notes,
+            lineNotes,
+            levels,
             hashCache,
             sliceCache: refreshSliceCache,
           });

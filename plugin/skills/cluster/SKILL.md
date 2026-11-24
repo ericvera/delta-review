@@ -39,11 +39,11 @@ Sanitize the branch with `[^A-Za-z0-9._-]` → `-` (`feature/x` → `feature-x`;
 
 Never commit, stage, or push the contract. It lives under the git directory, invisible to `git status`, and must stay that way.
 
-### Schema (version 3)
+### Schema (version 4)
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "clusters": [
     {
       "label": "Rename fetchUser → getUser",
@@ -71,7 +71,17 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
     }
   ],
   "notes": {
-    "src/new/config.ts": "Extracted verbatim; only the import block changed"
+    "src/new/config.ts": "Extracted verbatim; only the import block changed",
+    "src/cache/store.ts": [
+      "New LRU store backing the cache layer",
+      {
+        "text": "Eviction runs before the size check on purpose",
+        "lines": [42, 51]
+      }
+    ]
+  },
+  "levels": {
+    "src/cache/store.test.ts": "skim"
   },
   "waitPaths": ["src/cache", "src/api.ts"]
 }
@@ -79,7 +89,7 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
 
 **One malformed entry, cluster or move, rejects the whole file** — the reviewer loses clustering _and_ every declaration, and sees a warning. Validate before renaming into place.
 
-- `version` — write exactly the integer `3` (the extension also accepts `1` and `2`; anything else rejects the file).
+- `version` — write `4` when any `notes` value is an array (holds a ranged item), else `3`; `levels` alone never bumps it. The extension accepts `1`-`4`; anything else rejects the file. The example is version 4 because it carries a ranged note.
 - `clusters` — an array; each entry an object with string `label` and string `summary`.
 - `files`, `patterns` — when present, arrays of strings. Each cluster needs at least one of the two non-empty.
 - `wait` — optional boolean on a cluster; `true` means you still expect it to change, and the reviewer sees it muted. Any non-boolean value rejects the file. See **Wait**.
@@ -92,6 +102,8 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
 - `fromLines` — optional: a non-empty array of 1-based inclusive `[start, end]` integer pairs into the origin, ascending and non-overlapping (each `start` greater than the previous `end`).
 - `note` — optional string.
 - `notes` — optional top-level object mapping a repo-relative path to a one-line string. An empty-string value counts as no note.
+- A `notes` value may instead be an array (version 4 only — a lower version rejects it); write one only when it holds a ranged item. Each item is a string (file-level; several join with one space) or `{ "text": string, "lines": [start, end] }`, a remark on the current file's 1-based inclusive lines, integers with `1 <= start <= end`. Any other item or `lines` shape rejects the file; an empty string or empty `text` counts as no note.
+- `levels` — optional top-level object mapping a repo-relative path to `"review"` or `"skim"`, at any version. A non-object, or any other value, rejects the file. See **Review levels**.
 
 Unknown keys are ignored. Accepted but silently dropped — costing you the declaration, not the file:
 
@@ -100,7 +112,7 @@ Unknown keys are ignored. Accepted but silently dropped — costing you the decl
 - A `repo` entry whose `from` equals its `path`.
 - A second entry for an already-declared `path` — first wins.
 - An entry whose `path` is outside the extension's review set.
-- A `notes` key naming a path outside the extension's review set.
+- A `notes` or `levels` key naming a path outside the extension's review set.
 - A `waitPaths` entry covering no clustered file in the review set (Unclustered and Auto files never show as waiting).
 
 ### Which review set a move's `path` must name
@@ -117,7 +129,7 @@ Declare only on evidence: a move you performed in the invoking task, or one the 
 - `baseBlob` — on an `external` entry, record the donor file's pre-move content with `git hash-object -w <donor file>` and store the printed id; a `repo` entry takes it from the merge base per **Declaring an extraction**. Unreadable donor (the common case on a cold run) → omit rather than guess: the diff then shows the whole file as an addition, and the row cannot say verbatim or adapted.
 - `note` — prose about how the file was adapted, nothing else. **verbatim/adapted/unchanged is not a contract field**; the extension computes it from content hashes.
 
-No commit SHAs anywhere, and no blob id other than `moves[].baseBlob`. Everything in `clusters` must be derivable from the current diff on every run; `moves`, `notes`, a cluster's `wait`, and `waitPaths` are the preserved exceptions, because neither provenance, a reviewer's remark, nor the agent's intent is recoverable from the diff.
+No commit SHAs anywhere, and no blob id other than `moves[].baseBlob`. Everything in `clusters` must be derivable from the current diff on every run; `moves`, `notes`, `levels`, a cluster's `wait`, and `waitPaths` are the preserved exceptions, because neither provenance, a reviewer's remark, nor the agent's intent is recoverable from the diff.
 
 ### Declaring an extraction
 
@@ -148,9 +160,18 @@ Relocation re-finds content already substantiated; it is not inferred provenance
 `notes` carries one line per file for the reviewer, separate from a move's `note`.
 
 - Write an entry for a file that warrants a one-line remark.
-- On a cold re-run, preserve existing entries unchanged.
+- A remark about specific lines is a ranged item; a remark about the whole file is a file-level string. Keep a value with no ranged item a single string.
+- On a cold re-run, preserve existing file-level strings and ranged items' `text` unchanged.
 - At the end of a task, the entry of a file that task touched may be rewritten.
 - Drop an entry whose path has left the review set.
+- Ranged items: the extension cannot re-anchor them (it only clamps). On every re-run, cold or end-of-task, re-read the file and move each item's `lines` to where the remarked code now is, or drop the item when that code is gone. Re-check ranges in files the task touched; do not merely allow them to change.
+- Dropping a value's last ranged item turns it back into a string, or removes it when nothing is left; apply the `version` rule afterwards (it may fall to `3`).
+
+### Review levels
+
+- Mark `skim` a file the reviewer need not read line by line: tests mirroring code, mechanical edits, docs.
+- Omit `review`; it is the default.
+- On a cold re-run, preserve existing entries; drop an entry whose path has left the review set.
 
 ### Wait
 
@@ -206,7 +227,7 @@ If it exists, treat it as the baseline:
 
 - **Keep cluster labels and identity stable** — reviewers have collapse state and mental context attached to them. Do not rename or reorder gratuitously.
 - Place new or previously-unclustered files into the existing cluster they belong to, or a new one if they are a new logical change.
-- Drop `files` entries no longer in the review set. Carry `moves` and `notes` entries forward per the preservation rules in **Declaring a move** and **Notes**, and `wait` and `waitPaths` per **Wait**.
+- Drop `files` entries no longer in the review set. Carry `moves`, `notes` and `levels` entries forward per the preservation rules in **Declaring a move**, **Notes** and **Review levels**, and `wait` and `waitPaths` per **Wait**.
 - Run the re-run relocation rule in **Declaring an extraction** before declaring anything new.
 - Refresh a `label`/`summary` only where the meaning of the change actually shifted.
 
@@ -216,7 +237,7 @@ Add new `moves` entries per **Declaring a move** and **Declaring an extraction**
 
 ### 5. Write notes
 
-Fill `notes` per the Contract's **Notes** section, on top of the entries preserved in step 3.
+Fill `notes` per the Contract's **Notes** section and `levels` per **Review levels**, on top of the entries preserved in step 3. Set `version` per the Contract.
 
 ### 6. Cluster the files
 
@@ -232,4 +253,4 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 
 ### 7. Write and report
 
-Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the clusters flagged `wait` and the paths in `waitPaths`, and any files you left unclustered (and why).
+Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the files marked `skim`, the clusters flagged `wait` and the paths in `waitPaths`, and any files you left unclustered (and why).
