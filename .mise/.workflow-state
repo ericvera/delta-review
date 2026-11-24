@@ -11,6 +11,6 @@
     "gate": null
   },
   "amendments": 0,
-  "checks_from": null,
-  "fix_rounds": 0
+  "checks_from": "6de3ed8a7ebe7d21406c2f01b121c8d08ea5711b",
+  "fix_rounds": 1
 }
