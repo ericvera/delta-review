@@ -26,3 +26,10 @@ is it possible when tapping on the cluster notes to default to the markdown read
 - `deltaReview.openDocument` stays hidden from the command palette; it only gains an icon and inline menu entries.
 - The click-command choice for a document row moves into a pure helper (src/treeParents.ts) so a unit test fails without the change.
 - DEVELOPMENT.md lines 147, 309 (step 31k) and 330 (step 45a) are updated; README.md:69 unchanged.
+- Mock guesses: exact tooltip wording, sample cluster names/paths/content, preview tab title, add-note box look.
+
+## Proposal
+
+- Issue: clicking a Cluster notes row opens the source editor; its "intro • 4 questions" description adds nothing.
+- Approach: both document rows click to the markdown preview, with an inline "Open Source" (go-to-file) action for line notes; drop the Cluster notes description; pure helper + unit test; docs updated.
+- Skips: spec and critic (one module, no schema or API change).
