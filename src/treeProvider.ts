@@ -662,7 +662,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       item.id = "document:branch";
       item.contextValue = "branchDocument";
       tooltip.appendMarkdown(
-        "Branch overview, written by the agent. Click to open the preview; use Open Source to select lines and leave a review note.",
+        "Branch overview, written by the agent. Click to open the preview; use Open Source to open the markdown file.",
       );
     } else {
       item.iconPath = new vscode.ThemeIcon("note");
