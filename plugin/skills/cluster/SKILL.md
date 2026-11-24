@@ -187,7 +187,7 @@ Markdown documents beside the contract, in `<COMMON_DIR>/delta-review/`. No cont
 - Branch document — `branch-<sanitized-branch>.md`, written by another skill; never write it here.
 - Cluster notes document — `cluster-notes-<sanitized-branch>/<slug>.md`. Slug: the cluster's `label` lowercased, every run of characters outside `[a-z0-9]` replaced by one `-`, no trimming (`Clusters contract v4` → `clusters-contract-v4`); must match the extension's `clusterSlug`. An empty slug has no document. Labels sharing a slug share one document.
 - Shape: `# <label>`; an intro paragraph; `## Reading order`, a numbered list of the cluster's files in its `files` order; `## Check`, a list of questions for the reviewer.
-- Renaming a cluster renames its notes file; dropping a cluster deletes it. Rename or delete the old slug's file only when no cluster in the new contract still maps to that slug. Never rename onto an existing file: leave both files and tell the user.
+- Renaming a cluster renames its notes file; dropping a cluster deletes it. Rename or delete the old slug's file only when no cluster in the new contract still maps to that slug. Never rename onto an existing file: leave both files and tell the user. Before renaming or deleting a notes file, reply through the `delta:review-notes` responses file to every open or pending review note whose `document` is `"clusterNotes"` and whose `file` is that file's name: say what the note's concern became and, on a rename, the new file name. The notes file is extension-owned; never re-home a note's `file`.
 
 ### Conventions the extension does not reject — it fails silently
 
@@ -262,7 +262,7 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 
 ### 7. Write notes documents
 
-Write or refresh a cluster notes document for each cluster that warrants one, and rename or delete documents of renamed or dropped clusters, per **Documents**.
+Write or refresh a cluster notes document for each cluster that warrants one, and rename or delete documents of renamed or dropped clusters — replying first to their open review notes — per **Documents**.
 
 ### 8. Write and report
 

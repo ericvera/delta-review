@@ -32,6 +32,7 @@ import {
 } from "./contentProvider";
 import { createReviewDecorationProvider } from "./decorations";
 import {
+  CLUSTER_NOTES_FILE_PATTERN,
   deltaReviewDirFor,
   loadReviewDocuments,
   ReviewDocuments,
@@ -600,6 +601,24 @@ export const activate = async (
             return undefined;
           }
         };
+        const readDocumentContent = async (
+          fileName: string,
+        ): Promise<string | undefined> => {
+          if (
+            reviewDocuments === undefined ||
+            !CLUSTER_NOTES_FILE_PATTERN.test(fileName)
+          ) {
+            return undefined;
+          }
+          try {
+            return await readFile(
+              join(reviewDocuments.clusterNotesDir, fileName),
+              "utf8",
+            );
+          } catch {
+            return undefined;
+          }
+        };
         // Prunes the loaded repo's marks on a successful notes load; false
         // when a newer refresh superseded this one
         const pruneReadMarks = async (
@@ -698,6 +717,7 @@ export const activate = async (
             responses,
             {
               readWorkingContent,
+              readDocumentContent,
               baseBlobFor: (path, contentBlob) =>
                 baseBlobForNote(computed, path, contentBlob),
               anchorResolves,

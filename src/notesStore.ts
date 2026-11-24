@@ -8,6 +8,7 @@ import { mergeThreads, persistedStatus } from "./noteThreads";
 import {
   archiveFileName,
   notesFileName,
+  notesFileVersion,
   parseArchiveFile,
   parseNotesFile,
   parseResponsesFile,
@@ -18,6 +19,7 @@ import type {
   LoadNotesResult,
   LoadResponsesResult,
   Note,
+  NoteDocument,
   NoteSide,
   NotesFile,
   ResponseAnchor,
@@ -206,7 +208,12 @@ export const saveNotes = async (
 ): Promise<boolean> => {
   const dir = await deltaReviewDir(git);
   const path = join(dir, notesFileName(branch));
-  const text = JSON.stringify(file, null, 2) + "\n";
+  const text =
+    JSON.stringify(
+      { ...file, version: notesFileVersion(file.notes) },
+      null,
+      2,
+    ) + "\n";
   if (lastWritten.get(path) === text) {
     return false;
   }
@@ -416,8 +423,10 @@ const findNote = (file: NotesFile, noteId: string): Note => {
 };
 
 export interface NoteDraft {
-  // Repo-relative path the note anchors to
+  // Repo-relative path the note anchors to; for a document note, the
+  // document's file name inside the cluster notes dir
   file: string;
+  document?: NoteDocument;
   side: NoteSide;
   // 1-based, inclusive range in the side document
   startLine: number;
@@ -443,6 +452,7 @@ export const createNote = async (
   const note: Note = {
     id: randomUUID(),
     file: draft.file,
+    ...(draft.document === undefined ? {} : { document: draft.document }),
     side: draft.side,
     startLine: draft.startLine,
     endLine: draft.endLine,
@@ -626,6 +636,9 @@ export interface RefreshOptions {
   // file is missing from the working tree. Injected so this module stays
   // vscode-free.
   readWorkingContent: (file: string) => Promise<string | undefined>;
+  // Current content of a cluster notes document by file name; undefined when
+  // it is missing. Absent → every document note reads as missing.
+  readDocumentContent?: (fileName: string) => Promise<string | undefined>;
   // Current left-side blob for the base document a note belongs to
   // (ReviewModel's diffBaseSha). The note's creation blob disambiguates when
   // two review files present the same base path; undefined when the note has
@@ -688,6 +701,9 @@ export const refreshDerived = async (
       }
     }
     const note = thread.note;
+    if (note.document !== undefined) {
+      continue;
+    }
     if (appliedAt === undefined || note.appliedAnchorAt === appliedAt) {
       continue;
     }
@@ -718,7 +734,10 @@ export const refreshDerived = async (
     }
     let currentBlob: string | undefined;
     if (note.side === "working") {
-      const content = await options.readWorkingContent(note.file);
+      const content =
+        note.document !== undefined
+          ? await options.readDocumentContent?.(note.file)
+          : await options.readWorkingContent(note.file);
       // -w so the comparison blob is also anchor-able if a later pass
       // re-snapshots the note onto it
       currentBlob =

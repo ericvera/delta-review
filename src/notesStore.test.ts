@@ -1340,3 +1340,120 @@ describe("buildAnchorResolver", () => {
     expect(readAttempts).toEqual([]);
   });
 });
+
+describe("document notes", () => {
+  const docContent = "# Auth\n\none\ntwo\nthree\n";
+  const docDraft = (): NoteDraft =>
+    draft({
+      file: "auth.md",
+      document: "clusterNotes",
+      startLine: 3,
+      endLine: 4,
+      snapshot: ["one", "two"],
+      content: docContent,
+    });
+
+  const loadedNotes = async (): Promise<NotesFile> => {
+    const result = await loadNotes(git, "main");
+    if (result.state !== "ok") {
+      throw new Error(`expected notes, got ${result.state}`);
+    }
+    return result.file;
+  };
+
+  const onDiskVersion = async (): Promise<unknown> =>
+    JSON.parse(await readFile(notesPath(), "utf8")).version;
+
+  it("createNote stores the document key", async () => {
+    const note = await createNote(git, "main", docDraft());
+    expect(note.document).toBe("clusterNotes");
+    expect((await loadedNotes()).notes[0]?.document).toBe("clusterNotes");
+  });
+
+  it("saveNotes writes version 2 only while a document note exists", async () => {
+    await createNote(git, "main", draft());
+    expect(await onDiskVersion()).toBe(1);
+    const docNote = await createNote(git, "main", docDraft());
+    expect(await onDiskVersion()).toBe(2);
+    await deleteNote(git, "main", docNote.id);
+    expect(await onDiskVersion()).toBe(1);
+  });
+
+  it("refreshDerived shifts a document note through readDocumentContent", async () => {
+    await createNote(git, "main", docDraft());
+    const reads: string[] = [];
+    const refreshed = await refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      undefined,
+      refreshOptions({
+        readWorkingContent: async () => {
+          throw new Error("document notes must not read the working tree");
+        },
+        readDocumentContent: async (fileName) => {
+          reads.push(fileName);
+          return "intro\n" + docContent;
+        },
+      }),
+    );
+    expect(reads).toEqual(["auth.md"]);
+    expect(refreshed.notes[0]).toMatchObject({
+      currentStartLine: 4,
+      currentEndLine: 5,
+      outdated: false,
+    });
+  });
+
+  it.each([
+    ["absent", {}],
+    ["returning undefined", { readDocumentContent: async () => undefined }],
+  ])(
+    "marks a document note outdated with the reader %s",
+    async (_name, overrides: Partial<RefreshOptions>) => {
+      await createNote(git, "main", docDraft());
+      const refreshed = await refreshDerived(
+        git,
+        "main",
+        await loadedNotes(),
+        undefined,
+        refreshOptions(overrides),
+      );
+      expect(refreshed.notes[0]).toMatchObject({
+        outdated: true,
+        currentStartLine: 3,
+        currentEndLine: 4,
+      });
+    },
+  );
+
+  it("ignores a resolving response anchor on a document note", async () => {
+    const note = await createNote(git, "main", docDraft());
+    await writeFile(join(repoRoot, "b.txt"), "one\ntwo fixed\n");
+    await writeResponseEntries([
+      {
+        noteId: note.id,
+        anchor: { file: "b.txt", line: 2, snapshot: "two fixed" },
+      },
+    ]);
+    const refreshed = await refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      await loadedResponses(),
+      refreshOptions({
+        anchorResolves: () => true,
+        readDocumentContent: async () => docContent,
+      }),
+    );
+    expect(refreshed.notes[0]).toMatchObject({
+      file: "auth.md",
+      document: "clusterNotes",
+      side: "working",
+      contentBlob: note.contentBlob,
+      currentStartLine: 3,
+      outdated: false,
+    });
+    expect(refreshed.notes[0]?.appliedAnchorAt).toBeUndefined();
+  });
+});
