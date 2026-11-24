@@ -28,6 +28,17 @@ is it possible when tapping on the cluster notes to default to the markdown read
 - DEVELOPMENT.md lines 147, 309 (step 31k) and 330 (step 45a) are updated; README.md:69 unchanged.
 - Mock guesses: exact tooltip wording, sample cluster names/paths/content, preview tab title, add-note box look.
 
+## Investigation: skim label
+
+- `skim` is plain text in file-row `description` only (`withLevelTag`, src/reviewLevel.ts:6-16, test src/reviewLevel.test.ts:11-18; used at src/treeProvider.ts:571-582) plus hover tooltip `SKIM_TOOLTIP` (src/reviewLevel.ts:3-4, src/treeProvider.ts:611-613). Descriptions always render in VS Code's dim color; the API cannot recolor or bold them.
+- Label comes from `resourceUri` (src/treeProvider.ts:557), no `iconPath`; M/A/D/R badge/color from src/decorations.ts:89-154. Reviewed/waiting rows in grouped mode get `DIM_COLOR` on the label (src/treeProvider.ts:546-556).
+- Options: label highlights (precedent src/notesTreeProvider.ts:149); tag in label; colored `ThemeIcon` iconPath (precedent src/treeProvider.ts:724-726, replaces file-type icon); FileDecoration badge/color (competes with M/A/D/R and dim color); description glyph tweak (small gain).
+- Docs stating current form: DEVELOPMENT.md:303 (check 31h), README.md:68, plugin/skills/cluster/SKILL.md:172.
+
+## Open questions
+
+1. How should skim rows be made noticeable?
+
 ## Proposal
 
 - Issue: clicking a Cluster notes row opens the source editor; its "intro • 4 questions" description adds nothing.
