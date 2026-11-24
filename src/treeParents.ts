@@ -1,7 +1,9 @@
 import { dirname } from "node:path";
 import { ClusterModel, clusterFilesForKey } from "./clusters";
+import type { ClusterNotesDocument, ReviewDocuments } from "./documents";
 import { FileReviewStatus, ReviewFile } from "./model";
 import type {
+  DocumentElement,
   FileElement,
   FolderElement,
   ReviewTreeElement,
@@ -194,6 +196,10 @@ export const parentOf = (
     // on any element it has rendered
     case "autoGroup":
       return { kind: "group", status: element.status };
+    case "document":
+      return element.document === "branch"
+        ? undefined
+        : { kind: "cluster", clusterKey: element.clusterKey };
     case "group":
     case "cluster":
     case "reviewedBucket":
@@ -201,3 +207,22 @@ export const parentOf = (
       return undefined;
   }
 };
+
+// Notes documents exist for real clusters only, keyed by contract index
+export const clusterNotesFor = (
+  documents: ReviewDocuments | undefined,
+  clusterKey: string,
+): ClusterNotesDocument | undefined => {
+  const match = /^c(\d+)$/.exec(clusterKey);
+  return match === null
+    ? undefined
+    : documents?.clusterNotes.get(Number(match[1]));
+};
+
+export const documentPathFor = (
+  documents: ReviewDocuments | undefined,
+  element: DocumentElement,
+): string | undefined =>
+  element.document === "branch"
+    ? documents?.branchDocument
+    : clusterNotesFor(documents, element.clusterKey)?.path;

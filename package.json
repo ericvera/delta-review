@@ -79,6 +79,17 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.openDocument",
+        "title": "Open Document",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.previewDocument",
+        "title": "Open Preview",
+        "icon": "$(open-preview)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.viewAsTree",
         "title": "View as Tree",
         "icon": "$(list-tree)",
@@ -283,6 +294,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "deltaReview.previewDocument",
+          "when": "view == deltaReview && viewItem == clusterNotesDocument",
+          "group": "inline@1"
+        },
         {
           "command": "deltaReview.openFile",
           "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)(Snapshot)?$/",
@@ -504,6 +520,14 @@
         },
         {
           "command": "deltaReview.openFile",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.openDocument",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.previewDocument",
           "when": "false"
         },
         {

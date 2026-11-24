@@ -31,6 +31,11 @@ import {
   REVIEW_BASE_SCHEME,
 } from "./contentProvider";
 import { createReviewDecorationProvider } from "./decorations";
+import {
+  deltaReviewDirFor,
+  loadReviewDocuments,
+  ReviewDocuments,
+} from "./documents";
 import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
 import type { HashCacheEntry } from "./hashCache";
@@ -88,7 +93,7 @@ import {
   anchorSlicesIntoCache,
   deleteSliceRef,
 } from "./sliceAnchor";
-import { fileElementFor } from "./treeParents";
+import { documentPathFor, fileElementFor } from "./treeParents";
 import {
   collapseKeyFor,
   isDefaultCollapsed,
@@ -119,6 +124,7 @@ export const activate = async (
   let git: Git | undefined;
   let model: ReviewModel | undefined;
   let clusterModel: ClusterModel | undefined;
+  let reviewDocuments: ReviewDocuments | undefined;
 
   // Group/folder collapse state, kept across refreshes and window reloads
   const collapsedKey = "deltaReview.collapsedGroups";
@@ -191,6 +197,7 @@ export const activate = async (
     // Effective grouping: the preference only takes effect while a valid
     // contract produced a cluster model
     () => groupedPreference && clusterModel !== undefined,
+    () => reviewDocuments,
   );
   const treeView = vscode.window.createTreeView("deltaReview", {
     treeDataProvider: treeProvider,
@@ -232,7 +239,11 @@ export const activate = async (
   context.subscriptions.push(
     treeView.onDidCollapseElement((event) => {
       const element = event.element;
-      if (element.kind === "file" || element.kind === "message") {
+      if (
+        element.kind === "file" ||
+        element.kind === "message" ||
+        element.kind === "document"
+      ) {
         return;
       }
       if (isDefaultCollapsed(element)) {
@@ -244,7 +255,11 @@ export const activate = async (
     }),
     treeView.onDidExpandElement((event) => {
       const element = event.element;
-      if (element.kind === "file" || element.kind === "message") {
+      if (
+        element.kind === "file" ||
+        element.kind === "message" ||
+        element.kind === "document"
+      ) {
         return;
       }
       if (isDefaultCollapsed(element)) {
@@ -381,6 +396,7 @@ export const activate = async (
     if (git === undefined) {
       model = undefined;
       clusterModel = undefined;
+      reviewDocuments = undefined;
       setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
@@ -526,6 +542,19 @@ export const activate = async (
         }
       }
       setClustersAvailable(clusterModel !== undefined);
+
+      // Labels only from a valid contract; the branch document needs none
+      const documents = await loadReviewDocuments(
+        await deltaReviewDirFor(git),
+        branch,
+        contractResult.state === "ok"
+          ? contractResult.contract.clusters.map((cluster) => cluster.label)
+          : [],
+      );
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      reviewDocuments = documents;
 
       model = computed;
       treeProvider.setModel(model);
@@ -821,7 +850,10 @@ export const activate = async (
       return;
     }
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(contractDir), "*.json"),
+      new vscode.RelativePattern(
+        vscode.Uri.file(contractDir),
+        "{*.json,*.md,cluster-notes-*/*.md}",
+      ),
     );
     repoWatcherDisposables.push(
       watcher,
@@ -1333,6 +1365,20 @@ export const activate = async (
     return (model?.files ?? []).filter((file) => file.triage === "normal");
   };
 
+  // Row clicks pass the file Uri; inline actions pass the tree element
+  const documentUriFor = (
+    target: vscode.Uri | ReviewTreeElement | undefined,
+  ): vscode.Uri | undefined => {
+    if (target instanceof vscode.Uri) {
+      return target;
+    }
+    if (target?.kind !== "document") {
+      return undefined;
+    }
+    const path = documentPathFor(reviewDocuments, target);
+    return path === undefined ? undefined : vscode.Uri.file(path);
+  };
+
   // `folderScopeFiles` narrowed to the rows the folder actually renders: the
   // Reviewed bucket shows reviewed files, a cluster body shows only its
   // needs-review files, and a status-scoped folder shows that status. A bulk
@@ -1648,6 +1694,28 @@ export const activate = async (
           void vscode.window.showWarningMessage(warning);
         }
         await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.openDocument",
+      async (target?: vscode.Uri | ReviewTreeElement) => {
+        const uri = documentUriFor(target);
+        if (uri === undefined) {
+          return;
+        }
+        await vscode.window.showTextDocument(uri);
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.previewDocument",
+      async (target?: vscode.Uri | ReviewTreeElement) => {
+        const uri = documentUriFor(target);
+        if (uri === undefined) {
+          return;
+        }
+        await vscode.commands.executeCommand("markdown.showPreview", uri);
       },
     ),
 

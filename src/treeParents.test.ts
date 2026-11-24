@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ClusterModel } from "./clusters";
+import type { ReviewDocuments } from "./documents";
 import { FileReviewStatus, ReviewFile } from "./model";
 import {
   TreeContext,
+  documentPathFor,
   fileElementFor,
   parentOf,
   treeLevel,
@@ -400,5 +402,97 @@ describe("treeLevel", () => {
     );
     expect(level.folderNames).toEqual(["z"]);
     expect(level.directFiles).toEqual([a, b]);
+  });
+});
+
+describe("parentOf — document rows", () => {
+  const ctx = grouped(clusterModel([[file("a.ts")]]), "list");
+
+  it("puts the branch overview at the root", () => {
+    expect(
+      parentOf({ kind: "document", document: "branch" }, ctx),
+    ).toBeUndefined();
+  });
+
+  it("puts cluster notes under their cluster", () => {
+    expect(
+      parentOf(
+        { kind: "document", document: "clusterNotes", clusterKey: "c0" },
+        ctx,
+      ),
+    ).toEqual({ kind: "cluster", clusterKey: "c0" });
+  });
+});
+
+describe("documentPathFor", () => {
+  const documents = (
+    overrides: Partial<ReviewDocuments> = {},
+  ): ReviewDocuments => ({
+    clusterNotesDir: "/d/cluster-notes-x",
+    branchDocument: "/d/branch-x.md",
+    clusterNotes: new Map([
+      [
+        1,
+        {
+          path: "/d/cluster-notes-x/api.md",
+          fileName: "api.md",
+          summary: "intro",
+        },
+      ],
+    ]),
+    ...overrides,
+  });
+
+  it("resolves the branch document when present", () => {
+    expect(
+      documentPathFor(documents(), { kind: "document", document: "branch" }),
+    ).toBe("/d/branch-x.md");
+  });
+
+  it("returns undefined for an absent branch document", () => {
+    expect(
+      documentPathFor(documents({ branchDocument: undefined }), {
+        kind: "document",
+        document: "branch",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("resolves a cluster's notes document by index", () => {
+    expect(
+      documentPathFor(documents(), {
+        kind: "document",
+        document: "clusterNotes",
+        clusterKey: "c1",
+      }),
+    ).toBe("/d/cluster-notes-x/api.md");
+  });
+
+  it("returns undefined for a cluster with no notes document", () => {
+    expect(
+      documentPathFor(documents(), {
+        kind: "document",
+        document: "clusterNotes",
+        clusterKey: "c0",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for a key that is not a real cluster", () => {
+    for (const clusterKey of ["unclustered", "auto", "c", "c1x"]) {
+      expect(
+        documentPathFor(documents(), {
+          kind: "document",
+          document: "clusterNotes",
+          clusterKey,
+        }),
+      ).toBeUndefined();
+    }
+  });
+
+  it("returns undefined without documents", () => {
+    expect(
+      documentPathFor(undefined, { kind: "document", document: "branch" }),
+    ).toBeUndefined();
   });
 });

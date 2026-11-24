@@ -22,6 +22,7 @@ import {
   createReviewItemUri,
   createUnclusteredHeaderUri,
 } from "./decorations";
+import type { ReviewDocuments } from "./documents";
 import { escapeMarkdownText } from "./markdown";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
 import {
@@ -36,7 +37,12 @@ import {
 } from "./rowContext";
 import { agentLineNotesTooltipLine } from "./provenance";
 import { SKIM_TOOLTIP, withLevelTag } from "./reviewLevel";
-import { parentOf, treeLevel } from "./treeParents";
+import {
+  clusterNotesFor,
+  documentPathFor,
+  parentOf,
+  treeLevel,
+} from "./treeParents";
 import { Triage } from "./triage";
 
 export type ViewMode = "list" | "tree";
@@ -93,7 +99,14 @@ export interface FileElement {
   alwaysFlat?: true;
 }
 
+// A markdown document the agent wrote: the branch overview at the root, or a
+// real cluster's notes as its first child. No review state.
+export type DocumentElement =
+  | { kind: "document"; document: "branch" }
+  | { kind: "document"; document: "clusterNotes"; clusterKey: string };
+
 export type ReviewTreeElement =
+  | DocumentElement
   | GroupElement
   | AutoGroupElement
   | ClusterElement
@@ -167,6 +180,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     // Effective grouping (preference && a cluster model exists) — when false,
     // rendering is byte-identical to a build without clustering
     private readonly isGrouped: () => boolean,
+    private readonly getDocuments: () => ReviewDocuments | undefined,
   ) {}
 
   setModel(model: ReviewModel | undefined): void {
@@ -183,34 +197,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       return [];
     }
     if (element === undefined) {
-      const clusterModel = this.getClusterModel();
-      if (this.isGrouped() && clusterModel !== undefined) {
-        // Real clusters in contract order — empty and fully reviewed ones
-        // included, they render a message row — then Unclustered and Auto
-        // only while they hold a needs-review file (their reviewed members
-        // live in the Reviewed bucket), then the Reviewed bucket always last
-        const root: ReviewTreeElement[] = clusterModel.clusters.map(
-          (_, index): ClusterElement => ({
-            kind: "cluster",
-            clusterKey: `c${index}`,
-          }),
-        );
-        for (const clusterKey of ["unclustered", "auto"] as const) {
-          const needsReview = filterByStatus(
-            clusterFilesForKey(clusterModel, clusterKey),
-            FileReviewStatus.NeedsReview,
-          );
-          if (needsReview.length > 0) {
-            root.push({ kind: "cluster", clusterKey });
-          }
-        }
-        root.push({ kind: "reviewedBucket" });
-        return root;
-      }
-      return [
-        { kind: "group", status: FileReviewStatus.NeedsReview },
-        { kind: "group", status: FileReviewStatus.Reviewed },
-      ];
+      return [...this.branchDocumentRows(), ...this.rootChildren()];
     }
     if (element.kind === "group") {
       // Auto-triaged files render in their own subgroup, first; the regular
@@ -244,7 +231,10 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       );
     }
     if (element.kind === "cluster") {
-      return this.clusterChildren(element.clusterKey);
+      return [
+        ...this.clusterNotesRows(element.clusterKey),
+        ...this.clusterChildren(element.clusterKey),
+      ];
     }
     if (element.kind === "reviewedBucket") {
       // Every reviewed file, all triages and origins. List mode already shows
@@ -266,6 +256,54 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       });
     }
     return [];
+  }
+
+  private branchDocumentRows(): DocumentElement[] {
+    return this.getDocuments()?.branchDocument === undefined
+      ? []
+      : [{ kind: "document", document: "branch" }];
+  }
+
+  private clusterNotesRows(clusterKey: string): DocumentElement[] {
+    const element: DocumentElement = {
+      kind: "document",
+      document: "clusterNotes",
+      clusterKey,
+    };
+    return documentPathFor(this.getDocuments(), element) === undefined
+      ? []
+      : [element];
+  }
+
+  private rootChildren(): ReviewTreeElement[] {
+    const clusterModel = this.getClusterModel();
+    if (this.isGrouped() && clusterModel !== undefined) {
+      // Real clusters in contract order — empty and fully reviewed ones
+      // included, they render a message row — then Unclustered and Auto
+      // only while they hold a needs-review file (their reviewed members
+      // live in the Reviewed bucket), then the Reviewed bucket always last
+      const root: ReviewTreeElement[] = clusterModel.clusters.map(
+        (_, index): ClusterElement => ({
+          kind: "cluster",
+          clusterKey: `c${index}`,
+        }),
+      );
+      for (const clusterKey of ["unclustered", "auto"] as const) {
+        const needsReview = filterByStatus(
+          clusterFilesForKey(clusterModel, clusterKey),
+          FileReviewStatus.NeedsReview,
+        );
+        if (needsReview.length > 0) {
+          root.push({ kind: "cluster", clusterKey });
+        }
+      }
+      root.push({ kind: "reviewedBucket" });
+      return root;
+    }
+    return [
+      { kind: "group", status: FileReviewStatus.NeedsReview },
+      { kind: "group", status: FileReviewStatus.Reviewed },
+    ];
   }
 
   // Required by TreeView.reveal, which walks this chain to expand ancestors
@@ -372,6 +410,10 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
   }
 
   getTreeItem(element: ReviewTreeElement): vscode.TreeItem {
+    if (element.kind === "document") {
+      return this.documentTreeItem(element);
+    }
+
     if (element.kind === "group") {
       const label =
         element.status === FileReviewStatus.NeedsReview
@@ -601,6 +643,60 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       title: "Open Review Diff",
       arguments: [file],
     };
+    return item;
+  }
+
+  private documentTreeItem(element: DocumentElement): vscode.TreeItem {
+    const item = new vscode.TreeItem(
+      element.document === "branch" ? "Branch overview" : "Cluster notes",
+      vscode.TreeItemCollapsibleState.None,
+    );
+    const path = documentPathFor(this.getDocuments(), element);
+    const tooltip = new vscode.MarkdownString();
+    if (path !== undefined) {
+      tooltip.appendCodeblock(path, "text");
+    }
+    if (element.document === "branch") {
+      item.iconPath = new vscode.ThemeIcon("book");
+      item.id = "document:branch";
+      item.contextValue = "branchDocument";
+      tooltip.appendMarkdown("Branch overview, written by the agent.");
+    } else {
+      item.iconPath = new vscode.ThemeIcon("note");
+      item.id = `document:clusterNotes:${element.clusterKey}`;
+      item.contextValue = "clusterNotesDocument";
+      const summary = clusterNotesFor(
+        this.getDocuments(),
+        element.clusterKey,
+      )?.summary;
+      if (summary !== undefined && summary !== "") {
+        item.description = summary;
+      }
+      const clusterModel = this.getClusterModel();
+      const label =
+        (clusterModel === undefined
+          ? undefined
+          : clusterBucketForKey(clusterModel, element.clusterKey)?.label) ??
+        element.clusterKey;
+      tooltip.appendMarkdown(
+        `Notes document for ${escapeMarkdownText(label)}. Click to open it; select lines to leave a review note.`,
+      );
+    }
+    item.tooltip = tooltip;
+    if (path !== undefined) {
+      item.command =
+        element.document === "branch"
+          ? {
+              command: "deltaReview.previewDocument",
+              title: "Open Preview",
+              arguments: [vscode.Uri.file(path)],
+            }
+          : {
+              command: "deltaReview.openDocument",
+              title: "Open Document",
+              arguments: [vscode.Uri.file(path)],
+            };
+    }
     return item;
   }
 
