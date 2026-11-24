@@ -38,6 +38,7 @@ A vscode-free module locates the branch document and per-cluster notes documents
 
 ## Gotchas
 
+- Do not describe review notes on documents here: document notes do not exist until task 01_07, which adds the rule for open notes on a renamed or deleted document to this same Documents section.
 - Two clusters with the same label share one slug and therefore one document; acceptable.
 - Read text as UTF-8; do not follow anything outside `dir`.
 - No `vscode` import in `src/documents.ts`.
