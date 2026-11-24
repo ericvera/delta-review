@@ -226,3 +226,8 @@ export const documentPathFor = (
   element.document === "branch"
     ? documents?.branchDocument
     : clusterNotesFor(documents, element.clusterKey)?.path;
+
+// Both document kinds click to the rendered preview; the source editor is the
+// inline Open Source action
+export const documentClickCommand = (_element: DocumentElement): string =>
+  "deltaReview.previewDocument";

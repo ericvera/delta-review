@@ -9,7 +9,6 @@ import {
   clusterSlug,
   deltaReviewDirFor,
   loadReviewDocuments,
-  notesDocumentSummary,
 } from "./documents";
 import { Git } from "./git";
 
@@ -76,32 +75,6 @@ Bumps the contract and adds review levels.
   3. Is the skill doc in sync?
 `;
 
-describe("notesDocumentSummary", () => {
-  it("summarizes intro, sections and questions", () => {
-    expect(notesDocumentSummary(MOCK_DOCUMENT)).toBe(
-      "intro · reading order · 3 questions",
-    );
-  });
-
-  it("omits intro when only a title precedes the first section", () => {
-    expect(notesDocumentSummary("# Title\n\n## Reading order\n1. a\n")).toBe(
-      "reading order",
-    );
-  });
-
-  it("uses the singular for one question", () => {
-    expect(notesDocumentSummary("## Check\n- Why?\n")).toBe("1 question");
-  });
-
-  it("falls back to the heading when Check has no items", () => {
-    expect(notesDocumentSummary("## Check\nNothing to ask.\n")).toBe("check");
-  });
-
-  it("returns empty for empty text", () => {
-    expect(notesDocumentSummary("")).toBe("");
-  });
-});
-
 describe("deltaReviewDirFor", () => {
   it("resolves a relative common dir against the repo root", async () => {
     const git: Git = { repoRoot: "/repo", run: async () => ".git\n" };
@@ -148,7 +121,6 @@ describe("loadReviewDocuments", () => {
     expect(documents.clusterNotes.get(1)).toEqual({
       path: join(notesDir, "present-one.md"),
       fileName: "present-one.md",
-      summary: "intro · reading order · 3 questions",
     });
   });
 

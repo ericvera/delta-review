@@ -4,6 +4,7 @@ import type { ReviewDocuments } from "./documents";
 import { FileReviewStatus, ReviewFile } from "./model";
 import {
   TreeContext,
+  documentClickCommand,
   documentPathFor,
   fileElementFor,
   parentOf,
@@ -436,7 +437,6 @@ describe("documentPathFor", () => {
         {
           path: "/d/cluster-notes-x/api.md",
           fileName: "api.md",
-          summary: "intro",
         },
       ],
     ]),
@@ -494,5 +494,23 @@ describe("documentPathFor", () => {
     expect(
       documentPathFor(undefined, { kind: "document", document: "branch" }),
     ).toBeUndefined();
+  });
+});
+
+describe("documentClickCommand", () => {
+  it("opens the preview for the branch overview", () => {
+    expect(documentClickCommand({ kind: "document", document: "branch" })).toBe(
+      "deltaReview.previewDocument",
+    );
+  });
+
+  it("opens the preview for cluster notes", () => {
+    expect(
+      documentClickCommand({
+        kind: "document",
+        document: "clusterNotes",
+        clusterKey: "c1",
+      }),
+    ).toBe("deltaReview.previewDocument");
   });
 });
