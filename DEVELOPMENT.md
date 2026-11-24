@@ -201,8 +201,9 @@ One read-only thread per ranged agent note (`ReviewFile.lineNotes`, version 4 co
 
 #### Where a note's thread lives
 
-`src/noteTarget.ts` (pure) decides the document a note attaches to, from `(model, note, workingFileExists)`; the thread and the REVIEW NOTES click both resolve through it, so the click always lands on the document the thread is on. Five cases:
+`src/noteTarget.ts` (pure) decides the document a note attaches to, from `(model, note, workingDocumentExists)` (the working file, or for a document note the cluster notes document); the thread and the REVIEW NOTES click both resolve through it, so the click always lands on the document the thread is on. Six cases:
 
+- **Document note** — checked first, never through `model.files` (a repo file can share the document's name): the cluster notes document when it exists, else the note's `contentBlob` in **creation** coordinates.
 - **Base-side note, any file** — the base document named by [Base document identity](#base-document-identity), falling back to the note's `contentBlob`.
 - **Working side, file in the review set, not deleted** — the working file.
 - **Working side, file in the review set, deleted** — that file's base document at `diffBaseSha ?? note.contentBlob`, never the empty document: a deleted file's diff has an empty right side, so only the base holds the noted content.
@@ -214,6 +215,15 @@ The provenance thread is the one thread `src/noteTarget.ts` does not place: it a
 `reviewDiffIsEmpty` (same module) is the click path's escape hatch: a deleted file with no base blob diffs empty against empty, so instead of opening that diff the click opens the resolved target document directly.
 
 An anchor can sit past the end of its target document, and clamping it needs a line count, which only exists once the document is open — so `src/extension.ts` re-clamps on `onDidOpenTextDocument` (file and `delta-review-base` schemes only). That listener must never call `refresh()` (git on every document open) or `renderThreads` (it disposes any cached thread absent from the array it is given, including the one `addNote` adopts before its refresh lands); it calls the controller's range-only `reclampThreadsFor`.
+
+#### Notes on cluster notes documents
+
+- **Key**: `"document": "clusterNotes"`, `file` = the document's file name inside `cluster-notes-<sanitized branch>/`, `side` always `working`. Any other document (the branch overview, other files in the delta-review dir) offers no commenting ranges.
+- **Version**: the notes file is written as `"version": 2` while any document note exists, `"version": 1` otherwise, so files without document notes stay readable by older extensions.
+- **Detection** (`clusterNotesFileName`, `src/commentController.ts`): a `file:` URI whose directory is `reviewDocuments.clusterNotesDir` and whose name matches `CLUSTER_NOTES_FILE_PATTERN`; checked before `repoRelativePath`, which would otherwise yield a `.git/...` path. `addNote` stores the full document text as `content`, so `contentBlob` is its creation snapshot.
+- **Thread**: on the document's plain file URI. Re-anchoring diffs `contentBlob` against the current document; response anchors are ignored.
+- **Missing document** (agent renamed or deleted it): the note goes outdated with its last position, and the thread falls back to the `contentBlob` snapshot through the base content provider, still readable and closable.
+- **REVIEW NOTES** (`src/notesGrouping.ts`): groups keyed by `(document, file)`; document groups first, labeled `<cluster label> — notes` (first contract cluster whose `clusterSlug(label).md` is the file, else the file name), description `cluster notes · <n>`, id `notesFile:clusterNotes:<file>`, collapse key `notes:clusterNotes:<file>`. Click opens the document (or the snapshot) at the note; no diff, no DELTA REVIEW reveal.
 
 #### Long notes
 
@@ -317,4 +327,5 @@ Notes:
 43. Branch switch: `git switch` to another branch → that branch's own (empty or different) notes render; switch back → the originals return. Review marks and notes stay per-branch.
 44. Corrupt files: garbage in the notes file → warning toast, notes unrendered, note actions refuse, and the extension **never rewrites the file**; restore it → everything returns. Garbage in the responses file → warning, notes still render (without replies), recovers when fixed. Each warning shows once, not per refresh.
 45. Comments panel: open the built-in Comments panel → the same threads are listed there via the standard API; review tree, clusters, and auto-review behave exactly as before while notes exist.
+    45a. Cluster notes document: open a `cluster-notes-<branch>/<slug>.md` from its row, select lines, add a note → the thread renders on the document; the notes file shows `"version": 2` and the note carries `"document": "clusterNotes"` with `file` = the file name. Append a response for it → the reply merges and the label flips to Addressed. REVIEW NOTES lists it first under `<cluster label> — notes` (`cluster notes · 1`); click → the document opens at the note. Delete that note (not the document) → the notes file is written back as `"version": 1` once no document note remains. Add another, rename the document → the note goes outdated and its row click opens the creation snapshot. The branch overview offers no `+` gutter.
 46. Long note: add a note whose text runs 30+ lines → the whole note renders inline and the thread expands to fit it; no text is clipped, the thread carries no truncation link and no title-bar button beyond resolve/delete, and the only scrollbar is the editor's — scroll down to reach the file's lines below the widget. Edit that turn → the editor opens on the same full raw text (that editor scrolls once it passes ~500px; that is not clipping) and saving preserves it. Blank lines inside a note still separate paragraphs, and long lines still wrap rather than scrolling sideways. `**bold**` and inline code in a note or reply render formatted.

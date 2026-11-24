@@ -5,8 +5,9 @@ import type { Note } from "./notes";
 // Where a note's document lives, and how its anchor maps into that document.
 // Both the rendered comment thread and the REVIEW NOTES click resolve through
 // here, so the document the click opens is always the document the thread
-// attaches to. Pure — no vscode, no fs: whether the working file exists is
-// runtime knowledge injected by the caller.
+// attaches to. Pure — no vscode, no fs: whether the working file (or, for a
+// document note, the cluster notes document) exists is runtime knowledge
+// injected by the caller.
 
 // Which of a note's two line pairs the target document is expressed in:
 // `current` = the working-tree-drifted currentStartLine/currentEndLine,
@@ -31,10 +32,22 @@ export interface BaseNoteTarget {
   lines: NoteLineSource;
 }
 
-export type NoteTarget = WorkingNoteTarget | BaseNoteTarget;
+export interface DocumentNoteTarget {
+  kind: "document";
+  // File name inside the cluster notes dir
+  file: string;
+  lines: "current";
+}
+
+export type NoteTarget =
+  WorkingNoteTarget | BaseNoteTarget | DocumentNoteTarget;
 
 // The document a note belongs to.
 //
+// - document note, document exists → that cluster notes document (never
+//   resolved through `model.files`: a repo file can share its name);
+// - document note, document missing (renamed or deleted) → the note's
+//   creation blob, so it is still readable and closable;
 // - working side, file in the review set and not deleted → the working file;
 // - working side, file in the review set and deleted → that file's base
 //   document, where the noted content still exists (the working side of a
@@ -49,8 +62,18 @@ export type NoteTarget = WorkingNoteTarget | BaseNoteTarget;
 export const noteTargetFor = (
   model: ReviewModel | undefined,
   note: Note,
-  workingFileExists: boolean,
+  workingDocumentExists: boolean,
 ): NoteTarget => {
+  if (note.document !== undefined) {
+    return workingDocumentExists
+      ? { kind: "document", file: note.file, lines: "current" }
+      : {
+          kind: "base",
+          path: note.file,
+          sha: note.contentBlob,
+          lines: "creation",
+        };
+  }
   if (note.side === "base") {
     const currentBase =
       model === undefined
@@ -75,7 +98,7 @@ export const noteTargetFor = (
       lines: "current",
     };
   }
-  if (file === undefined && !workingFileExists) {
+  if (file === undefined && !workingDocumentExists) {
     return {
       kind: "base",
       path: note.file,

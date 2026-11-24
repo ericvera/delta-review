@@ -201,6 +201,47 @@ describe("noteTargetFor", () => {
       lines: "current",
     });
   });
+
+  describe("document notes", () => {
+    const documentNote = note({
+      file: "api-layer.md",
+      document: "clusterNotes",
+    });
+
+    it("targets the cluster notes document when it exists", () => {
+      expect(noteTargetFor(model([]), documentNote, true)).toEqual({
+        kind: "document",
+        file: "api-layer.md",
+        lines: "current",
+      });
+    });
+
+    it("falls back to the creation blob when the document is missing", () => {
+      expect(noteTargetFor(model([]), documentNote, false)).toEqual({
+        kind: "base",
+        path: "api-layer.md",
+        sha: "blob-at-creation",
+        lines: "creation",
+      });
+    });
+
+    it("ignores a review file with the same name", () => {
+      const sameName = model([
+        file({ path: "api-layer.md", deleted: true, diffBaseSha: "aaa" }),
+      ]);
+      expect(noteTargetFor(sameName, documentNote, true)).toEqual({
+        kind: "document",
+        file: "api-layer.md",
+        lines: "current",
+      });
+      expect(noteTargetFor(sameName, documentNote, false)).toEqual({
+        kind: "base",
+        path: "api-layer.md",
+        sha: "blob-at-creation",
+        lines: "creation",
+      });
+    });
+  });
 });
 
 describe("reviewDiffIsEmpty", () => {

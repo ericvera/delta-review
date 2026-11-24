@@ -51,8 +51,10 @@ import {
 } from "./model";
 import { buildDiffTitle, buildRowDescription } from "./moveDisplay";
 import type { ResponsesFile } from "./notes";
+import { clusterNotesDocumentLabel } from "./notesGrouping";
 import {
   noteAnchorLines,
+  NoteTarget,
   noteTargetFor,
   reviewDiffIsEmpty,
 } from "./noteTarget";
@@ -210,6 +212,11 @@ export const activate = async (
   const notesTreeProvider = new NotesTreeProvider(
     (key) => collapsed.has(key),
     isUnread,
+    (file) =>
+      clusterNotesDocumentLabel(
+        file,
+        clusterModel?.clusters.map((cluster) => cluster.label) ?? [],
+      ),
   );
   const notesTreeView = vscode.window.createTreeView("deltaReviewNotes", {
     treeDataProvider: notesTreeProvider,
@@ -323,6 +330,7 @@ export const activate = async (
     () => model,
     () => void refresh(),
     { isUnread, markRead: (thread) => markRead(thread) },
+    () => reviewDocuments?.clusterNotesDir,
   );
   context.subscriptions.push(commentController);
 
@@ -1282,6 +1290,44 @@ export const activate = async (
     );
   };
 
+  const noteTargetUri = (activeGit: Git, target: NoteTarget): vscode.Uri => {
+    switch (target.kind) {
+      case "working":
+        return vscode.Uri.file(join(activeGit.repoRoot, target.path));
+      case "base":
+        return createReviewBaseUri(target.path, target.sha);
+      case "document":
+        return vscode.Uri.file(
+          join(reviewDocuments?.clusterNotesDir ?? "", target.file),
+        );
+    }
+  };
+
+  // A document note never goes through model.files (a repo file can share
+  // its name) and has no diff or DELTA REVIEW row to sync
+  const openDocumentNote = async (thread: NoteThread): Promise<void> => {
+    if (git === undefined) {
+      return;
+    }
+    const dir = reviewDocuments?.clusterNotesDir;
+    let exists = false;
+    if (dir !== undefined) {
+      try {
+        await access(join(dir, thread.note.file));
+        exists = true;
+      } catch {
+        exists = false;
+      }
+    }
+    const target = noteTargetFor(model, thread.note, exists);
+    const { startLine } = noteAnchorLines(thread.note, target.lines);
+    const targetLine = Math.max(startLine - 1, 0);
+    await vscode.window.showTextDocument(noteTargetUri(git, target), {
+      selection: new vscode.Range(targetLine, 0, targetLine, 0),
+    });
+    commentController.expandThread(thread.note.id);
+  };
+
   // Selection sync from REVIEW NOTES: put the noted file's row in DELTA
   // REVIEW, expanding whatever ancestors are collapsed. Best effort — reveal
   // rejects on a view that cannot be shown, and that must never fail the
@@ -1567,6 +1613,10 @@ export const activate = async (
         if (git === undefined) {
           return;
         }
+        if (thread.note.document !== undefined) {
+          await openDocumentNote(thread);
+          return;
+        }
         const line = Math.max(thread.note.currentStartLine - 1, 0);
         const selection = new vscode.Range(line, 0, line, 0);
         const file = model?.files.find(
@@ -1602,12 +1652,9 @@ export const activate = async (
         const target = noteTargetFor(model, thread.note, onDisk);
         const { startLine } = noteAnchorLines(thread.note, target.lines);
         const targetLine = Math.max(startLine - 1, 0);
-        await vscode.window.showTextDocument(
-          target.kind === "working"
-            ? vscode.Uri.file(join(git.repoRoot, target.path))
-            : createReviewBaseUri(target.path, target.sha),
-          { selection: new vscode.Range(targetLine, 0, targetLine, 0) },
-        );
+        await vscode.window.showTextDocument(noteTargetUri(git, target), {
+          selection: new vscode.Range(targetLine, 0, targetLine, 0),
+        });
         // Working-side threads attach to the plain file URI and base-side
         // ones to the base document, so whichever opened, the thread renders
         // here

@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
+import { CLUSTER_NOTES_FILE_PATTERN } from "./documents";
 import { Git } from "./git";
 import { ReviewModel } from "./model";
 import { Note, NoteSide } from "./notes";
@@ -168,6 +169,7 @@ export const createNoteCommentController = (
     isUnread: (thread: NoteThread) => boolean;
     markRead: (thread: NoteThread) => void;
   },
+  getClusterNotesDir: () => string | undefined,
 ): NoteCommentController => {
   const controller = vscode.comments.createCommentController(
     "deltaReview.notes",
@@ -189,6 +191,21 @@ export const createNoteCommentController = (
     return relativePath.split(sep).join("/");
   };
 
+  // Checked before repoRelativePath: with the git common dir inside the repo,
+  // a cluster notes document would otherwise read as a `.git/...` repo path.
+  // Both sides go through Uri.file so a drive-letter case difference matches.
+  const clusterNotesFileName = (uri: vscode.Uri): string | undefined => {
+    const dir = getClusterNotesDir();
+    if (dir === undefined || uri.scheme !== "file") {
+      return undefined;
+    }
+    const fileName = basename(uri.fsPath);
+    return dirname(uri.fsPath) === vscode.Uri.file(dir).fsPath &&
+      CLUSTER_NOTES_FILE_PATTERN.test(fileName)
+      ? fileName
+      : undefined;
+  };
+
   controller.commentingRangeProvider = {
     provideCommentingRanges: (document) => {
       // Runs for every open document — return fast for foreign schemes
@@ -207,6 +224,9 @@ export const createNoteCommentController = (
         new vscode.Range(0, 0, Math.max(document.lineCount - 1, 0), 0),
       ];
       if (scheme === "file") {
+        if (clusterNotesFileName(document.uri) !== undefined) {
+          return fullDocument;
+        }
         const path = repoRelativePath(git, document.uri);
         return path !== undefined &&
           model.files.some((file) => file.path === path && !file.deleted)
@@ -363,19 +383,35 @@ export const createNoteCommentController = (
     git: Git,
     model: ReviewModel | undefined,
     note: Note,
-  ): NoteTarget =>
-    noteTargetFor(
+  ): NoteTarget => {
+    if (note.document !== undefined) {
+      const dir = getClusterNotesDir();
+      return noteTargetFor(
+        model,
+        note,
+        dir !== undefined && existsSync(join(dir, note.file)),
+      );
+    }
+    return noteTargetFor(
       model,
       note,
       // Only a working-side note consults it, so a base-side note costs no
       // stat at all
       note.side === "working" && existsSync(join(git.repoRoot, note.file)),
     );
+  };
 
-  const uriForTarget = (git: Git, target: NoteTarget): vscode.Uri =>
-    target.kind === "working"
-      ? vscode.Uri.file(join(git.repoRoot, target.path))
-      : createReviewBaseUri(target.path, target.sha);
+  const uriForTarget = (git: Git, target: NoteTarget): vscode.Uri => {
+    switch (target.kind) {
+      case "working":
+        return vscode.Uri.file(join(git.repoRoot, target.path));
+      case "base":
+        return createReviewBaseUri(target.path, target.sha);
+      case "document":
+        // threadTargetFor yields a document target only with a known dir
+        return vscode.Uri.file(join(getClusterNotesDir() ?? "", target.file));
+    }
+  };
 
   const openDocumentFor = (uri: vscode.Uri): vscode.TextDocument | undefined =>
     vscode.workspace.textDocuments.find(
@@ -831,7 +867,11 @@ export const createNoteCommentController = (
     }
     let side: NoteSide;
     let path: string | undefined;
-    if (uri.scheme === REVIEW_BASE_SCHEME) {
+    const documentFileName = clusterNotesFileName(uri);
+    if (documentFileName !== undefined) {
+      side = "working";
+      path = documentFileName;
+    } else if (uri.scheme === REVIEW_BASE_SCHEME) {
       side = "base";
       path = uri.path.slice(1);
     } else {
@@ -856,6 +896,9 @@ export const createNoteCommentController = (
       const note = await createNote(context.git, context.model.branch, {
         file: path,
         side,
+        ...(documentFileName === undefined
+          ? {}
+          : { document: "clusterNotes" as const }),
         startLine: startLine + 1,
         endLine: endLine + 1,
         snapshot,
