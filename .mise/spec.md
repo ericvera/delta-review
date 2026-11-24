@@ -61,7 +61,7 @@
 ### Notes UI (`src/commentController.ts`, `src/notesTreeProvider.ts`, `src/extension.ts`)
 
 - Controller gains `getClusterNotesDir: () => string | undefined`. A `file:` document whose directory equals it (both sides normalized through `vscode.Uri.file(dir).fsPath`, so Windows drive-letter case matches) and whose name matches the pattern gets full-document commenting ranges and `addNote` creates a `document: "clusterNotes"` working note; this check runs before `repoRelativePath`, since a common dir inside the repo would otherwise yield a `.git/...` path. Document targets resolve to `Uri.file(join(dir, file))`.
-- REVIEW NOTES groups by `(document, file)`; document groups sort first, label from a `documentLabel(file)` resolver (`<cluster label> — notes`, falling back to the file name), description `cluster notes · <n>`, collapse key `notes:clusterNotes:<file>`.
+- REVIEW NOTES groups by `(document, file)`; document groups sort first, label from a `documentLabel(file)` resolver (`<cluster label> — notes`, falling back to the file name), description `cluster notes · <n>`, collapse key `notes:clusterNotes:<file>`. Grouping, the label resolver and the collapse key live as pure functions in `src/notesGrouping.ts` (new, no `vscode`) with a colocated test.
 - `deltaReview.openNoteInDiff` on a document note opens its target document (never a diff, never matching a repo file of the same name) and expands the thread; no DELTA REVIEW reveal.
 
 ### Docs
@@ -91,4 +91,4 @@
 | `01_05_document_discovery.md` | Document path convention, summary, loader; skill documents the convention | `src/documents.ts`, `plugin/skills/cluster/SKILL.md` |
 | `01_06_document_rows.md` | Branch overview and cluster notes rows, commands, watcher | `src/treeProvider.ts`, `src/treeParents.ts`, `src/extension.ts`, `package.json`, `DEVELOPMENT.md` |
 | `01_07_notes_v2_document_notes.md` | Notes file v2 `document` key and store support | `src/notes.ts`, `src/notesStore.ts`, `src/extension.ts`, `plugin/skills/review-notes/SKILL.md`, `plugin/skills/cluster/SKILL.md` |
-| `01_08_document_notes_ui.md` | Document note target, commenting, threads, REVIEW NOTES and click for document notes | `src/noteTarget.ts`, `src/commentController.ts`, `src/notesTreeProvider.ts`, `src/extension.ts`, `DEVELOPMENT.md` |
+| `01_08_document_notes_ui.md` | Document note target, commenting, threads, REVIEW NOTES and click for document notes | `src/noteTarget.ts`, `src/commentController.ts`, `src/notesTreeProvider.ts`, `src/notesGrouping.ts` (new), `src/extension.ts`, `DEVELOPMENT.md` |
