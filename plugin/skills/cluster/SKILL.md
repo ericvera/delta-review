@@ -180,6 +180,15 @@ Relocation re-finds content already substantiated; it is not inferred provenance
 - List a file or directory in `waitPaths` when only part of a cluster is still expected to change; use the cluster's `wait` when all of it is. Remove an entry once that path is settled.
 - On a cold re-run, keep a `waitPaths` entry only while it still covers a file in the review set. A cold run adds no entry.
 
+### Documents
+
+Markdown documents beside the contract, in `<COMMON_DIR>/delta-review/`. No contract key names one; a document's row appears only while its file exists, and absence is silent. Never commit, stage, or push them: they live under the git directory, so a delete is unrecoverable.
+
+- Branch document — `branch-<sanitized-branch>.md`, written by another skill; never write it here.
+- Cluster notes document — `cluster-notes-<sanitized-branch>/<slug>.md`. Slug: the cluster's `label` lowercased, every run of characters outside `[a-z0-9]` replaced by one `-`, no trimming (`Clusters contract v4` → `clusters-contract-v4`); must match the extension's `clusterSlug`. An empty slug has no document. Labels sharing a slug share one document.
+- Shape: `# <label>`; an intro paragraph; `## Reading order`, a numbered list of the cluster's files in its `files` order; `## Check`, a list of questions for the reviewer.
+- Renaming a cluster renames its notes file; dropping a cluster deletes it. Rename or delete the old slug's file only when no cluster in the new contract still maps to that slug. Never rename onto an existing file: leave both files and tell the user.
+
 ### Conventions the extension does not reject — it fails silently
 
 - `files` entries and a move's `path` — repo-relative and `/`-separated, as `git diff --name-only` prints them. An absolute or `\`-separated path parses fine and then never matches: the file lands in "Unclustered", or you lose the declaration.
@@ -225,7 +234,7 @@ Union both lists, deduplicated. Do not filter further — deleted files belong t
 
 If it exists, treat it as the baseline:
 
-- **Keep cluster labels and identity stable** — reviewers have collapse state and mental context attached to them. Do not rename or reorder gratuitously.
+- **Keep cluster labels and identity stable** — reviewers have collapse state and mental context attached to them. Do not rename or reorder gratuitously. A rename moves its notes document per **Documents**.
 - Place new or previously-unclustered files into the existing cluster they belong to, or a new one if they are a new logical change.
 - Drop `files` entries no longer in the review set. Carry `moves`, `notes` and `levels` entries forward per the preservation rules in **Declaring a move**, **Notes** and **Review levels**, and `wait` and `waitPaths` per **Wait**.
 - Run the re-run relocation rule in **Declaring an extraction** before declaring anything new.
@@ -251,6 +260,10 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 - Set or clear `wait` and `waitPaths` entries per **Wait**.
 - `label` — target **≤ 40 characters**, **50 is a hard cap**. It gets about 34 characters of a default sidebar and truncates from the right, so put the distinguishing words first and move any further detail into `summary`, which renders as a tooltip and is effectively unbounded.
 
-### 7. Write and report
+### 7. Write notes documents
 
-Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the files marked `skim`, the clusters flagged `wait` and the paths in `waitPaths`, and any files you left unclustered (and why).
+Write or refresh a cluster notes document for each cluster that warrants one, and rename or delete documents of renamed or dropped clusters, per **Documents**.
+
+### 8. Write and report
+
+Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the files marked `skim`, the clusters flagged `wait` and the paths in `waitPaths`, the notes documents written, renamed, or deleted (and any rename left undone), and any files you left unclustered (and why).
