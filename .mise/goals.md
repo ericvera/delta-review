@@ -17,6 +17,7 @@ is it possible when tapping on the cluster notes to default to the markdown read
 - Clicking a Cluster notes row opens the markdown preview (`deltaReview.previewDocument`), matching Branch overview.
 - The Cluster notes row's inline action changes from "Open Preview" to "Open Source" (`deltaReview.openDocument`, go-to-file icon); the preview inline action is dropped.
 - Branch overview rows get the same inline "Open Source" action.
+- The Cluster notes row shows no description text beside its label (today e.g. "intro • 4 questions").
 
 ## Assumptions
 
