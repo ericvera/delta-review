@@ -74,7 +74,7 @@ import {
   refreshDerived,
   setResolved,
 } from "./notesStore";
-import { provenanceEntriesFor } from "./provenance";
+import { agentLineNoteEntriesFor, provenanceEntriesFor } from "./provenance";
 import {
   clearAllReviewSnapshots,
   deletePreDeletionRef,
@@ -390,6 +390,7 @@ export const activate = async (
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
+      commentController.renderAgentLineThreads([]);
       return;
     }
     const configuration = vscode.workspace.getConfiguration("deltaReview");
@@ -532,6 +533,7 @@ export const activate = async (
       // provenance comes from the clusters contract, so it must survive a
       // notes file that fails to load below.
       commentController.renderProvenanceThreads(provenanceEntriesFor(model));
+      commentController.renderAgentLineThreads(agentLineNoteEntriesFor(model));
       treeView.message = contractWarning;
       void syncActiveClusterChanges();
 
@@ -725,6 +727,7 @@ export const activate = async (
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
+      commentController.renderAgentLineThreads([]);
     }
   };
 
@@ -2060,6 +2063,7 @@ export const activate = async (
         return {
           files,
           threads: commentController.provenanceThreads(),
+          agentLineThreads: commentController.agentLineThreads(),
           // Row text as tree mode renders it (no directory text), by path
           rows: Object.fromEntries(
             files.map((file) => [

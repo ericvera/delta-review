@@ -34,6 +34,7 @@ import {
   fileContextValue,
   folderContextValue,
 } from "./rowContext";
+import { agentLineNotesTooltipLine } from "./provenance";
 import { SKIM_TOOLTIP, withLevelTag } from "./reviewLevel";
 import { parentOf, treeLevel } from "./treeParents";
 import { Triage } from "./triage";
@@ -560,6 +561,10 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     if (file.fileNote !== undefined && file.fileNote !== "") {
       // Contract text, escaped for the same reason as the move note
       notes.push(escapeMarkdownText(file.fileNote));
+    }
+    const lineNotesLine = agentLineNotesTooltipLine(file.lineNotes);
+    if (lineNotesLine !== undefined) {
+      notes.push(lineNotesLine);
     }
     if (file.reviewLevel === "skim") {
       notes.push(SKIM_TOOLTIP);

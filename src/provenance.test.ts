@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
 import { buildTooltipStatusLine } from "./moveDisplay";
 import {
+  agentLineNoteEntriesFor,
+  agentLineNoteLabel,
+  agentLineNotesTooltipLine,
   buildProvenanceBody,
   provenanceEntriesFor,
   type ProvenanceBodyInput,
@@ -248,5 +251,90 @@ describe("provenanceEntriesFor", () => {
         originLinesOutOfRange: true,
       }),
     );
+  });
+});
+
+describe("agentLineNoteEntriesFor", () => {
+  it("emits one entry per ranged note with an escaped body and the deleted flag", () => {
+    expect(
+      agentLineNoteEntriesFor(
+        model([
+          file({
+            path: "src/a.ts",
+            lineNotes: [
+              { lines: [2, 4], text: "Uses *retry* here" },
+              { lines: [9, 9], text: "Plain" },
+            ],
+          }),
+          file({
+            path: "src/gone.ts",
+            deleted: true,
+            lineNotes: [{ lines: [1, 3], text: "Was the old loop" }],
+          }),
+        ]),
+      ),
+    ).toEqual([
+      {
+        path: "src/a.ts",
+        deleted: false,
+        startLine: 2,
+        endLine: 4,
+        body: "Uses \\*retry\\* here",
+      },
+      {
+        path: "src/a.ts",
+        deleted: false,
+        startLine: 9,
+        endLine: 9,
+        body: "Plain",
+      },
+      {
+        path: "src/gone.ts",
+        deleted: true,
+        startLine: 1,
+        endLine: 3,
+        body: "Was the old loop",
+      },
+    ]);
+  });
+
+  it("emits nothing for files without line notes", () => {
+    expect(
+      agentLineNoteEntriesFor(
+        model([file({ path: "src/a.ts", fileNote: "A string note" })]),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("agentLineNoteLabel", () => {
+  it("names a single line", () => {
+    expect(agentLineNoteLabel(7, 7)).toBe("Agent note · line 7");
+  });
+
+  it("names a multi-line span with an en dash", () => {
+    expect(agentLineNoteLabel(2, 4)).toBe("Agent note · lines 2–4");
+  });
+});
+
+describe("agentLineNotesTooltipLine", () => {
+  it("is undefined for no notes", () => {
+    expect(agentLineNotesTooltipLine(undefined)).toBeUndefined();
+    expect(agentLineNotesTooltipLine([])).toBeUndefined();
+  });
+
+  it("uses the singular for one note", () => {
+    expect(agentLineNotesTooltipLine([{ lines: [3, 3], text: "x" }])).toBe(
+      "1 agent note on lines: 3",
+    );
+  });
+
+  it("uses the plural and joins the ranges", () => {
+    expect(
+      agentLineNotesTooltipLine([
+        { lines: [2, 4], text: "x" },
+        { lines: [9, 9], text: "y" },
+      ]),
+    ).toBe("2 agent notes on lines: 2–4, 9");
   });
 });

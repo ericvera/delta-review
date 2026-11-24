@@ -21,7 +21,11 @@ import {
   editReviewerTurn,
   setResolved,
 } from "./notesStore";
-import type { ProvenanceEntry } from "./provenance";
+import {
+  agentLineNoteLabel,
+  type AgentLineNoteEntry,
+  type ProvenanceEntry,
+} from "./provenance";
 import {
   canReplyFor,
   sameCommentDisplays,
@@ -81,6 +85,19 @@ export interface ProvenanceThreadSnapshot {
   body: string;
 }
 
+// A rendered agent line thread, inspection-only like ProvenanceThreadSnapshot.
+// Lines are the rendered 0-based range, after any clamp.
+export interface AgentLineThreadSnapshot {
+  path: string;
+  uri: string;
+  startLine: number;
+  endLine: number;
+  label: string | undefined;
+  canReply: boolean;
+  contextValue: string | undefined;
+  body: string;
+}
+
 export interface NoteCommentController extends vscode.Disposable {
   // Reconciles rendered comment threads with the given display threads
   renderThreads: (threads: NoteThread[]) => void;
@@ -90,6 +107,11 @@ export interface NoteCommentController extends vscode.Disposable {
   renderProvenanceThreads: (entries: ProvenanceEntry[]) => void;
   // Inspection accessor for the scripted extension-host check
   provenanceThreads: () => ProvenanceThreadSnapshot[];
+  // Reconciles the read-only agent line-range threads with the given
+  // entries; model-driven and independent of renderThreads, like provenance
+  renderAgentLineThreads: (entries: AgentLineNoteEntry[]) => void;
+  // Inspection accessor for the scripted extension-host check
+  agentLineThreads: () => AgentLineThreadSnapshot[];
   // Expands a note's rendered thread — the reveal approximation for
   // click-to-navigate (VS Code 1.90 has no stable thread.reveal())
   expandThread: (noteId: string) => void;
@@ -492,7 +514,10 @@ export const createNoteCommentController = (
   // Mirrors openDiff's right-side choice, so the thread lands on the document
   // the diff actually shows: the working file, or the empty base document
   // standing in for a deleted file's missing right side
-  const provenanceUri = (git: Git, entry: ProvenanceEntry): vscode.Uri =>
+  const provenanceUri = (
+    git: Git,
+    entry: Pick<ProvenanceEntry, "path" | "deleted">,
+  ): vscode.Uri =>
     entry.deleted
       ? createReviewBaseUri(entry.path, undefined)
       : vscode.Uri.file(join(git.repoRoot, entry.path));
@@ -503,6 +528,125 @@ export const createNoteCommentController = (
     }
     provenanceCache.clear();
   };
+
+  // Agent line threads by `<path>\n<index>`: a third cache for the same
+  // reason provenance has its own — they are not notes. startLine/endLine
+  // keep the contract's 1-based span so a re-clamp on open starts from it.
+  interface AgentLineThreadEntry {
+    thread: vscode.CommentThread;
+    uriKey: string;
+    body: string;
+    startLine: number;
+    endLine: number;
+  }
+  const agentLineCache = new Map<string, AgentLineThreadEntry>();
+
+  const agentLineCommentsFor = (body: string): vscode.Comment[] => [
+    {
+      body: new vscode.MarkdownString(body),
+      mode: vscode.CommentMode.Preview,
+      author: { name: "Claude" },
+    },
+  ];
+
+  const agentLineRange = (
+    startLine: number,
+    endLine: number,
+    document: vscode.TextDocument | undefined,
+  ): vscode.Range => {
+    const { start, end } =
+      document === undefined
+        ? { start: startLine - 1, end: endLine - 1 }
+        : clampNoteRange(startLine, endLine, document.lineCount);
+    return new vscode.Range(start, 0, end, 0);
+  };
+
+  const clearAgentLineThreads = (): void => {
+    for (const entry of agentLineCache.values()) {
+      entry.thread.dispose();
+    }
+    agentLineCache.clear();
+  };
+
+  const renderAgentLineThreads = (entries: AgentLineNoteEntry[]): void => {
+    const git = getGit();
+    if (git === undefined) {
+      clearAgentLineThreads();
+      return;
+    }
+    const rendered = new Set<string>();
+    const indexByPath = new Map<string, number>();
+    for (const entry of entries) {
+      const index = indexByPath.get(entry.path) ?? 0;
+      indexByPath.set(entry.path, index + 1);
+      const key = `${entry.path}\n${index}`;
+      rendered.add(key);
+      const uri = provenanceUri(git, entry);
+      const uriKey = uri.toString();
+      const range = agentLineRange(
+        entry.startLine,
+        entry.endLine,
+        openDocumentFor(uri),
+      );
+      const label = agentLineNoteLabel(entry.startLine, entry.endLine);
+      const cached = agentLineCache.get(key);
+      if (cached === undefined || cached.uriKey !== uriKey) {
+        cached?.thread.dispose();
+        const thread = controller.createCommentThread(
+          uri,
+          range,
+          agentLineCommentsFor(entry.body),
+        );
+        thread.label = label;
+        thread.canReply = false;
+        thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+        agentLineCache.set(key, {
+          thread,
+          uriKey,
+          body: entry.body,
+          startLine: entry.startLine,
+          endLine: entry.endLine,
+        });
+        continue;
+      }
+      if (cached.body !== entry.body) {
+        cached.thread.comments = agentLineCommentsFor(entry.body);
+        cached.body = entry.body;
+      }
+      if (
+        cached.startLine !== entry.startLine ||
+        cached.endLine !== entry.endLine
+      ) {
+        cached.thread.label = label;
+        cached.startLine = entry.startLine;
+        cached.endLine = entry.endLine;
+      }
+      if (!cached.thread.range?.isEqual(range)) {
+        cached.thread.range = range;
+      }
+    }
+    for (const [key, entry] of agentLineCache) {
+      if (!rendered.has(key)) {
+        entry.thread.dispose();
+        agentLineCache.delete(key);
+      }
+    }
+  };
+
+  const agentLineThreads = (): AgentLineThreadSnapshot[] =>
+    [...agentLineCache].map(([key, entry]) => {
+      const body = entry.thread.comments[0]?.body ?? "";
+      return {
+        path: key.slice(0, key.lastIndexOf("\n")),
+        uri: entry.thread.uri.toString(),
+        startLine: entry.thread.range?.start.line ?? 0,
+        endLine: entry.thread.range?.end.line ?? 0,
+        label: entry.thread.label,
+        canReply: entry.thread.canReply !== false,
+        contextValue: entry.thread.contextValue,
+        body: typeof body === "string" ? body : body.value,
+      };
+    });
 
   const renderProvenanceThreads = (entries: ProvenanceEntry[]): void => {
     const git = getGit();
@@ -576,8 +720,9 @@ export const createNoteCommentController = (
       threadCache.clear();
       threadNoteIds.clear();
       // No repo means no paths to resolve provenance URIs against, so those
-      // threads go with the notes
+      // and agent line threads go with the notes
       clearProvenanceThreads();
+      clearAgentLineThreads();
       return;
     }
     const model = getModel();
@@ -647,6 +792,15 @@ export const createNoteCommentController = (
         entry.thread.range = rangeFor(
           entry.noteThread.note,
           entry.lines,
+          document,
+        );
+      }
+    }
+    for (const entry of agentLineCache.values()) {
+      if (entry.uriKey === uriKey) {
+        entry.thread.range = agentLineRange(
+          entry.startLine,
+          entry.endLine,
           document,
         );
       }
@@ -969,6 +1123,8 @@ export const createNoteCommentController = (
     renderThreads,
     renderProvenanceThreads,
     provenanceThreads,
+    renderAgentLineThreads,
+    agentLineThreads,
     expandThread,
     reclampThreadsFor,
     restyleThreads,
@@ -987,6 +1143,7 @@ export const createNoteCommentController = (
       threadCache.clear();
       threadNoteIds.clear();
       clearProvenanceThreads();
+      clearAgentLineThreads();
       controller.dispose();
     },
   };
