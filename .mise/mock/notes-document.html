@@ -1,7 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><title>Cluster notes document</title></head><body><div class="page">
 <p><a href="index.html">&larr; Index</a></p>
 <h1>Cluster notes document &mdash; read in place, reviewed like code</h1>
-<p class="caption">Clicking a cluster's <b>Cluster notes</b> row opens its markdown file (written by the agent beside the contracts under <code>&lt;git common dir&gt;/delta-review/</code>). The owner selects a line range and adds a review note exactly as on a diff; the agent answers through the existing responses file.</p>
+<p class="caption">Clicking a cluster's <b>Cluster notes</b> row opens its markdown file, found by convention at <code>&lt;git common dir&gt;/delta-review/cluster-notes-&lt;branch&gt;/&lt;cluster slug&gt;.md</code> (here <code>cluster-notes-feat-cluster-notes-docs-review-levels/clusters-contract-v4.md</code>); the slug is the cluster label lowercased with non-alphanumerics turned into hyphens. The contract does not name the file. The owner selects a line range and adds a review note exactly as on a diff; the agent answers through the existing responses file.</p>
 
 <div class="shots">
 
@@ -11,13 +11,13 @@
 <div class="sb-title">Source Control</div>
 <div class="view-head"><i class="codicon codicon-chevron-down"></i>Delta Review<span class="actions"><i class="codicon codicon-list-tree"></i><i class="codicon codicon-ungroup-by-ref-type"></i><i class="codicon codicon-refresh"></i></span></div>
 <div class="tree">
- <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span><span class="desc">plate</span></div>
+ <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span></div>
  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-layers"></i></span><span class="lbl">Clusters contract v4</span><span class="count">0/4</span></div>
  <div class="row selected" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-note"></i></span><span class="lbl">Cluster notes</span><span class="desc">intro &middot; reading&hellip;</span></div>
  <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">clusters.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
- <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-beaker"></i></span><span class="lbl">clusters.test.ts</span><span class="tag skim">skim</span><span class="deco M">M</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-beaker"></i></span><span class="lbl">clusters.test.ts</span><span class="tag skim">skim</span><span class="desc">src</span><span class="deco M">M</span></div>
  <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">model.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
- <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-markdown"></i></span><span class="lbl">SKILL.md</span><span class="tag skim">skim</span><span class="deco M">M</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-markdown"></i></span><span class="lbl">SKILL.md</span><span class="tag skim">skim</span><span class="desc">plugin/skills/cluster</span><span class="deco M">M</span></div>
 </div></div>
 <div class="editor">
  <div class="tabs"><div class="tab active"><i class="codicon codicon-note"></i>Clusters contract v4 &mdash; notes</div><div class="tab"><i class="codicon codicon-file-code"></i>clusters.ts</div></div>

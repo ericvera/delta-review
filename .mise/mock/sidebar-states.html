@@ -15,22 +15,26 @@
  <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">model.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-right"></i></span><span class="icon"><i class="codicon codicon-check"></i></span><span class="lbl">Reviewed</span><span class="count">0</span></div>
 </div></div></div>
-<div class="new-note">Nothing to show &rArr; no row. The tree looks exactly like today.</div>
+<div class="new-note">Neither <code>&lt;git common dir&gt;/delta-review/branch-&lt;branch&gt;.md</code> nor <code>&lt;git common dir&gt;/delta-review/cluster-notes-&lt;branch&gt;/&lt;cluster slug&gt;.md</code> exists &rArr; no rows, no error. The tree looks exactly like today.</div>
 </div>
 
-<div class="shot"><div class="label">B. Cluster names a notes file that does not exist yet</div>
+<div class="shot"><div class="label">B. Branch document present; only one cluster has a notes file</div>
 <div class="workbench"><div class="sidebar" style="min-height:200px">
 <div class="sb-title">Source Control</div>
 <div class="view-head"><i class="codicon codicon-chevron-down"></i>Delta Review<span class="actions"><i class="codicon codicon-list-tree"></i><i class="codicon codicon-ungroup-by-ref-type"></i><i class="codicon codicon-refresh"></i></span></div>
 <div class="tree">
- <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span><span class="desc">plate</span></div>
+ <div class="row new" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span></div>
  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-layers"></i></span><span class="lbl">Clusters contract v4</span><span class="count">0/2</span></div>
- <div class="row new show-actions" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-warning" style="color:var(--warn)"></i></span><span class="lbl" style="color:var(--dim)">Cluster notes</span><span class="desc">file not found</span>
-  <div class="tooltip"><code>clusters-contract-v4.md</code><p>The clusters contract names this notes file, but it is not beside the contract. It appears here as soon as the agent writes it.</p></div>
- </div>
- <div class="row" style="padding-left:16px;margin-top:62px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">clusters.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
+ <div class="row new" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-note"></i></span><span class="lbl">Cluster notes</span><span class="desc">intro &middot; reading order &middot; 3 questions</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">clusters.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">model.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
+ <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-layers"></i></span><span class="lbl">Document rows in the tree</span><span class="count">0/1</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">treeProvider.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
 </div></div></div>
-<div class="new-note">The row stays so the gap is visible; clicking does nothing.</div>
+<div class="new-note">Documents are found by convention, never named in the contract. Directory <code>&lt;git common dir&gt;/delta-review/</code>:<br>
+<code>branch-feat-cluster-notes-docs-review-levels.md</code> &mdash; exists &rArr; Branch overview row.<br>
+<code>cluster-notes-feat-cluster-notes-docs-review-levels/clusters-contract-v4.md</code> &mdash; exists &rArr; Cluster notes row.<br>
+<code>cluster-notes-feat-cluster-notes-docs-review-levels/document-rows-in-the-tree.md</code> &mdash; absent &rArr; no row, no warning.</div>
 </div>
 
 <div class="shot"><div class="label">C. Every file in a cluster reviewed</div>
@@ -38,7 +42,7 @@
 <div class="sb-title">Source Control</div>
 <div class="view-head"><i class="codicon codicon-chevron-down"></i>Delta Review<span class="actions"><i class="codicon codicon-list-tree"></i><i class="codicon codicon-ungroup-by-ref-type"></i><i class="codicon codicon-refresh"></i></span></div>
 <div class="tree">
- <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span><span class="desc">plate</span></div>
+ <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span></div>
  <div class="row dimmed" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-layers"></i></span><span class="lbl">Clusters contract v4</span><span class="count">4/4</span></div>
  <div class="row new" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-note"></i></span><span class="lbl">Cluster notes</span><span class="desc">intro &middot; reading order &middot; 3 questions</span></div>
  <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="msg">All files reviewed.</span></div>
@@ -54,7 +58,7 @@
 <div class="sb-title">Source Control</div>
 <div class="view-head"><i class="codicon codicon-chevron-down"></i>Delta Review<span class="actions"><i class="codicon codicon-list-tree"></i><i class="codicon codicon-group-by-ref-type"></i><i class="codicon codicon-refresh"></i></span></div>
 <div class="tree">
- <div class="row new" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span><span class="desc">plate</span></div>
+ <div class="row new" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span></div>
  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-circle-large-outline"></i></span><span class="lbl">Needs Review</span><span class="count">10</span></div>
  <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-markdown"></i></span><span class="lbl">SKILL.md</span><span class="tag skim">skim</span><span class="desc">plugin/skills/cluster</span><span class="deco M">M</span></div>
  <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-beaker"></i></span><span class="lbl">clusters.test.ts</span><span class="tag skim">skim</span><span class="desc">src</span><span class="deco M">M</span></div>

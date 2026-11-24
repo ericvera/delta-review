@@ -1,7 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><title>Sidebar: grouped list mode</title></head><body><div class="page">
 <p><a href="index.html">&larr; Index</a></p>
 <h1>Sidebar &mdash; grouped, list mode</h1>
-<p class="caption">New elements are outlined in yellow. The branch document is the first row of the tree; each cluster opens with its notes document; files follow in contract order (the order the cluster's <code>files</code> array lists them, not alphabetical); review level shows as a tag on the file row, and cluster names no longer carry depth.</p>
+<p class="caption">New elements are outlined in yellow. The branch document is the first row of the tree; each cluster opens with its notes document; files follow in contract order (the order the cluster's <code>files</code> array lists them, not alphabetical); review level shows as a tag on the file row, and cluster names no longer carry depth. As today in list mode, every file row shows its directory as the row description (after any skim tag); a file at the repo root shows none.</p>
 
 <div class="shots">
 
@@ -10,7 +10,7 @@
 <div class="sb-title">Source Control</div>
 <div class="view-head"><i class="codicon codicon-chevron-down"></i>Delta Review<span class="actions"><i class="codicon codicon-list-tree" title="View as Tree"></i><i class="codicon codicon-ungroup-by-ref-type" title="Ungroup Clusters"></i><i class="codicon codicon-refresh" title="Refresh"></i></span></div>
 <div class="tree">
- <div class="row new" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span><span class="desc">plate</span></div>
+ <div class="row new" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span></div>
 
  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-layers"></i></span><span class="lbl">Clusters contract v4</span><span class="count">0/4</span></div>
  <div class="row new" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-note"></i></span><span class="lbl">Cluster notes</span><span class="desc">intro &middot; reading order &middot; 3 questions</span></div>
@@ -34,7 +34,7 @@
  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-right"></i></span><span class="icon"><i class="codicon codicon-check"></i></span><span class="lbl">Reviewed</span><span class="count">1</span></div>
 </div>
 </div></div>
-<div class="new-note">Order inside "Clusters contract v4" is the contract's: clusters.ts, clusters.test.ts, model.ts, SKILL.md &mdash; not path order.</div>
+<div class="new-note">Order inside "Clusters contract v4" is the contract's: clusters.ts, clusters.test.ts, model.ts, SKILL.md &mdash; not path order. Each file row keeps its directory in the description (<code>src</code>, <code>plugin/skills/cluster</code>); <code>package.json</code> sits at the repo root, so it has none.</div>
 </div>
 
 <div class="shot"><div class="label">B. Hover on a notes row: inline actions + tooltip</div>
@@ -42,10 +42,10 @@
 <div class="sb-title">Source Control</div>
 <div class="view-head"><i class="codicon codicon-chevron-down"></i>Delta Review<span class="actions"><i class="codicon codicon-list-tree"></i><i class="codicon codicon-ungroup-by-ref-type"></i><i class="codicon codicon-refresh"></i></span></div>
 <div class="tree">
- <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span><span class="desc">plate</span></div>
+ <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span></div>
  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-layers"></i></span><span class="lbl">Clusters contract v4</span><span class="count">0/4</span></div>
  <div class="row show-actions new" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-note"></i></span><span class="lbl">Cluster notes</span><span class="desc">intro &middot; reading order &middot; 3 questions</span><span class="inline"><i class="codicon codicon-open-preview" title="Open Preview"></i><i class="codicon codicon-comment-discussion" title="Open Notes Document"></i></span>
-  <div class="tooltip"><code>clusters-contract-v4.md</code><p>Notes document for <b>Clusters contract v4</b>. Click to open it; select lines to leave a review note.</p><p>1 open note</p></div>
+  <div class="tooltip"><code>&lt;git common dir&gt;/delta-review/cluster-notes-feat-cluster-notes-docs-review-levels/clusters-contract-v4.md</code><p>Notes document for <b>Clusters contract v4</b>. Click to open it; select lines to leave a review note.</p><p>1 open note</p></div>
  </div>
  <div class="row" style="padding-left:16px;margin-top:64px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">clusters.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
 </div>

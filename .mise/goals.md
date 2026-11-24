@@ -24,17 +24,17 @@ Evaluate the following. I look forward to seeing the mocks.
 
 - Notes on a cluster notes document anchor to the selected line range, like code notes; agent replies use the existing responses file; the notes file format gets a version bump.
 
-- Documents: the agent writes markdown files beside the contracts under `<git common dir>/delta-review/` (never committed); each cluster names its notes file, the branch document has a fixed name; the watcher widens to `*.md`.
+- Documents: the agent writes markdown files beside the contracts under `<git common dir>/delta-review/` (never committed), found by convention, not named in any contract: branch document `branch-<branch>.md`, cluster notes `cluster-notes-<branch>/<slug>.md` (slug = label lowercased, runs of other characters → single hyphen; `<branch>` sanitized as for `clusters-<branch>.json`). A row appears only when its file exists — no missing-file error. Watcher widens to `*.md`. Renaming a cluster means renaming its notes file (cluster skill says so).
+- The branch document is the output of the owner's in-development "plate" skill; the row is labelled "Branch overview", never "plate".
+- List mode keeps today's directory path in the row description (after any skim tag); root files show none.
 - Contract order applies in list mode only; tree (folder) mode keeps folders-first alphabetical.
 
 ## Assumptions
 
-- "Plate" means the branch document.
 - Row labels/icons: "Branch overview" (book icon), "Cluster notes" (note icon).
 - A cluster notes row opens the markdown source (so notes can be added); the branch row opens the markdown preview.
 - Document rows have no reviewed state.
 - Only `skim` shows a tag on the row; `review` is the default and untagged.
-- A notes file named by the contract but missing shows a warning row.
 - The branch row also shows in ungrouped view.
 - The branch document takes no review notes.
 - A line-range agent note renders as a read-only thread under the last line of its range.
@@ -42,5 +42,5 @@ Evaluate the following. I look forward to seeing the mocks.
 ## Proposal
 
 Issue: cluster intros, reading order, review depth and agent remarks live in labels and file-level notes, not where they are read.
-Approach: clusters contract v4 (per-cluster notes doc, branch doc, per-file `review`/`skim`, line-range agent notes), doc rows first in tree and cluster, list-mode contract order, notes file v2 for line notes on cluster docs; skill docs and DEVELOPMENT.md updated in step.
+Approach: convention-located branch doc and per-cluster notes docs; clusters contract v4 (per-file `review`/`skim`, line-range agent notes), doc rows first in tree and cluster, list-mode contract order, notes file v2 for line notes on cluster docs; skill docs and DEVELOPMENT.md updated in step.
 Skips: none — schema changes across both contracts need spec and critic.
