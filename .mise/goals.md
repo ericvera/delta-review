@@ -20,8 +20,11 @@ Evaluate the following. I look forward to seeing the mocks.
 9. Tests: src/clusters.test.ts, src/treeParents.test.ts, src/provenance.test.ts, src/notes.test.ts; plus scripted extension-host check (DEVELOPMENT.md:205).
 10. Tree structure changes → mock condition met.
 
+## Decisions
+
+- Documents: the agent writes markdown files beside the contracts under `<git common dir>/delta-review/` (never committed); each cluster names its notes file, the branch document has a fixed name; the watcher widens to `*.md`.
+- Contract order applies in list mode only; tree (folder) mode keeps folders-first alphabetical.
+
 ## Open questions
 
-1. Where do the cluster notes document and branch document come from?
-2. How does contract order interact with tree (folder) mode?
 3. How are notes on a cluster notes document anchored and versioned?
