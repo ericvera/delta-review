@@ -26,6 +26,14 @@ export interface ClusterDefinition {
 // A 1-based, inclusive line span of the origin file.
 export type LineRange = [start: number, end: number];
 
+export type ReviewLevel = "review" | "skim";
+
+// An agent remark about a line span of the file's current content.
+export interface LineNote {
+  lines: LineRange;
+  text: string;
+}
+
 // A file the writer moved into its current location, declared because git
 // cannot see the move: it came from another repository, or was rewritten
 // heavily enough that rename detection misses it.
@@ -38,19 +46,23 @@ export interface MoveDeclaration {
   // Blob id of the content this file came from
   baseBlob?: string;
   // The origin's line spans this file was extracted from — repo origins on a
-  // version 3 contract only
+  // version 3 or later contract only
   fromLines?: LineRange[];
   note?: string;
 }
 
 export interface ClustersContract {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   clusters: ClusterDefinition[];
   // Always present; a version 1 contract normalizes to an empty list
   moves: MoveDeclaration[];
   // Repo-relative path → one-line remark. Always present; empty below
   // version 3
   notes: Map<string, string>;
+  // Repo-relative path → ranged remarks. Always present; empty below version 4
+  lineNotes: Map<string, LineNote[]>;
+  // Repo-relative path → review level. Always present; any version
+  levels: Map<string, ReviewLevel>;
   // Repo-relative file or directory paths the agent still expects to change,
   // trailing "/" stripped. Always present; any version
   waitPaths: string[];
@@ -136,7 +148,7 @@ export const everyFileWaiting = (
 
 // Order-preserving filter of a file list down to one review status. Returns
 // a new array; the ReviewFile objects are kept by reference, so callers keep
-// the model's path-sorted order and object identity.
+// the input's order and object identity.
 export const filterByStatus = (
   files: readonly ReviewFile[],
   status: FileReviewStatus,
@@ -231,7 +243,7 @@ const isNonEmptyString = (value: unknown): value is string =>
 const isContractVersion = (
   value: unknown,
 ): value is ClustersContract["version"] =>
-  value === 1 || value === 2 || value === 3;
+  value === 1 || value === 2 || value === 3 || value === 4;
 
 const isMoveOrigin = (value: unknown): value is MoveDeclaration["origin"] =>
   value === "repo" || value === "external";
@@ -404,6 +416,110 @@ const parseMove = (
   };
 };
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isLineRange = (value: unknown): value is LineRange => {
+  if (!Array.isArray(value) || value.length !== 2) {
+    return false;
+  }
+  const [start, end]: unknown[] = value;
+  return isInteger(start) && isInteger(end) && start >= 1 && end >= start;
+};
+
+const parseNoteItem = (
+  item: unknown,
+  label: string,
+): { text: string; lines?: LineRange } | { error: string } => {
+  if (typeof item === "string") {
+    return { text: item };
+  }
+  if (!isPlainObject(item) || typeof item.text !== "string") {
+    return {
+      error: `${label} must be a string or an object with "text" and "lines"`,
+    };
+  }
+  if (!isLineRange(item.lines)) {
+    return {
+      error: `${label}: "lines" must be a [start, end] pair of integers with 1 <= start <= end`,
+    };
+  }
+  return { text: item.text, lines: item.lines };
+};
+
+const parseNotes = (
+  raw: unknown,
+  version: 3 | 4,
+):
+  | { notes: Map<string, string>; lineNotes: Map<string, LineNote[]> }
+  | { error: string } => {
+  const notes = new Map<string, string>();
+  const lineNotes = new Map<string, LineNote[]>();
+  if (raw === undefined) {
+    return { notes, lineNotes };
+  }
+  if (!isPlainObject(raw)) {
+    return { error: '"notes" must be an object' };
+  }
+  for (const [path, value] of Object.entries(raw)) {
+    const label = `notes["${path}"]`;
+    if (version === 3 && typeof value !== "string") {
+      return { error: `${label} must be a string` };
+    }
+    if (typeof value !== "string" && !Array.isArray(value)) {
+      return { error: `${label} must be a string or an array` };
+    }
+    const items: unknown[] = typeof value === "string" ? [value] : value;
+    const remarks: string[] = [];
+    const ranged: LineNote[] = [];
+    for (let index = 0; index < items.length; index++) {
+      const result = parseNoteItem(items[index], `${label}[${index}]`);
+      if ("error" in result) {
+        return result;
+      }
+      // An empty remark is no remark; keep it out of the maps so consumers
+      // never have to test for one.
+      if (result.text.length === 0) {
+        continue;
+      }
+      if (result.lines === undefined) {
+        remarks.push(result.text);
+      } else {
+        ranged.push({ lines: result.lines, text: result.text });
+      }
+    }
+    if (remarks.length > 0) {
+      notes.set(path, remarks.join(" "));
+    }
+    if (ranged.length > 0) {
+      lineNotes.set(path, ranged);
+    }
+  }
+  return { notes, lineNotes };
+};
+
+const isReviewLevel = (value: unknown): value is ReviewLevel =>
+  value === "review" || value === "skim";
+
+const parseLevels = (
+  raw: unknown,
+): { levels: Map<string, ReviewLevel> } | { error: string } => {
+  const levels = new Map<string, ReviewLevel>();
+  if (raw === undefined) {
+    return { levels };
+  }
+  if (!isPlainObject(raw)) {
+    return { error: '"levels" must be an object' };
+  }
+  for (const [path, value] of Object.entries(raw)) {
+    if (!isReviewLevel(value)) {
+      return { error: `levels["${path}"] must be "review" or "skim"` };
+    }
+    levels.set(path, value);
+  }
+  return { levels };
+};
+
 // Parses and validates contract text. Errors are one-line and user-facing.
 // Unknown extra keys are ignored (forward-friendly within a version).
 export const parseClustersContract = (text: string): ParseClustersResult => {
@@ -424,13 +540,13 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
   if (version === undefined) {
     return {
       ok: false,
-      error: 'missing "version" (extension supports 1, 2 and 3)',
+      error: 'missing "version" (extension supports 1, 2, 3 and 4)',
     };
   }
   if (!isContractVersion(version)) {
     return {
       ok: false,
-      error: `unsupported version ${JSON.stringify(version)} (extension supports 1, 2 and 3)`,
+      error: `unsupported version ${JSON.stringify(version)} (extension supports 1, 2, 3 and 4)`,
     };
   }
   if (!Array.isArray(record.clusters)) {
@@ -453,7 +569,7 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
     }
     const declared = new Set<string>();
     for (let index = 0; index < record.moves.length; index++) {
-      const result = parseMove(record.moves[index], index, version === 3);
+      const result = parseMove(record.moves[index], index, version >= 3);
       if ("error" in result) {
         return { ok: false, error: result.error };
       }
@@ -466,28 +582,22 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
       moves.push(result.move);
     }
   }
-  // `notes` arrived in version 3; below it the key is unknown and ignored,
-  // so an older contract can carry one without being validated against it.
-  const notes = new Map<string, string>();
-  if (version === 3 && record.notes !== undefined) {
-    const rawNotes = record.notes;
-    if (
-      typeof rawNotes !== "object" ||
-      rawNotes === null ||
-      Array.isArray(rawNotes)
-    ) {
-      return { ok: false, error: '"notes" must be an object' };
+  // `notes` arrived in version 3 and gained array values in version 4; below
+  // 3 the key is unknown and ignored, so an older contract can carry one
+  // without being validated against it.
+  let notes = new Map<string, string>();
+  let lineNotes = new Map<string, LineNote[]>();
+  if (version >= 3) {
+    const result = parseNotes(record.notes, version === 4 ? 4 : 3);
+    if ("error" in result) {
+      return { ok: false, error: result.error };
     }
-    for (const [path, note] of Object.entries(rawNotes)) {
-      if (typeof note !== "string") {
-        return { ok: false, error: `notes["${path}"] must be a string` };
-      }
-      // An empty remark is no remark; keep it out of the map so consumers
-      // never have to test for one.
-      if (note.length > 0) {
-        notes.set(path, note);
-      }
-    }
+    ({ notes, lineNotes } = result);
+  }
+  // Ungated, like `waitPaths`: older readers ignore the unknown key.
+  const levelsResult = parseLevels(record.levels);
+  if ("error" in levelsResult) {
+    return { ok: false, error: levelsResult.error };
   }
   // Ungated, like a cluster's `wait`: older readers ignore the unknown key.
   const rawWaitPaths = record.waitPaths === undefined ? [] : record.waitPaths;
@@ -499,7 +609,15 @@ export const parseClustersContract = (text: string): ParseClustersResult => {
     .filter((entry) => entry.length > 0);
   return {
     ok: true,
-    contract: { version, clusters, moves, notes, waitPaths },
+    contract: {
+      version,
+      clusters,
+      moves,
+      notes,
+      lineNotes,
+      levels: levelsResult.levels,
+      waitPaths,
+    },
   };
 };
 
@@ -514,20 +632,22 @@ const isCoveredByWaitPath = (
 // everything); explicit `files` listings beat pattern matches, first listing
 // cluster wins; otherwise the first cluster (contract order) whose patterns
 // match wins; anything left is unclustered. Files named by the contract but
-// absent from the review set are simply not shown. Input order (path-sorted
-// from the model) is preserved within each bucket, and ReviewFile objects are
-// kept by reference.
+// absent from the review set are simply not shown. Within a real cluster,
+// explicit members come first in the order of that cluster's `files` (the
+// agent's reading order), then pattern-only members in input order.
+// Unclustered and auto keep input order (path-sorted from the model).
+// ReviewFile objects are kept by reference.
 export const resolveClusterModel = (
   contract: ClustersContract,
   files: ReviewFile[],
 ): ClusterModel => {
-  const explicit = new Map<string, number>();
+  const explicit = new Map<string, { cluster: number; position: number }>();
   contract.clusters.forEach((cluster, index) => {
-    for (const path of cluster.files) {
+    cluster.files.forEach((path, position) => {
       if (!explicit.has(path)) {
-        explicit.set(path, index);
+        explicit.set(path, { cluster: index, position });
       }
-    }
+    });
   });
   // One matcher per cluster. The contract is externally written, so guard
   // pattern compilation the same way triage.ts guards user-typed globs.
@@ -559,9 +679,9 @@ export const resolveClusterModel = (
       auto.push(file);
       continue;
     }
-    const explicitIndex = explicit.get(file.path);
-    if (explicitIndex !== undefined) {
-      buckets[explicitIndex].files.push(file);
+    const listing = explicit.get(file.path);
+    if (listing !== undefined) {
+      buckets[listing.cluster].files.push(file);
       continue;
     }
     const patternIndex = matchers.findIndex((matches) => matches(file.path));
@@ -570,6 +690,15 @@ export const resolveClusterModel = (
       continue;
     }
     unclustered.push(file);
+  }
+  for (const bucket of buckets) {
+    const position = (file: ReviewFile): number =>
+      explicit.get(file.path)?.position ?? Infinity;
+    bucket.files.sort((a, b) => {
+      const pa = position(a);
+      const pb = position(b);
+      return pa === pb ? 0 : pa < pb ? -1 : 1;
+    });
   }
   if (contract.waitPaths.length > 0) {
     for (const bucket of buckets) {

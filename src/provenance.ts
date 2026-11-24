@@ -1,3 +1,4 @@
+import type { LineNote } from "./clusters";
 import { escapeMarkdownText } from "./markdown";
 import type { ReviewModel } from "./model";
 import { buildTooltipOriginLine } from "./moveDisplay";
@@ -89,4 +90,51 @@ export const provenanceEntriesFor = (model: ReviewModel): ProvenanceEntry[] => {
     }
   }
   return entries;
+};
+
+// One read-only thread per ranged agent note. Lines stay 1-based inclusive,
+// as the contract states them; the controller converts and clamps.
+export interface AgentLineNoteEntry {
+  path: string;
+  deleted: boolean;
+  startLine: number;
+  endLine: number;
+  body: string;
+}
+
+export const agentLineNoteEntriesFor = (
+  model: ReviewModel,
+): AgentLineNoteEntry[] =>
+  model.files.flatMap((file) =>
+    (file.lineNotes ?? []).map(({ lines: [startLine, endLine], text }) => ({
+      path: file.path,
+      deleted: file.deleted,
+      startLine,
+      endLine,
+      body: escapeMarkdownText(text),
+    })),
+  );
+
+const lineSpan = (startLine: number, endLine: number): string =>
+  startLine === endLine ? `${startLine}` : `${startLine}–${endLine}`;
+
+export const agentLineNoteLabel = (
+  startLine: number,
+  endLine: number,
+): string =>
+  startLine === endLine
+    ? `Agent note · line ${startLine}`
+    : `Agent note · lines ${lineSpan(startLine, endLine)}`;
+
+export const agentLineNotesTooltipLine = (
+  lineNotes: readonly LineNote[] | undefined,
+): string | undefined => {
+  if (lineNotes === undefined || lineNotes.length === 0) {
+    return undefined;
+  }
+  const noun = lineNotes.length === 1 ? "note" : "notes";
+  const ranges = lineNotes
+    .map(({ lines: [start, end] }) => lineSpan(start, end))
+    .join(", ");
+  return `${lineNotes.length} agent ${noun} on lines: ${ranges}`;
 };

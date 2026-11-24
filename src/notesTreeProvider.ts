@@ -1,5 +1,7 @@
 import { basename, dirname } from "node:path";
 import * as vscode from "vscode";
+import type { NoteDocument } from "./notes";
+import { groupNoteThreads, notesGroupCollapseKey } from "./notesGrouping";
 import type { NoteThread, ThreadStatus } from "./noteThreads";
 
 // REVIEW NOTES tree: notes grouped by file, rendered as a sibling SCM section
@@ -9,7 +11,9 @@ import type { NoteThread, ThreadStatus } from "./noteThreads";
 
 export interface NotesFileGroupElement {
   kind: "fileGroup";
-  // Repo-relative path, '/'-separated (git style)
+  document?: NoteDocument;
+  // Repo-relative path, '/'-separated (git style); for a document group, the
+  // file name inside the cluster notes dir
   file: string;
   // This file's threads, sorted by current position
   threads: NoteThread[];
@@ -22,10 +26,8 @@ export interface NoteRowElement {
 
 export type NotesTreeElement = NotesFileGroupElement | NoteRowElement;
 
-// Collapse keys share the main view's persisted set; the `notes:` namespace
-// can never collide with its status/cluster/folder keys.
 export const notesCollapseKeyFor = (element: NotesFileGroupElement): string =>
-  `notes:${element.file}`;
+  notesGroupCollapseKey(element);
 
 const MAX_LABEL_LENGTH = 60;
 
@@ -77,6 +79,7 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
   constructor(
     private readonly isCollapsed: (key: string) => boolean,
     private readonly isUnread: (thread: NoteThread) => boolean,
+    private readonly documentLabel: (file: string) => string,
   ) {}
 
   setThreads(threads: NoteThread[]): void {
@@ -92,24 +95,9 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
     if (element === undefined) {
       // With no notes this returns [] — never a message row — so the
       // viewsWelcome empty state renders
-      const byFile = new Map<string, NoteThread[]>();
-      for (const thread of this.threads) {
-        const group = byFile.get(thread.note.file);
-        if (group === undefined) {
-          byFile.set(thread.note.file, [thread]);
-        } else {
-          group.push(thread);
-        }
-      }
-      return [...byFile.entries()]
-        .sort(([pathA], [pathB]) => (pathA < pathB ? -1 : 1))
-        .map(([file, threads]): NotesFileGroupElement => ({
-          kind: "fileGroup",
-          file,
-          threads: [...threads].sort(
-            (a, b) => a.note.currentStartLine - b.note.currentStartLine,
-          ),
-        }));
+      return groupNoteThreads(this.threads).map(
+        (group): NotesFileGroupElement => ({ kind: "fileGroup", ...group }),
+      );
     }
     if (element.kind === "fileGroup") {
       return element.threads.map((thread): NoteRowElement => ({
@@ -121,6 +109,20 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
   }
 
   getTreeItem(element: NotesTreeElement): vscode.TreeItem {
+    if (element.kind === "fileGroup" && element.document !== undefined) {
+      const item = new vscode.TreeItem(
+        this.documentLabel(element.file),
+        this.isCollapsed(notesCollapseKeyFor(element))
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.description = `cluster notes · ${element.threads.length}`;
+      const tooltip = new vscode.MarkdownString();
+      tooltip.appendCodeblock(element.file, "text");
+      item.tooltip = tooltip;
+      item.id = `notesFile:${element.document}:${element.file}`;
+      return item;
+    }
     if (element.kind === "fileGroup") {
       const item = new vscode.TreeItem(
         basename(element.file),

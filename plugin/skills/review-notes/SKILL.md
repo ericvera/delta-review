@@ -72,6 +72,9 @@ Never write, reformat, or repair the notes file. If it exists but is not valid J
 - `side: "working"` — the note is on current code in `file`. `side: "base"` — it is on old/removed code from the diff's left side; that text may no longer exist anywhere, so address the intent of what replaced it (or its deletion).
 - `outdated: true` — the noted lines changed after the note was written; `snapshot` is what they were.
 - `status`, `contentBlob`, `appliedAnchorAt` — extension bookkeeping; `status` matters only in the work-set rule below.
+- `version` is `1` or `2`. Version 2 adds `document`, present (right after `file`) only on a note anchored to a cluster notes document; its value is always `"clusterNotes"`.
+- Document note: `file` is the document's file name, at `<COMMON_DIR>/delta-review/cluster-notes-<sanitized-branch>/<file>`; `side` is always `"working"`; fixing it means editing that markdown file. A response `anchor` on a document note is ignored — omit it.
+- A document note whose file no longer exists is answered by reply only; never recreate the old file to re-home it. Renames and deletions of notes documents follow the cluster skill's **Documents** section.
 
 ### Responses file (write)
 
@@ -141,7 +144,7 @@ Binds any driver that responds to notes. Read-only drivers (summarize, triage, d
 
 ### Schema changes
 
-An additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file, like `pending`) needs no `version` bump. Every other change, including any notes-file change (additive or not), requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version other than 1, and it rebuilds notes from known keys and re-saves them on each refresh, so an older extension would strip a newer notes key. `src/notes.ts` also owns the archive's parser, which validates only `version` and `notes`.
+The extension accepts notes `version` 1 and 2, responses and archive `version` 1 only. An additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file, like `pending`) needs no `version` bump. Every other change, including any notes-file change (additive or not), requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version it does not list, and it rebuilds notes from known keys and re-saves them on each refresh, so an older extension would strip a newer notes key. `src/notes.ts` also owns the archive's parser, which validates only `version` and `notes`.
 
 ## Default workflow: addressing the notes
 

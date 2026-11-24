@@ -1,6 +1,11 @@
 import { existsSync, readdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import type { LineRange, MoveDeclaration } from "./clusters";
+import type {
+  LineNote,
+  LineRange,
+  MoveDeclaration,
+  ReviewLevel,
+} from "./clusters";
 import {
   Git,
   parseLsTreeOutput,
@@ -91,6 +96,10 @@ export interface ReviewFile {
   originContentUnavailable: boolean;
   // The contract's one-line remark about this file, for the reviewer
   fileNote?: string;
+  // The contract's ranged remarks about this file; absent when none
+  lineNotes?: LineNote[];
+  // How closely the contract asks the reviewer to read this file
+  reviewLevel: ReviewLevel;
   // "auto" when the file is mechanical (matches an auto-review glob or is
   // linguist-generated); "normal" otherwise
   triage: Triage;
@@ -573,6 +582,9 @@ export const computeReviewModel = async (
     // The contract's per-file remarks, keyed by the file's current path; a key
     // naming no file in the review set is ignored
     notes?: ReadonlyMap<string, string>;
+    // Keyed like `notes`, with the same handling of unknown keys
+    lineNotes?: ReadonlyMap<string, LineNote[]>;
+    levels?: ReadonlyMap<string, ReviewLevel>;
     // Working-tree content shas carried across refreshes, keyed by path and
     // validated by stat. Owned and cleared by the caller; absent means every
     // existing path is re-hashed.
@@ -753,6 +765,7 @@ export const computeReviewModel = async (
       mergeBaseBlobs: baseBlobs,
       originBaseByPath,
     });
+    const lineNotes = options?.lineNotes?.get(path);
     return {
       path,
       status: selection.reviewed
@@ -775,6 +788,8 @@ export const computeReviewModel = async (
       moveClassification: base.moveClassification,
       originContentUnavailable: base.originContentUnavailable,
       fileNote: options?.notes?.get(path),
+      ...(lineNotes !== undefined && lineNotes.length > 0 ? { lineNotes } : {}),
+      reviewLevel: options?.levels?.get(path) ?? "review",
       triage: triageByPath.get(path) ?? "normal",
     };
   });

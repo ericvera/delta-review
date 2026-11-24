@@ -2,7 +2,7 @@
   "name": "delta-review",
   "displayName": "Delta Review",
   "description": "Incremental local code review: mark files reviewed and see only the delta since your last review.",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "publisher": "eric",
   "private": true,
   "engines": {
@@ -76,6 +76,17 @@
         "command": "deltaReview.openFile",
         "title": "Open File",
         "icon": "$(go-to-file)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.openDocument",
+        "title": "Open Document",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.previewDocument",
+        "title": "Open Preview",
+        "icon": "$(open-preview)",
         "category": "Delta Review"
       },
       {
@@ -283,6 +294,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "deltaReview.previewDocument",
+          "when": "view == deltaReview && viewItem == clusterNotesDocument",
+          "group": "inline@1"
+        },
         {
           "command": "deltaReview.openFile",
           "when": "view == deltaReview && viewItem =~ /^(needsReviewFile|reviewedFile)(Snapshot)?$/",
@@ -504,6 +520,14 @@
         },
         {
           "command": "deltaReview.openFile",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.openDocument",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.previewDocument",
           "when": "false"
         },
         {

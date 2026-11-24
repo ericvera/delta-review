@@ -1,7 +1,9 @@
 import { dirname } from "node:path";
 import { ClusterModel, clusterFilesForKey } from "./clusters";
+import type { ClusterNotesDocument, ReviewDocuments } from "./documents";
 import { FileReviewStatus, ReviewFile } from "./model";
 import type {
+  DocumentElement,
   FileElement,
   FolderElement,
   ReviewTreeElement,
@@ -119,6 +121,36 @@ const placementFor = (
   };
 };
 
+// One directory level of tree mode: subfolder names and the files directly
+// inside `parentPath`, each sorted by path (folders-first alphabetical, like
+// the built-in CHANGES tree), whatever order `files` arrives in.
+export const treeLevel = (
+  files: readonly ReviewFile[],
+  parentPath: string,
+): { folderNames: string[]; directFiles: ReviewFile[] } => {
+  const prefix = parentPath === "" ? "" : `${parentPath}/`;
+  const folderNames = new Set<string>();
+  const directFiles: ReviewFile[] = [];
+  for (const file of files) {
+    if (!file.path.startsWith(prefix)) {
+      continue;
+    }
+    const rest = file.path.slice(prefix.length);
+    const slashIndex = rest.indexOf("/");
+    if (slashIndex === -1) {
+      directFiles.push(file);
+    } else {
+      folderNames.add(rest.slice(0, slashIndex));
+    }
+  }
+  return {
+    folderNames: [...folderNames].sort(),
+    directFiles: directFiles.sort((a, b) =>
+      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+    ),
+  };
+};
+
 // The file element getChildren would produce for this file, including the
 // alwaysFlat flag its container stamps.
 export const fileElementFor = (
@@ -164,6 +196,10 @@ export const parentOf = (
     // on any element it has rendered
     case "autoGroup":
       return { kind: "group", status: element.status };
+    case "document":
+      return element.document === "branch"
+        ? undefined
+        : { kind: "cluster", clusterKey: element.clusterKey };
     case "group":
     case "cluster":
     case "reviewedBucket":
@@ -171,3 +207,22 @@ export const parentOf = (
       return undefined;
   }
 };
+
+// Notes documents exist for real clusters only, keyed by contract index
+export const clusterNotesFor = (
+  documents: ReviewDocuments | undefined,
+  clusterKey: string,
+): ClusterNotesDocument | undefined => {
+  const match = /^c(\d+)$/.exec(clusterKey);
+  return match === null
+    ? undefined
+    : documents?.clusterNotes.get(Number(match[1]));
+};
+
+export const documentPathFor = (
+  documents: ReviewDocuments | undefined,
+  element: DocumentElement,
+): string | undefined =>
+  element.document === "branch"
+    ? documents?.branchDocument
+    : clusterNotesFor(documents, element.clusterKey)?.path;

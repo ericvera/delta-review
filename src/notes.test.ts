@@ -4,6 +4,7 @@ import {
   ResponseEntry,
   archiveFileName,
   notesFileName,
+  notesFileVersion,
   parseArchiveFile,
   parseNotesFile,
   parseResponsesFile,
@@ -73,6 +74,95 @@ describe("notesFileName / responsesFileName / archiveFileName", () => {
     expect(archiveFileName("responses-x")).toBe("archive-responses-x.json");
     expect(archiveFileName("main").startsWith("notes-")).toBe(false);
     expect(archiveFileName("main").startsWith("responses-")).toBe(false);
+  });
+});
+
+describe("parseNotesFile document notes", () => {
+  const documentNote: Note = {
+    ...validNote,
+    file: "auth-flow.md",
+    document: "clusterNotes",
+    side: "working",
+  };
+  const v2Text = (note: Record<string, unknown>): string =>
+    JSON.stringify({ version: 2, notes: [note] });
+
+  it("parses a version 2 document note and keeps the key after file", () => {
+    const result = parseNotesFile(v2Text({ ...documentNote }));
+    expect(result).toEqual({
+      ok: true,
+      file: { version: 2, notes: [documentNote] },
+    });
+    if (result.ok) {
+      expect(Object.keys(result.file.notes[0] ?? {}).slice(0, 4)).toEqual([
+        "id",
+        "file",
+        "document",
+        "side",
+      ]);
+    }
+  });
+
+  it("parses a version 2 file without document notes", () => {
+    expect(parseNotesFile(v2Text({ ...validNote }))).toEqual({
+      ok: true,
+      file: { version: 2, notes: [validNote] },
+    });
+  });
+
+  it("rejects an invalid document value", () => {
+    expect(parseNotesFile(v2Text({ ...documentNote, document: "x" }))).toEqual({
+      ok: false,
+      error: 'note 1 ("a1b2"): "document" must be "clusterNotes"',
+    });
+  });
+
+  it.each(["../x.md", "a/b.md", "Auth.md", "x.txt"])(
+    "rejects document file name %j",
+    (file) => {
+      expect(parseNotesFile(v2Text({ ...documentNote, file }))).toEqual({
+        ok: false,
+        error:
+          'note 1 ("a1b2"): a document note\'s "file" must be a cluster notes file name',
+      });
+    },
+  );
+
+  it("rejects a base-side document note", () => {
+    expect(parseNotesFile(v2Text({ ...documentNote, side: "base" }))).toEqual({
+      ok: false,
+      error: 'note 1 ("a1b2"): a document note\'s "side" must be "working"',
+    });
+  });
+
+  it("ignores a document key in a version 1 file", () => {
+    expect(
+      parseNotesFile(noteWith({ document: "clusterNotes", file: "../x" })),
+    ).toEqual({
+      ok: true,
+      file: { version: 1, notes: [{ ...validNote, file: "../x" }] },
+    });
+  });
+});
+
+describe("notesFileVersion", () => {
+  it("is 1 without document notes", () => {
+    expect(notesFileVersion([])).toBe(1);
+    expect(notesFileVersion([validNote])).toBe(1);
+  });
+
+  it("is 2 when any note has a document", () => {
+    expect(
+      notesFileVersion([
+        validNote,
+        {
+          ...validNote,
+          file: "a.md",
+          side: "working",
+          document: "clusterNotes",
+        },
+      ]),
+    ).toBe(2);
   });
 });
 
@@ -173,14 +263,14 @@ describe("parseNotesFile", () => {
   it("rejects a missing version", () => {
     expect(parseNotesFile(JSON.stringify({ notes: [] }))).toEqual({
       ok: false,
-      error: 'missing "version" (extension supports 1)',
+      error: 'missing "version" (extension supports 1 and 2)',
     });
   });
 
   it.each([
-    [0, "unsupported version 0 (extension supports 1)"],
-    [2, "unsupported version 2 (extension supports 1)"],
-    ["1", 'unsupported version "1" (extension supports 1)'],
+    [0, "unsupported version 0 (extension supports 1 and 2)"],
+    [3, "unsupported version 3 (extension supports 1 and 2)"],
+    ["1", 'unsupported version "1" (extension supports 1 and 2)'],
   ])("rejects version %j", (version, error) => {
     expect(parseNotesFile(JSON.stringify({ version, notes: [] }))).toEqual({
       ok: false,

@@ -1849,6 +1849,57 @@ describe("computeReviewModel", () => {
       ["src/plain.ts", undefined],
     ]);
   });
+
+  const setUpTwoEdits = () =>
+    setUp({
+      changes: [
+        ["M", "src/edited.ts"],
+        ["M", "src/plain.ts"],
+      ],
+      baseBlobs: { "src/edited.ts": PATH_SHA, "src/plain.ts": PATH_SHA },
+      workingShas: {
+        "src/edited.ts": WORKING_SHA,
+        "src/plain.ts": WORKING_SHA,
+      },
+    });
+
+  it("defaults reviewLevel to review and reads the contract's levels", async () => {
+    const git = await setUpTwoEdits();
+    const model = await computeReviewModel(git, "main", {
+      levels: new Map([
+        ["src/edited.ts", "skim"],
+        ["src/absent.ts", "skim"],
+      ]),
+    });
+    expect(model.files.map((file) => [file.path, file.reviewLevel])).toEqual([
+      ["src/edited.ts", "skim"],
+      ["src/plain.ts", "review"],
+    ]);
+  });
+
+  it("defaults reviewLevel to review without levels", async () => {
+    const git = await setUpTwoEdits();
+    const model = await computeReviewModel(git, "main");
+    expect(model.files.map((file) => file.reviewLevel)).toEqual([
+      "review",
+      "review",
+    ]);
+  });
+
+  it("attaches line notes only to files that have some", async () => {
+    const git = await setUpTwoEdits();
+    const model = await computeReviewModel(git, "main", {
+      lineNotes: new Map([
+        ["src/edited.ts", [{ lines: [2, 4], text: "loop bound" }]],
+        ["src/plain.ts", []],
+        ["src/absent.ts", [{ lines: [1, 1], text: "not in the review set" }]],
+      ]),
+    });
+    expect(model.files[0].lineNotes).toEqual([
+      { lines: [2, 4], text: "loop bound" },
+    ]);
+    expect("lineNotes" in model.files[1]).toBe(false);
+  });
 });
 
 const reviewFile = (
@@ -1872,6 +1923,7 @@ const reviewFile = (
   moveClassification: undefined,
   originContentUnavailable: false,
   triage: "normal",
+  reviewLevel: "review",
   ...overrides,
 });
 

@@ -1,4 +1,5 @@
 import { sanitizeBranchForFilename } from "./clusters";
+import { CLUSTER_NOTES_FILE_PATTERN } from "./documents";
 
 // The notes contract: three versioned JSON files per branch under
 // <git common dir>/delta-review/. The notes file is extension-owned (review
@@ -13,6 +14,8 @@ export type NoteSide = "base" | "working";
 
 export type NoteStatus = "open" | "addressed" | "resolved";
 
+export type NoteDocument = "clusterNotes";
+
 export interface ReviewerTurn {
   text: string;
   // ISO-8601 UTC timestamp
@@ -21,8 +24,11 @@ export interface ReviewerTurn {
 
 export interface Note {
   id: string;
-  // Repo-relative path the note anchors to
+  // Repo-relative path the note anchors to; for a document note, the
+  // document's file name inside the cluster notes dir
   file: string;
+  // Set on notes anchored to a cluster notes document (version 2 only)
+  document?: NoteDocument;
   side: NoteSide;
   // 1-based, inclusive range at creation time
   startLine: number;
@@ -47,7 +53,7 @@ export interface Note {
 }
 
 export interface NotesFile {
-  version: 1;
+  version: 1 | 2;
   notes: Note[];
 }
 
@@ -130,6 +136,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const parseNote = (
   value: unknown,
   index: number,
+  version: 1 | 2,
 ): { note: Note } | { error: string } => {
   const where = `note ${index + 1}`;
   if (!isRecord(value)) {
@@ -144,6 +151,20 @@ const parseNote = (
   }
   if (value.side !== "base" && value.side !== "working") {
     return { error: `${where2}: "side" must be "base" or "working"` };
+  }
+  const document = version === 2 ? value.document : undefined;
+  if (document !== undefined) {
+    if (document !== "clusterNotes") {
+      return { error: `${where2}: "document" must be "clusterNotes"` };
+    }
+    if (!CLUSTER_NOTES_FILE_PATTERN.test(value.file)) {
+      return {
+        error: `${where2}: a document note's "file" must be a cluster notes file name`,
+      };
+    }
+    if (value.side !== "working") {
+      return { error: `${where2}: a document note's "side" must be "working"` };
+    }
   }
   if (!isLineNumber(value.startLine)) {
     return { error: `${where2}: "startLine" must be an integer >= 1` };
@@ -219,6 +240,7 @@ const parseNote = (
   const note: Note = {
     id: value.id,
     file: value.file,
+    ...(document === undefined ? {} : { document }),
     side: value.side,
     startLine: value.startLine,
     endLine: value.endLine,
@@ -292,16 +314,23 @@ const parseResponseEntry = (
   return { entry };
 };
 
-// Shared top-level validation: JSON.parse, non-array object, version 1, and
-// the entries key present as an array. Errors are one-line and user-facing.
-// The validated record rides along for callers that must preserve keys they
-// do not model.
+// Shared top-level validation: JSON.parse, non-array object, a supported
+// version, and the entries key present as an array. Errors are one-line and
+// user-facing. The validated record rides along for callers that must
+// preserve keys they do not model.
 const parseVersionedFile = (
   text: string,
   entriesKey: "notes" | "responses",
+  versions: readonly number[],
 ):
-  | { ok: true; entries: unknown[]; record: Record<string, unknown> }
+  | {
+      ok: true;
+      version: number;
+      entries: unknown[];
+      record: Record<string, unknown>;
+    }
   | { ok: false; error: string } => {
+  const supported = `(extension supports ${versions.join(" and ")})`;
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -315,43 +344,54 @@ const parseVersionedFile = (
     return { ok: false, error: "top level must be an object" };
   }
   if (data.version === undefined) {
-    return { ok: false, error: 'missing "version" (extension supports 1)' };
+    return { ok: false, error: `missing "version" ${supported}` };
   }
-  if (data.version !== 1) {
+  if (typeof data.version !== "number" || !versions.includes(data.version)) {
     return {
       ok: false,
-      error: `unsupported version ${JSON.stringify(data.version)} (extension supports 1)`,
+      error: `unsupported version ${JSON.stringify(data.version)} ${supported}`,
     };
   }
   if (!Array.isArray(data[entriesKey])) {
     return { ok: false, error: `"${entriesKey}" must be an array` };
   }
-  return { ok: true, entries: data[entriesKey], record: data };
+  return {
+    ok: true,
+    version: data.version,
+    entries: data[entriesKey],
+    record: data,
+  };
 };
 
+// The version a notes file is written at: 2 only when a note needs it, so
+// files without document notes stay readable by version-1 extensions.
+export const notesFileVersion = (notes: readonly Note[]): 1 | 2 =>
+  notes.some((note) => note.document !== undefined) ? 2 : 1;
+
 // Parses and validates notes-file text. Unknown extra keys are ignored
-// (forward-friendly within version 1).
+// (forward-friendly within a version).
 export const parseNotesFile = (text: string): ParseNotesResult => {
-  const top = parseVersionedFile(text, "notes");
+  const top = parseVersionedFile(text, "notes", [1, 2]);
   if (!top.ok) {
     return top;
   }
+  const version = top.version === 2 ? 2 : 1;
   const notes: Note[] = [];
   for (let index = 0; index < top.entries.length; index++) {
-    const result = parseNote(top.entries[index], index);
+    const result = parseNote(top.entries[index], index, version);
     if ("error" in result) {
       return { ok: false, error: result.error };
     }
     notes.push(result.note);
   }
-  return { ok: true, file: { version: 1, notes } };
+  return { ok: true, file: { version, notes } };
 };
 
 // Parses and validates responses-file text. A violating entry rejects the
 // file as a whole (clusters semantics). Structurally valid anchors pointing
 // at nonexistent locations are accepted — resolution is a runtime concern.
 export const parseResponsesFile = (text: string): ParseResponsesResult => {
-  const top = parseVersionedFile(text, "responses");
+  const top = parseVersionedFile(text, "responses", [1]);
   if (!top.ok) {
     return top;
   }
@@ -370,7 +410,7 @@ export const parseResponsesFile = (text: string): ParseResponsesResult => {
 // are opaque history, so a single unrecognized entry must not cost the file
 // — and unknown top-level keys survive into the returned shell.
 export const parseArchiveFile = (text: string): ParseArchiveResult => {
-  const top = parseVersionedFile(text, "notes");
+  const top = parseVersionedFile(text, "notes", [1]);
   if (!top.ok) {
     return top;
   }

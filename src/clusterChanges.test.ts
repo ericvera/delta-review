@@ -32,6 +32,7 @@ const file = (
   originLinesOutOfRange: false,
   originContentUnavailable: false,
   triage: "normal",
+  reviewLevel: "review",
   ...overrides,
 });
 

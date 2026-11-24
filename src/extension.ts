@@ -19,8 +19,10 @@ import {
 import {
   ClusterModel,
   clusterFilesForKey,
+  LineNote,
   loadClustersContract,
   resolveClusterModel,
+  ReviewLevel,
 } from "./clusters";
 import { createNoteCommentController } from "./commentController";
 import {
@@ -29,6 +31,12 @@ import {
   REVIEW_BASE_SCHEME,
 } from "./contentProvider";
 import { createReviewDecorationProvider } from "./decorations";
+import {
+  CLUSTER_NOTES_FILE_PATTERN,
+  deltaReviewDirFor,
+  loadReviewDocuments,
+  ReviewDocuments,
+} from "./documents";
 import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
 import type { HashCacheEntry } from "./hashCache";
@@ -43,8 +51,10 @@ import {
 } from "./model";
 import { buildDiffTitle, buildRowDescription } from "./moveDisplay";
 import type { ResponsesFile } from "./notes";
+import { clusterNotesDocumentLabel } from "./notesGrouping";
 import {
   noteAnchorLines,
+  NoteTarget,
   noteTargetFor,
   reviewDiffIsEmpty,
 } from "./noteTarget";
@@ -72,7 +82,7 @@ import {
   refreshDerived,
   setResolved,
 } from "./notesStore";
-import { provenanceEntriesFor } from "./provenance";
+import { agentLineNoteEntriesFor, provenanceEntriesFor } from "./provenance";
 import {
   clearAllReviewSnapshots,
   deletePreDeletionRef,
@@ -86,7 +96,7 @@ import {
   anchorSlicesIntoCache,
   deleteSliceRef,
 } from "./sliceAnchor";
-import { fileElementFor } from "./treeParents";
+import { documentPathFor, fileElementFor } from "./treeParents";
 import {
   collapseKeyFor,
   isDefaultCollapsed,
@@ -117,6 +127,7 @@ export const activate = async (
   let git: Git | undefined;
   let model: ReviewModel | undefined;
   let clusterModel: ClusterModel | undefined;
+  let reviewDocuments: ReviewDocuments | undefined;
 
   // Group/folder collapse state, kept across refreshes and window reloads
   const collapsedKey = "deltaReview.collapsedGroups";
@@ -189,6 +200,7 @@ export const activate = async (
     // Effective grouping: the preference only takes effect while a valid
     // contract produced a cluster model
     () => groupedPreference && clusterModel !== undefined,
+    () => reviewDocuments,
   );
   const treeView = vscode.window.createTreeView("deltaReview", {
     treeDataProvider: treeProvider,
@@ -200,6 +212,11 @@ export const activate = async (
   const notesTreeProvider = new NotesTreeProvider(
     (key) => collapsed.has(key),
     isUnread,
+    (file) =>
+      clusterNotesDocumentLabel(
+        file,
+        clusterModel?.clusters.map((cluster) => cluster.label) ?? [],
+      ),
   );
   const notesTreeView = vscode.window.createTreeView("deltaReviewNotes", {
     treeDataProvider: notesTreeProvider,
@@ -230,7 +247,11 @@ export const activate = async (
   context.subscriptions.push(
     treeView.onDidCollapseElement((event) => {
       const element = event.element;
-      if (element.kind === "file" || element.kind === "message") {
+      if (
+        element.kind === "file" ||
+        element.kind === "message" ||
+        element.kind === "document"
+      ) {
         return;
       }
       if (isDefaultCollapsed(element)) {
@@ -242,7 +263,11 @@ export const activate = async (
     }),
     treeView.onDidExpandElement((event) => {
       const element = event.element;
-      if (element.kind === "file" || element.kind === "message") {
+      if (
+        element.kind === "file" ||
+        element.kind === "message" ||
+        element.kind === "document"
+      ) {
         return;
       }
       if (isDefaultCollapsed(element)) {
@@ -305,6 +330,7 @@ export const activate = async (
     () => model,
     () => void refresh(),
     { isUnread, markRead: (thread) => markRead(thread) },
+    () => reviewDocuments?.clusterNotesDir,
   );
   context.subscriptions.push(commentController);
 
@@ -379,6 +405,7 @@ export const activate = async (
     if (git === undefined) {
       model = undefined;
       clusterModel = undefined;
+      reviewDocuments = undefined;
       setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
@@ -388,6 +415,7 @@ export const activate = async (
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
+      commentController.renderAgentLineThreads([]);
       return;
     }
     const configuration = vscode.workspace.getConfiguration("deltaReview");
@@ -419,6 +447,14 @@ export const activate = async (
         contractResult.state === "ok"
           ? contractResult.contract.notes
           : new Map<string, string>();
+      const lineNotes =
+        contractResult.state === "ok"
+          ? contractResult.contract.lineNotes
+          : new Map<string, LineNote[]>();
+      const levels =
+        contractResult.state === "ok"
+          ? contractResult.contract.levels
+          : new Map<string, ReviewLevel>();
       // Slices this refresh writes go into its own copy and reach the shared
       // cache only once anchored, so a refresh superseded midway leaves no
       // unanchored sha behind for a later one to reuse
@@ -428,6 +464,8 @@ export const activate = async (
         branch,
         moves,
         notes,
+        lineNotes,
+        levels,
         hashCache,
         sliceCache: refreshSliceCache,
       });
@@ -464,6 +502,8 @@ export const activate = async (
             branch,
             moves,
             notes,
+            lineNotes,
+            levels,
             hashCache,
             sliceCache: refreshSliceCache,
           });
@@ -512,12 +552,26 @@ export const activate = async (
       }
       setClustersAvailable(clusterModel !== undefined);
 
+      // Labels only from a valid contract; the branch document needs none
+      const documents = await loadReviewDocuments(
+        await deltaReviewDirFor(git),
+        branch,
+        contractResult.state === "ok"
+          ? contractResult.contract.clusters.map((cluster) => cluster.label)
+          : [],
+      );
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      reviewDocuments = documents;
+
       model = computed;
       treeProvider.setModel(model);
       // Rebuilt from the model beside the tree, not inside renderNoteThreads:
       // provenance comes from the clusters contract, so it must survive a
       // notes file that fails to load below.
       commentController.renderProvenanceThreads(provenanceEntriesFor(model));
+      commentController.renderAgentLineThreads(agentLineNoteEntriesFor(model));
       treeView.message = contractWarning;
       void syncActiveClusterChanges();
 
@@ -551,6 +605,24 @@ export const activate = async (
         ): Promise<string | undefined> => {
           try {
             return await readFile(join(gitForNotes.repoRoot, path), "utf8");
+          } catch {
+            return undefined;
+          }
+        };
+        const readDocumentContent = async (
+          fileName: string,
+        ): Promise<string | undefined> => {
+          if (
+            reviewDocuments === undefined ||
+            !CLUSTER_NOTES_FILE_PATTERN.test(fileName)
+          ) {
+            return undefined;
+          }
+          try {
+            return await readFile(
+              join(reviewDocuments.clusterNotesDir, fileName),
+              "utf8",
+            );
           } catch {
             return undefined;
           }
@@ -653,6 +725,7 @@ export const activate = async (
             responses,
             {
               readWorkingContent,
+              readDocumentContent,
               baseBlobFor: (path, contentBlob) =>
                 baseBlobForNote(computed, path, contentBlob),
               anchorResolves,
@@ -711,6 +784,7 @@ export const activate = async (
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
+      commentController.renderAgentLineThreads([]);
     }
   };
 
@@ -804,7 +878,10 @@ export const activate = async (
       return;
     }
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(contractDir), "*.json"),
+      new vscode.RelativePattern(
+        vscode.Uri.file(contractDir),
+        "{*.json,*.md,cluster-notes-*/*.md}",
+      ),
     );
     repoWatcherDisposables.push(
       watcher,
@@ -1213,6 +1290,44 @@ export const activate = async (
     );
   };
 
+  const noteTargetUri = (activeGit: Git, target: NoteTarget): vscode.Uri => {
+    switch (target.kind) {
+      case "working":
+        return vscode.Uri.file(join(activeGit.repoRoot, target.path));
+      case "base":
+        return createReviewBaseUri(target.path, target.sha);
+      case "document":
+        return vscode.Uri.file(
+          join(reviewDocuments?.clusterNotesDir ?? "", target.file),
+        );
+    }
+  };
+
+  // A document note never goes through model.files (a repo file can share
+  // its name) and has no diff or DELTA REVIEW row to sync
+  const openDocumentNote = async (thread: NoteThread): Promise<void> => {
+    if (git === undefined) {
+      return;
+    }
+    const dir = reviewDocuments?.clusterNotesDir;
+    let exists = false;
+    if (dir !== undefined) {
+      try {
+        await access(join(dir, thread.note.file));
+        exists = true;
+      } catch {
+        exists = false;
+      }
+    }
+    const target = noteTargetFor(model, thread.note, exists);
+    const { startLine } = noteAnchorLines(thread.note, target.lines);
+    const targetLine = Math.max(startLine - 1, 0);
+    await vscode.window.showTextDocument(noteTargetUri(git, target), {
+      selection: new vscode.Range(targetLine, 0, targetLine, 0),
+    });
+    commentController.expandThread(thread.note.id);
+  };
+
   // Selection sync from REVIEW NOTES: put the noted file's row in DELTA
   // REVIEW, expanding whatever ancestors are collapsed. Best effort — reveal
   // rejects on a view that cannot be shown, and that must never fail the
@@ -1314,6 +1429,20 @@ export const activate = async (
         : clusterFilesForKey(clusterModel, element.clusterKey);
     }
     return (model?.files ?? []).filter((file) => file.triage === "normal");
+  };
+
+  // Row clicks pass the file Uri; inline actions pass the tree element
+  const documentUriFor = (
+    target: vscode.Uri | ReviewTreeElement | undefined,
+  ): vscode.Uri | undefined => {
+    if (target instanceof vscode.Uri) {
+      return target;
+    }
+    if (target?.kind !== "document") {
+      return undefined;
+    }
+    const path = documentPathFor(reviewDocuments, target);
+    return path === undefined ? undefined : vscode.Uri.file(path);
   };
 
   // `folderScopeFiles` narrowed to the rows the folder actually renders: the
@@ -1484,6 +1613,10 @@ export const activate = async (
         if (git === undefined) {
           return;
         }
+        if (thread.note.document !== undefined) {
+          await openDocumentNote(thread);
+          return;
+        }
         const line = Math.max(thread.note.currentStartLine - 1, 0);
         const selection = new vscode.Range(line, 0, line, 0);
         const file = model?.files.find(
@@ -1519,12 +1652,9 @@ export const activate = async (
         const target = noteTargetFor(model, thread.note, onDisk);
         const { startLine } = noteAnchorLines(thread.note, target.lines);
         const targetLine = Math.max(startLine - 1, 0);
-        await vscode.window.showTextDocument(
-          target.kind === "working"
-            ? vscode.Uri.file(join(git.repoRoot, target.path))
-            : createReviewBaseUri(target.path, target.sha),
-          { selection: new vscode.Range(targetLine, 0, targetLine, 0) },
-        );
+        await vscode.window.showTextDocument(noteTargetUri(git, target), {
+          selection: new vscode.Range(targetLine, 0, targetLine, 0),
+        });
         // Working-side threads attach to the plain file URI and base-side
         // ones to the base document, so whichever opened, the thread renders
         // here
@@ -1631,6 +1761,28 @@ export const activate = async (
           void vscode.window.showWarningMessage(warning);
         }
         await refresh();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.openDocument",
+      async (target?: vscode.Uri | ReviewTreeElement) => {
+        const uri = documentUriFor(target);
+        if (uri === undefined) {
+          return;
+        }
+        await vscode.window.showTextDocument(uri);
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.previewDocument",
+      async (target?: vscode.Uri | ReviewTreeElement) => {
+        const uri = documentUriFor(target);
+        if (uri === undefined) {
+          return;
+        }
+        await vscode.commands.executeCommand("markdown.showPreview", uri);
       },
     ),
 
@@ -2046,6 +2198,7 @@ export const activate = async (
         return {
           files,
           threads: commentController.provenanceThreads(),
+          agentLineThreads: commentController.agentLineThreads(),
           // Row text as tree mode renders it (no directory text), by path
           rows: Object.fromEntries(
             files.map((file) => [
