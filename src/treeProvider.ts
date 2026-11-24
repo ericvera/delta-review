@@ -34,7 +34,7 @@ import {
   fileContextValue,
   folderContextValue,
 } from "./rowContext";
-import { parentOf } from "./treeParents";
+import { parentOf, treeLevel } from "./treeParents";
 import { Triage } from "./triage";
 
 export type ViewMode = "list" | "tree";
@@ -356,22 +356,9 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
     },
   ): ReviewTreeElement[] {
     const prefix = parentPath === "" ? "" : `${parentPath}/`;
-    const folderNames = new Set<string>();
-    const directFiles: ReviewFile[] = [];
-    for (const file of files) {
-      if (!file.path.startsWith(prefix)) {
-        continue;
-      }
-      const rest = file.path.slice(prefix.length);
-      const slashIndex = rest.indexOf("/");
-      if (slashIndex === -1) {
-        directFiles.push(file);
-      } else {
-        folderNames.add(rest.slice(0, slashIndex));
-      }
-    }
+    const { folderNames, directFiles } = treeLevel(files, parentPath);
     return [
-      ...[...folderNames].sort().map((name): FolderElement => ({
+      ...folderNames.map((name): FolderElement => ({
         kind: "folder",
         status: scope.status,
         clusterKey: scope.clusterKey,

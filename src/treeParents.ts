@@ -119,6 +119,36 @@ const placementFor = (
   };
 };
 
+// One directory level of tree mode: subfolder names and the files directly
+// inside `parentPath`, each sorted by path (folders-first alphabetical, like
+// the built-in CHANGES tree), whatever order `files` arrives in.
+export const treeLevel = (
+  files: readonly ReviewFile[],
+  parentPath: string,
+): { folderNames: string[]; directFiles: ReviewFile[] } => {
+  const prefix = parentPath === "" ? "" : `${parentPath}/`;
+  const folderNames = new Set<string>();
+  const directFiles: ReviewFile[] = [];
+  for (const file of files) {
+    if (!file.path.startsWith(prefix)) {
+      continue;
+    }
+    const rest = file.path.slice(prefix.length);
+    const slashIndex = rest.indexOf("/");
+    if (slashIndex === -1) {
+      directFiles.push(file);
+    } else {
+      folderNames.add(rest.slice(0, slashIndex));
+    }
+  }
+  return {
+    folderNames: [...folderNames].sort(),
+    directFiles: directFiles.sort((a, b) =>
+      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+    ),
+  };
+};
+
 // The file element getChildren would produce for this file, including the
 // alwaysFlat flag its container stamps.
 export const fileElementFor = (

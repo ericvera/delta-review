@@ -174,6 +174,8 @@ Write atomically: a temporary file in the same `delta-review` directory, then re
 
 Explicit `files` beat `patterns`; the first cluster in contract order that claims a file wins; files matched by nothing render prominently under "Unclustered"; auto-triaged files (lockfiles, generated code per the user's extension settings) go to a separate Auto bucket regardless of the contract.
 
+A cluster's `files` order is the reading order the sidebar's list mode shows: explicit members in `files` order, then pattern-only members alphabetically. Tree mode stays alphabetical.
+
 ### Schema changes
 
 Any further change requires bumping `version` and updating the extension's parser (`src/clusters.ts` in the delta-review repo) in the same commit — except a new optional key an older extension can safely ignore (like `wait`), which keeps the version.
@@ -224,6 +226,7 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 
 - Every changed file should be claimed by a cluster unless it genuinely belongs to no logical change.
 - Never invent a junk-drawer cluster ("Misc", "Other"). Unclaimed files surface as "Unclustered" — that is the scope-creep detector, and hiding them defeats it.
+- List each cluster's `files` in the order a reviewer should read them, per **Membership resolution**.
 - Set or clear `wait` and `waitPaths` entries per **Wait**.
 - `label` — target **≤ 40 characters**, **50 is a hard cap**. It gets about 34 characters of a default sidebar and truncates from the right, so put the distinguishing words first and move any further detail into `summary`, which renders as a tooltip and is effectively unbounded.
 

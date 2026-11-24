@@ -1026,6 +1026,84 @@ describe("resolveClusterModel", () => {
     expect(model.unclustered.map((f) => f.path)).toEqual(["zz.md"]);
   });
 
+  it("orders explicit members by their position in the cluster's files", () => {
+    const a = file("a.ts");
+    const m = file("m.ts");
+    const z = file("z.ts");
+    const model = resolveClusterModel(
+      contract([
+        {
+          label: "A",
+          summary: "s",
+          files: ["z.ts", "a.ts", "m.ts"],
+          patterns: [],
+        },
+      ]),
+      [a, m, z],
+    );
+    expect(model.clusters[0].files).toEqual([z, a, m]);
+    expect(model.clusters[0].files[0]).toBe(z);
+  });
+
+  it("puts pattern-only members after explicit ones, in input order", () => {
+    const a = file("src/a.ts");
+    const b = file("src/b.ts");
+    const y = file("src/y.ts");
+    const z = file("src/z.ts");
+    const model = resolveClusterModel(
+      contract([
+        {
+          label: "Src",
+          summary: "s",
+          files: ["src/z.ts", "src/y.ts"],
+          patterns: ["src/**"],
+        },
+      ]),
+      [a, b, y, z],
+    );
+    expect(model.clusters[0].files).toEqual([z, y, a, b]);
+  });
+
+  it("keeps Unclustered and Auto in input order", () => {
+    const a = file("a.md");
+    const b = file("b.md");
+    const lockA = file("a.lock", "auto");
+    const lockB = file("b.lock", "auto");
+    const model = resolveClusterModel(
+      contract([
+        {
+          label: "Deps",
+          summary: "s",
+          files: ["b.lock", "a.lock"],
+          patterns: [],
+        },
+      ]),
+      [lockA, a, lockB, b],
+    );
+    expect(model.unclustered).toEqual([a, b]);
+    expect(model.auto).toEqual([lockA, lockB]);
+  });
+
+  it("takes a doubly-listed path's position from the first listing cluster", () => {
+    const a = file("a.ts");
+    const b = file("b.ts");
+    const c = file("c.ts");
+    const model = resolveClusterModel(
+      contract([
+        { label: "A", summary: "s", files: ["b.ts", "c.ts"], patterns: [] },
+        {
+          label: "B",
+          summary: "s",
+          files: ["c.ts", "a.ts", "b.ts"],
+          patterns: [],
+        },
+      ]),
+      [a, b, c],
+    );
+    expect(model.clusters[0].files).toEqual([b, c]);
+    expect(model.clusters[1].files).toEqual([a]);
+  });
+
   it("keeps ReviewFile objects by reference", () => {
     const a = file("a.ts");
     const model = resolveClusterModel(

@@ -136,7 +136,7 @@ export const everyFileWaiting = (
 
 // Order-preserving filter of a file list down to one review status. Returns
 // a new array; the ReviewFile objects are kept by reference, so callers keep
-// the model's path-sorted order and object identity.
+// the input's order and object identity.
 export const filterByStatus = (
   files: readonly ReviewFile[],
   status: FileReviewStatus,
@@ -514,20 +514,22 @@ const isCoveredByWaitPath = (
 // everything); explicit `files` listings beat pattern matches, first listing
 // cluster wins; otherwise the first cluster (contract order) whose patterns
 // match wins; anything left is unclustered. Files named by the contract but
-// absent from the review set are simply not shown. Input order (path-sorted
-// from the model) is preserved within each bucket, and ReviewFile objects are
-// kept by reference.
+// absent from the review set are simply not shown. Within a real cluster,
+// explicit members come first in the order of that cluster's `files` (the
+// agent's reading order), then pattern-only members in input order.
+// Unclustered and auto keep input order (path-sorted from the model).
+// ReviewFile objects are kept by reference.
 export const resolveClusterModel = (
   contract: ClustersContract,
   files: ReviewFile[],
 ): ClusterModel => {
-  const explicit = new Map<string, number>();
+  const explicit = new Map<string, { cluster: number; position: number }>();
   contract.clusters.forEach((cluster, index) => {
-    for (const path of cluster.files) {
+    cluster.files.forEach((path, position) => {
       if (!explicit.has(path)) {
-        explicit.set(path, index);
+        explicit.set(path, { cluster: index, position });
       }
-    }
+    });
   });
   // One matcher per cluster. The contract is externally written, so guard
   // pattern compilation the same way triage.ts guards user-typed globs.
@@ -559,9 +561,9 @@ export const resolveClusterModel = (
       auto.push(file);
       continue;
     }
-    const explicitIndex = explicit.get(file.path);
-    if (explicitIndex !== undefined) {
-      buckets[explicitIndex].files.push(file);
+    const listing = explicit.get(file.path);
+    if (listing !== undefined) {
+      buckets[listing.cluster].files.push(file);
       continue;
     }
     const patternIndex = matchers.findIndex((matches) => matches(file.path));
@@ -570,6 +572,15 @@ export const resolveClusterModel = (
       continue;
     }
     unclustered.push(file);
+  }
+  for (const bucket of buckets) {
+    const position = (file: ReviewFile): number =>
+      explicit.get(file.path)?.position ?? Infinity;
+    bucket.files.sort((a, b) => {
+      const pa = position(a);
+      const pb = position(b);
+      return pa === pb ? 0 : pa < pb ? -1 : 1;
+    });
   }
   if (contract.waitPaths.length > 0) {
     for (const bucket of buckets) {

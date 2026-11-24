@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ClusterModel } from "./clusters";
 import { FileReviewStatus, ReviewFile } from "./model";
-import { TreeContext, fileElementFor, parentOf } from "./treeParents";
+import {
+  TreeContext,
+  fileElementFor,
+  parentOf,
+  treeLevel,
+} from "./treeParents";
 import type { ReviewTreeElement } from "./treeProvider";
 import type { Triage } from "./triage";
 
@@ -369,5 +374,30 @@ describe("parent chains terminate", () => {
         expect(isRoot(element as ReviewTreeElement)).toBe(true);
       }
     }
+  });
+});
+
+describe("treeLevel", () => {
+  it("returns sorted folder names and path-sorted direct files", () => {
+    const zeta = file("zeta.ts");
+    const alpha = file("alpha.ts");
+    const level = treeLevel(
+      [zeta, file("src/b/x.ts"), alpha, file("lib/y.ts"), file("src/a.ts")],
+      "",
+    );
+    expect(level.folderNames).toEqual(["lib", "src"]);
+    expect(level.directFiles).toEqual([alpha, zeta]);
+    expect(level.directFiles[0]).toBe(alpha);
+  });
+
+  it("only considers files under parentPath", () => {
+    const b = file("src/b.ts");
+    const a = file("src/a.ts");
+    const level = treeLevel(
+      [file("srcx/c.ts"), b, file("src/z/deep.ts"), a, file("top.ts")],
+      "src",
+    );
+    expect(level.folderNames).toEqual(["z"]);
+    expect(level.directFiles).toEqual([a, b]);
   });
 });
