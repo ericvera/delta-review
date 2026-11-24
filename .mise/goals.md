@@ -18,6 +18,8 @@ is it possible when tapping on the cluster notes to default to the markdown read
 - The Cluster notes row's inline action changes from "Open Preview" to "Open Source" (`deltaReview.openDocument`, go-to-file icon); the preview inline action is dropped.
 - Branch overview rows get the same inline "Open Source" action.
 - The Cluster notes row shows no description text beside its label (today e.g. "intro • 4 questions").
+- Skim file rows carry the tag in the label (`foo.ts · skim`), keeping the file-type icon, in both tree and list mode.
+- `skim` is removed from the row description; the hover tooltip still explains it.
 
 ## Assumptions
 
@@ -26,6 +28,8 @@ is it possible when tapping on the cluster notes to default to the markdown read
 - `deltaReview.openDocument` stays hidden from the command palette; it only gains an icon and inline menu entries.
 - The click-command choice for a document row moves into a pure helper (src/treeParents.ts) so a unit test fails without the change.
 - DEVELOPMENT.md lines 147, 309 (step 31k) and 330 (step 45a) are updated; README.md:69 unchanged.
+- The label tag takes whatever color the row's label gets (git change tint, or dim on reviewed/waiting rows), since a FileDecoration colors the whole label.
+- Skim docs updated: DEVELOPMENT.md:303 (check 31h), README.md:68, plugin/skills/cluster/SKILL.md:172 where they describe the rendering.
 - Mock guesses: exact tooltip wording, sample cluster names/paths/content, preview tab title, add-note box look.
 
 ## Investigation: skim label
@@ -35,12 +39,8 @@ is it possible when tapping on the cluster notes to default to the markdown read
 - Options: label highlights (precedent src/notesTreeProvider.ts:149); tag in label; colored `ThemeIcon` iconPath (precedent src/treeProvider.ts:724-726, replaces file-type icon); FileDecoration badge/color (competes with M/A/D/R and dim color); description glyph tweak (small gain).
 - Docs stating current form: DEVELOPMENT.md:303 (check 31h), README.md:68, plugin/skills/cluster/SKILL.md:172.
 
-## Open questions
-
-1. How should skim rows be made noticeable?
-
 ## Proposal
 
-- Issue: clicking a Cluster notes row opens the source editor; its "intro • 4 questions" description adds nothing.
-- Approach: both document rows click to the markdown preview, with an inline "Open Source" (go-to-file) action for line notes; drop the Cluster notes description; pure helper + unit test; docs updated.
+- Issue: Cluster notes rows open the source editor and carry a "intro • 4 questions" description that adds nothing; the `skim` tag fades into the dim description.
+- Approach: both document rows click to the markdown preview with an inline "Open Source" (go-to-file) action; drop the Cluster notes description; move `skim` from description into the label (`foo.ts · skim`); pure helpers + unit tests; docs updated.
 - Skips: spec and critic (one module, no schema or API change).
