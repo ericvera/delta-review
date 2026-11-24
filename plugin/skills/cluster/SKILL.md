@@ -266,7 +266,7 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 Write or refresh a cluster notes document for each cluster that warrants one, and rename or delete documents of renamed or dropped clusters — replying first to their open review notes — per **Documents**.
 
 - Default shape: `# <label>`; an intro paragraph; `## Reading order`, a numbered list of the cluster's files in its `files` order; `## Check`, a list of questions for the reviewer.
-- Under guidance, the document is `# <label>` followed only by the sections the guidance asks for; `## Reading order` and `## Check` appear only if requested. Guidance asking for no sections means no document is written or refreshed for that cluster; an existing one is left unchanged, and **Documents**' rename/delete rules still apply.
+- Under guidance that addresses notes documents, the document is `# <label>` followed only by the sections the guidance asks for; `## Reading order` and `## Check` appear only if requested. Guidance asking for no sections means no document is written or refreshed for that cluster; an existing one is left unchanged, and **Documents**' rename/delete rules still apply.
 
 ### 8. Write and report
 
