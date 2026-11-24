@@ -1,20 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { SKIM_TOOLTIP, withLevelTag } from "./reviewLevel";
+import { SKIM_TOOLTIP, withLevelLabel } from "./reviewLevel";
 
-describe("withLevelTag", () => {
-  it("passes the description through for review", () => {
-    expect(withLevelTag("review", "src/a")).toBe("src/a");
-    expect(withLevelTag("review", undefined)).toBeUndefined();
-    expect(withLevelTag("review", "")).toBe("");
+describe("withLevelLabel", () => {
+  it("leaves the name unchanged for review", () => {
+    expect(withLevelLabel("review", "a.ts")).toBe("a.ts");
   });
 
-  it("shows skim alone when the rest is undefined or empty", () => {
-    expect(withLevelTag("skim", undefined)).toBe("skim");
-    expect(withLevelTag("skim", "")).toBe("skim");
-  });
-
-  it("prefixes skim to a non-empty description", () => {
-    expect(withLevelTag("skim", "src/a")).toBe("skim · src/a");
+  it("appends the skim tag to the name", () => {
+    expect(withLevelLabel("skim", "a.ts")).toBe("a.ts · skim");
   });
 });
 

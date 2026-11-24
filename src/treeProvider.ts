@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import * as vscode from "vscode";
 import {
   ClusterModel,
@@ -36,9 +36,9 @@ import {
   folderContextValue,
 } from "./rowContext";
 import { agentLineNotesTooltipLine } from "./provenance";
-import { SKIM_TOOLTIP, withLevelTag } from "./reviewLevel";
+import { SKIM_TOOLTIP, withLevelLabel } from "./reviewLevel";
 import {
-  clusterNotesFor,
+  documentClickCommand,
   documentPathFor,
   parentOf,
   treeLevel,
@@ -568,18 +568,19 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       showDirectory && directory !== "." ? directory : undefined;
     // The origin segment ("← [donor] <origin> · adapted") is assembled by the
     // display module; every abbreviation rule lives there, none here
-    item.description = withLevelTag(
-      file.reviewLevel,
-      buildRowDescription({
-        path: file.path,
-        directoryText,
-        movedFrom: file.movedFrom,
-        moveOrigin: file.moveOrigin,
-        donor: file.donor,
-        moveClassification: file.moveClassification,
-        originLines: file.originLines,
-      }),
-    );
+    item.description = buildRowDescription({
+      path: file.path,
+      directoryText,
+      movedFrom: file.movedFrom,
+      moveOrigin: file.moveOrigin,
+      donor: file.donor,
+      moveClassification: file.moveClassification,
+      originLines: file.originLines,
+    });
+    // An explicit label keeps the resourceUri's file icon and decoration tint
+    if (file.reviewLevel === "skim") {
+      item.label = withLevelLabel(file.reviewLevel, basename(file.path));
+    }
     // Hover always leads with the full repo-relative path (the row usually
     // truncates it), with any status notes on separate lines
     const tooltip = new vscode.MarkdownString();
@@ -660,18 +661,13 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       item.iconPath = new vscode.ThemeIcon("book");
       item.id = "document:branch";
       item.contextValue = "branchDocument";
-      tooltip.appendMarkdown("Branch overview, written by the agent.");
+      tooltip.appendMarkdown(
+        "Branch overview, written by the agent. Click to open the preview; use Open Source to select lines and leave a review note.",
+      );
     } else {
       item.iconPath = new vscode.ThemeIcon("note");
       item.id = `document:clusterNotes:${element.clusterKey}`;
       item.contextValue = "clusterNotesDocument";
-      const summary = clusterNotesFor(
-        this.getDocuments(),
-        element.clusterKey,
-      )?.summary;
-      if (summary !== undefined && summary !== "") {
-        item.description = summary;
-      }
       const clusterModel = this.getClusterModel();
       const label =
         (clusterModel === undefined
@@ -679,23 +675,16 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
           : clusterBucketForKey(clusterModel, element.clusterKey)?.label) ??
         element.clusterKey;
       tooltip.appendMarkdown(
-        `Notes document for ${escapeMarkdownText(label)}. Click to open it; select lines to leave a review note.`,
+        `Notes document for ${escapeMarkdownText(label)}. Click to open the preview; use Open Source to select lines and leave a review note.`,
       );
     }
     item.tooltip = tooltip;
     if (path !== undefined) {
-      item.command =
-        element.document === "branch"
-          ? {
-              command: "deltaReview.previewDocument",
-              title: "Open Preview",
-              arguments: [vscode.Uri.file(path)],
-            }
-          : {
-              command: "deltaReview.openDocument",
-              title: "Open Document",
-              arguments: [vscode.Uri.file(path)],
-            };
+      item.command = {
+        command: documentClickCommand(element),
+        title: "Open Preview",
+        arguments: [vscode.Uri.file(path)],
+      };
     }
     return item;
   }

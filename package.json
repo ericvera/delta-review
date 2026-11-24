@@ -80,7 +80,8 @@
       },
       {
         "command": "deltaReview.openDocument",
-        "title": "Open Document",
+        "title": "Open Source",
+        "icon": "$(go-to-file)",
         "category": "Delta Review"
       },
       {
@@ -295,8 +296,8 @@
       ],
       "view/item/context": [
         {
-          "command": "deltaReview.previewDocument",
-          "when": "view == deltaReview && viewItem == clusterNotesDocument",
+          "command": "deltaReview.openDocument",
+          "when": "view == deltaReview && viewItem =~ /^(branchDocument|clusterNotesDocument)$/",
           "group": "inline@1"
         },
         {
