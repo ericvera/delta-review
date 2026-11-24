@@ -1,0 +1,87 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><title>Cluster notes document</title></head><body><div class="page">
+<p><a href="index.html">&larr; Index</a></p>
+<h1>Cluster notes document &mdash; read in place, reviewed like code</h1>
+<p class="caption">Clicking a cluster's <b>Cluster notes</b> row opens its markdown file (written by the agent beside the contracts under <code>&lt;git common dir&gt;/delta-review/</code>). The owner selects a line range and adds a review note exactly as on a diff; the agent answers through the existing responses file.</p>
+
+<div class="shots">
+
+<div class="shot"><div class="label">A. Composing a note on lines 9&ndash;11</div>
+<div class="workbench">
+<div class="sidebar" style="width:280px">
+<div class="sb-title">Source Control</div>
+<div class="view-head"><i class="codicon codicon-chevron-down"></i>Delta Review<span class="actions"><i class="codicon codicon-list-tree"></i><i class="codicon codicon-ungroup-by-ref-type"></i><i class="codicon codicon-refresh"></i></span></div>
+<div class="tree">
+ <div class="row" style="padding-left:8px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-book"></i></span><span class="lbl">Branch overview</span><span class="desc">plate</span></div>
+ <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-layers"></i></span><span class="lbl">Clusters contract v4</span><span class="count">0/4</span></div>
+ <div class="row selected" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-note"></i></span><span class="lbl">Cluster notes</span><span class="desc">intro &middot; reading&hellip;</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">clusters.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-beaker"></i></span><span class="lbl">clusters.test.ts</span><span class="tag skim">skim</span><span class="deco M">M</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">model.ts</span><span class="desc">src</span><span class="deco M">M</span></div>
+ <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-markdown"></i></span><span class="lbl">SKILL.md</span><span class="tag skim">skim</span><span class="deco M">M</span></div>
+</div></div>
+<div class="editor">
+ <div class="tabs"><div class="tab active"><i class="codicon codicon-note"></i>Clusters contract v4 &mdash; notes</div><div class="tab"><i class="codicon codicon-file-code"></i>clusters.ts</div></div>
+ <div class="crumbs">Delta Review <i class="codicon codicon-chevron-right"></i> Clusters contract v4 <i class="codicon codicon-chevron-right"></i> notes <span style="margin-left:auto"><i class="codicon codicon-open-preview" title="Open Preview to the Side"></i></span></div>
+ <div class="code">
+  <div class="ln"><span class="no">1</span><span class="tx"><span class="h1"># Clusters contract v4</span></span></div>
+  <div class="ln"><span class="no">2</span><span class="tx"></span></div>
+  <div class="ln"><span class="no">3</span><span class="tx">The clusters file gains per-file review levels and line-ranged</span></div>
+  <div class="ln"><span class="no">4</span><span class="tx">agent notes, so the version moves to 4. Older extensions reject</span></div>
+  <div class="ln"><span class="no">5</span><span class="tx">the file rather than silently dropping notes.</span></div>
+  <div class="ln"><span class="no">6</span><span class="tx"></span></div>
+  <div class="ln"><span class="no">7</span><span class="tx"><span class="h2">## Reading order</span></span></div>
+  <div class="ln"><span class="no">8</span><span class="tx"></span></div>
+  <div class="ln range"><span class="no"><span class="plus">+</span>9</span><span class="tx"><span class="li">1.</span> src/clusters.ts &mdash; parser: <span class="str">`levels`</span> map, ranged <span class="str">`notes`</span></span></div>
+  <div class="ln range"><span class="no">10</span><span class="tx"><span class="li">2.</span> src/clusters.test.ts &mdash; skim; one case per new key</span></div>
+  <div class="ln range"><span class="no">11</span><span class="tx"><span class="li">3.</span> src/model.ts &mdash; level and notes reach ReviewFile</span></div>
+  <div class="thread">
+   <div class="th-head"><i class="codicon codicon-comment"></i>Lines 9&ndash;11<span class="actions"><i class="codicon codicon-close"></i></span></div>
+   <div class="compose"><textarea>Read model.ts before the tests &mdash; I want the shape before the cases.</textarea>
+   <div class="btns"><span class="btn sec">Cancel</span><span class="btn">Add Note</span></div></div>
+  </div>
+  <div class="ln"><span class="no">12</span><span class="tx"><span class="li">4.</span> plugin/skills/cluster/SKILL.md &mdash; skim; schema section</span></div>
+  <div class="ln"><span class="no">13</span><span class="tx"></span></div>
+  <div class="ln"><span class="no">14</span><span class="tx"><span class="h2">## Check</span></span></div>
+  <div class="ln"><span class="no">15</span><span class="tx"></span></div>
+  <div class="ln"><span class="no">16</span><span class="tx"><span class="li">-</span> Does a v3 file still parse?</span></div>
+  <div class="ln"><span class="no">17</span><span class="tx"><span class="li">-</span> Is an unknown level rejected, or defaulted to review?</span></div>
+  <div class="ln"><span class="no">18</span><span class="tx"><span class="li">-</span> Does a range past end-of-file fall back to file level?</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<div class="shot"><div class="label">B. Note submitted; agent replied through the responses file</div>
+<div class="workbench">
+<div class="editor" style="min-width:720px">
+ <div class="tabs"><div class="tab active"><i class="codicon codicon-note"></i>Clusters contract v4 &mdash; notes</div></div>
+ <div class="code">
+  <div class="ln"><span class="no">7</span><span class="tx"><span class="h2">## Reading order</span></span></div>
+  <div class="ln"><span class="no">8</span><span class="tx"></span></div>
+  <div class="ln range"><span class="no">9</span><span class="tx"><span class="li">1.</span> src/clusters.ts &mdash; parser: <span class="str">`levels`</span> map, ranged <span class="str">`notes`</span></span></div>
+  <div class="ln range"><span class="no">10</span><span class="tx"><span class="li">2.</span> src/model.ts &mdash; level and notes reach ReviewFile</span></div>
+  <div class="ln range"><span class="no">11</span><span class="tx"><span class="li">3.</span> src/clusters.test.ts &mdash; skim; one case per new key</span></div>
+  <div class="thread">
+   <div class="th-head"><i class="codicon codicon-comment-discussion"></i>Lines 9&ndash;11 &middot; 2 comments<span class="actions"><i class="codicon codicon-check" title="Resolve"></i><i class="codicon codicon-trash" title="Delete Thread"></i><i class="codicon codicon-chevron-up"></i></span></div>
+   <div class="cmt"><div class="who"><i class="codicon codicon-account"></i>You<span class="when">2 min ago</span></div><div class="body">Read model.ts before the tests &mdash; I want the shape before the cases.</div></div>
+   <div class="cmt"><div class="who"><i class="codicon codicon-agent"></i>Agent<span class="when">just now</span></div><div class="body">Swapped 2 and 3 in the reading order and in the cluster's <code>files</code>, so the sidebar matches.</div></div>
+   <div class="compose" style="padding:6px 10px"><div style="border:1px solid #3c3c3c;padding:4px 6px;color:var(--dim)">Reply&hellip;</div></div>
+  </div>
+  <div class="ln"><span class="no">12</span><span class="tx"><span class="li">4.</span> plugin/skills/cluster/SKILL.md &mdash; skim; schema section</span></div>
+ </div>
+</div>
+<div class="sidebar" style="width:300px;border-left:1px solid var(--border);border-right:none">
+ <div class="sb-title">Review Notes</div>
+ <div class="tree">
+  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-note"></i></span><span class="lbl">Clusters contract v4 &mdash; notes</span><span class="count">1</span></div>
+  <div class="row new" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-comment-unresolved"></i></span><span class="lbl">Read model.ts before the tests&hellip;</span><span class="desc">L9&ndash;11</span></div>
+  <div class="row" style="padding-left:0"><span class="twisty"><i class="codicon codicon-chevron-down"></i></span><span class="icon"><i class="codicon codicon-file-code"></i></span><span class="lbl">clusters.ts</span><span class="desc">src</span><span class="count">1</span></div>
+  <div class="row" style="padding-left:16px"><span class="twisty"></span><span class="icon"><i class="codicon codicon-comment-unresolved"></i></span><span class="lbl">Why not a per-cluster level?</span><span class="desc">L271</span></div>
+ </div>
+</div>
+</div>
+<div class="new-note">The Review Notes view lists notes on the notes document under the document's name, beside code notes.</div>
+</div>
+
+</div>
+</div></body></html>

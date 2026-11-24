@@ -26,3 +26,21 @@ Evaluate the following. I look forward to seeing the mocks.
 
 - Documents: the agent writes markdown files beside the contracts under `<git common dir>/delta-review/` (never committed); each cluster names its notes file, the branch document has a fixed name; the watcher widens to `*.md`.
 - Contract order applies in list mode only; tree (folder) mode keeps folders-first alphabetical.
+
+## Assumptions
+
+- "Plate" means the branch document.
+- Row labels/icons: "Branch overview" (book icon), "Cluster notes" (note icon).
+- A cluster notes row opens the markdown source (so notes can be added); the branch row opens the markdown preview.
+- Document rows have no reviewed state.
+- Only `skim` shows a tag on the row; `review` is the default and untagged.
+- A notes file named by the contract but missing shows a warning row.
+- The branch row also shows in ungrouped view.
+- The branch document takes no review notes.
+- A line-range agent note renders as a read-only thread under the last line of its range.
+
+## Proposal
+
+Issue: cluster intros, reading order, review depth and agent remarks live in labels and file-level notes, not where they are read.
+Approach: clusters contract v4 (per-cluster notes doc, branch doc, per-file `review`/`skim`, line-range agent notes), doc rows first in tree and cluster, list-mode contract order, notes file v2 for line notes on cluster docs; skill docs and DEVELOPMENT.md updated in step.
+Skips: none — schema changes across both contracts need spec and critic.

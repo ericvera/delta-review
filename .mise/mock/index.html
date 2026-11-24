@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><title>Delta Review mocks: cluster notes, documents, review levels</title></head><body><div class="page">
+<h1>Delta Review &mdash; cluster notes, documents, review levels</h1>
+<p class="caption">Static mocks of every screen the goals touch. New elements are outlined in yellow.</p>
+<ol>
+ <li><a href="sidebar-list.html">Sidebar, grouped list mode</a> &mdash; branch overview row first, cluster notes row first in each cluster, contract file order, skim tags; hover states for notes rows and skim files.</li>
+ <li><a href="sidebar-tree.html">Sidebar, grouped tree mode</a> &mdash; folders-first alphabetical kept; document rows and tags still present.</li>
+ <li><a href="sidebar-states.html">Sidebar edge states</a> &mdash; no documents, missing notes file, fully reviewed cluster, ungrouped mode.</li>
+ <li><a href="notes-document.html">Cluster notes document</a> &mdash; composing a line-range review note, agent reply, Review Notes view entry.</li>
+ <li><a href="branch-document.html">Branch document</a> &mdash; opened from the first row.</li>
+ <li><a href="agent-line-note.html">Agent note on a line range</a> &mdash; read-only thread in the review diff, tooltip summary.</li>
+</ol>
+<div class="legend"><b>Guesses not settled by goals.md</b>
+<ul>
+ <li>Row labels and icons: "Branch overview" (book), "Cluster notes" (note); notes row description summarizes its sections.</li>
+ <li>"Plate" is read as the branch document; it shows as the row's description.</li>
+ <li>Clicking a notes row opens the markdown source (needed for line notes); the branch row opens the preview. Documents have no mark-reviewed action or review state.</li>
+ <li>Only "skim" gets a tag; "review" is the untagged default.</li>
+ <li>A notes file named by the contract but absent shows a warning row; no branch document means no row.</li>
+ <li>Branch overview row also appears in ungrouped mode.</li>
+ <li>Branch document does not accept review notes (goals only ask for cluster notes documents).</li>
+ <li>Ranged agent notes render under the range's last line; the file tooltip lists their ranges.</li>
+</ul></div>
+</div></body></html>
