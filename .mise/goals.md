@@ -12,7 +12,16 @@ is it possible when tapping on the cluster notes to default to the markdown read
 - Nothing hard to undo; no data, schema or contract change; command IDs unchanged.
 - Branch overview rows have no inline source action (no menu entry targets `branchDocument`).
 
-## Open questions
+## Decisions
 
-1. How does the reviewer reach the source editor (to leave line notes) once click opens the preview?
-2. Should Branch overview rows get the same inline "open source" action?
+- Clicking a Cluster notes row opens the markdown preview (`deltaReview.previewDocument`), matching Branch overview.
+- The Cluster notes row's inline action changes from "Open Preview" to "Open Source" (`deltaReview.openDocument`, go-to-file icon); the preview inline action is dropped.
+- Branch overview rows get the same inline "Open Source" action.
+
+## Assumptions
+
+- Row tooltips are reworded: click opens the preview; use the inline "Open Source" action to select lines and leave a review note.
+- Clicking a note under REVIEW NOTES keeps opening the source at the note.
+- `deltaReview.openDocument` stays hidden from the command palette; it only gains an icon and inline menu entries.
+- The click-command choice for a document row moves into a pure helper (src/treeParents.ts) so a unit test fails without the change.
+- DEVELOPMENT.md lines 147, 309 (step 31k) and 330 (step 45a) are updated; README.md:69 unchanged.
