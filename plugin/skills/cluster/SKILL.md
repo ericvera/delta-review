@@ -9,8 +9,10 @@ description: >-
   or ported in from another project, to record that a file was extracted
   from lines of another file, to add a reviewer note for a file, to generate
   or update Delta Review clusters, or at the end of a coding task when the
-  user wants the change broken down for review. Requires a git repository
-  with a feature branch.
+  user wants the change broken down for review, or when the user or a
+  calling skill supplies its own rules for grouping, file order, review
+  levels, notes or notes documents (`/delta:cluster <guidance>`). Requires a
+  git repository with a feature branch.
 ---
 
 # Cluster
@@ -24,7 +26,7 @@ Two situations:
 
 ## Contract
 
-Binding for every consumer of this file, whatever workflow is driving.
+Binding for every consumer of this file, whatever workflow or guidance is driving.
 
 ### File location
 
@@ -92,8 +94,8 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
 - `version` — write `4` when any `notes` value is an array (holds a ranged item), else `3`; `levels` alone never bumps it. The extension accepts `1`-`4`; anything else rejects the file. The example is version 4 because it carries a ranged note.
 - `clusters` — an array; each entry an object with string `label` and string `summary`.
 - `files`, `patterns` — when present, arrays of strings. Each cluster needs at least one of the two non-empty.
-- `wait` — optional boolean on a cluster; `true` means you still expect it to change, and the reviewer sees it muted. Any non-boolean value rejects the file. See **Wait**.
-- `waitPaths` — optional top-level array of repo-relative file or directory paths you still expect to change; a directory entry covers every file under it. A non-array or any non-string entry rejects the file. See **Wait**.
+- `wait` — optional boolean on a cluster; `true` means you still expect it to change, and the reviewer sees it muted. Any non-boolean value rejects the file. See workflow step 6.
+- `waitPaths` — optional top-level array of repo-relative file or directory paths you still expect to change; a directory entry covers every file under it. A non-array or any non-string entry rejects the file. See workflow step 6.
 - `moves` — optional; when present, an array of objects.
 - `path`, `from` — required, non-empty strings.
 - `origin` — required, exactly `"repo"` (elsewhere in this repo) or `"external"` (another project).
@@ -103,7 +105,7 @@ Never commit, stage, or push the contract. It lives under the git directory, inv
 - `note` — optional string.
 - `notes` — optional top-level object mapping a repo-relative path to a one-line string. An empty-string value counts as no note.
 - A `notes` value may instead be an array (version 4 only — a lower version rejects it); write one only when it holds a ranged item. Each item is a string (file-level; several join with one space) or `{ "text": string, "lines": [start, end] }`, a remark on the current file's 1-based inclusive lines, integers with `1 <= start <= end`. Any other item or `lines` shape rejects the file; an empty string or empty `text` counts as no note.
-- `levels` — optional top-level object mapping a repo-relative path to `"review"` or `"skim"`, at any version. A non-object, or any other value, rejects the file. See **Review levels**.
+- `levels` — optional top-level object mapping a repo-relative path to `"review"` or `"skim"`, at any version. A non-object, or any other value, rejects the file. See **Review levels** and workflow step 5.
 
 Unknown keys are ignored. Accepted but silently dropped — costing you the declaration, not the file:
 
@@ -159,26 +161,15 @@ Relocation re-finds content already substantiated; it is not inferred provenance
 
 `notes` carries one line per file for the reviewer, separate from a move's `note`.
 
-- Write an entry for a file that warrants a one-line remark.
 - A remark about specific lines is a ranged item; a remark about the whole file is a file-level string. Keep a value with no ranged item a single string.
-- On a cold re-run, preserve existing file-level strings and ranged items' `text` unchanged.
-- At the end of a task, the entry of a file that task touched may be rewritten.
 - Drop an entry whose path has left the review set.
 - Ranged items: the extension cannot re-anchor them (it only clamps). On every re-run, cold or end-of-task, re-read the file and move each item's `lines` to where the remarked code now is, or drop the item when that code is gone. Re-check ranges in files the task touched; do not merely allow them to change.
 - Dropping a value's last ranged item turns it back into a string, or removes it when nothing is left; apply the `version` rule afterwards (it may fall to `3`).
 
 ### Review levels
 
-- Mark `skim` a file the reviewer need not read line by line: tests mirroring code, mechanical edits, docs.
 - Omit `review`; it is the default.
-- On a cold re-run, preserve existing entries; drop an entry whose path has left the review set.
-
-### Wait
-
-- Set `wait: true` on a cluster you still expect to change; clear it once the cluster is settled or plans change.
-- On a cold re-run, keep an existing `wait` only on a cluster whose label survives. A cold run sets no new `wait`.
-- List a file or directory in `waitPaths` when only part of a cluster is still expected to change; use the cluster's `wait` when all of it is. Remove an entry once that path is settled.
-- On a cold re-run, keep a `waitPaths` entry only while it still covers a file in the review set. A cold run adds no entry.
+- Drop an entry whose path has left the review set.
 
 ### Documents
 
@@ -186,7 +177,6 @@ Markdown documents beside the contract, in `<COMMON_DIR>/delta-review/`. No cont
 
 - Branch document — `branch-<sanitized-branch>.md`, written by another skill; never write it here.
 - Cluster notes document — `cluster-notes-<sanitized-branch>/<slug>.md`. Slug: the cluster's `label` lowercased, every run of characters outside `[a-z0-9]` replaced by one `-`, no trimming (`Clusters contract v4` → `clusters-contract-v4`); must match the extension's `clusterSlug`. An empty slug has no document. Labels sharing a slug share one document.
-- Shape: `# <label>`; an intro paragraph; `## Reading order`, a numbered list of the cluster's files in its `files` order; `## Check`, a list of questions for the reviewer.
 - Renaming a cluster renames its notes file; dropping a cluster deletes it. Rename or delete the old slug's file only when no cluster in the new contract still maps to that slug. Never rename onto an existing file: leave both files and tell the user. Before renaming or deleting a notes file, reply through the `delta:review-notes` responses file to every open or pending review note whose `document` is `"clusterNotes"` and whose `file` is that file's name: say what the note's concern became and, on a rename, the new file name. The notes file is extension-owned; never re-home a note's `file`.
 
 ### Conventions the extension does not reject — it fails silently
@@ -212,6 +202,8 @@ Any further change requires bumping `version` and updating the extension's parse
 
 ## Default workflow: clustering the branch
 
+The default when clustering the branch. Guidance from `/delta:cluster` arguments, the user's message, or a calling skill's instructions replaces any step or rule here it addresses; user over calling skill over this workflow. Where guidance is silent, this workflow applies. The Contract binds regardless.
+
 ### 1. Resolve the repo root and base branch
 
 Work from the repo root per the Contract. Read `deltaReview.baseBranch` from `.vscode/settings.json` at the repo root; absent file or key → `main`. It is JSONC, so read it as text rather than assuming strict `JSON.parse`/`jq` succeeds.
@@ -236,7 +228,7 @@ If it exists, treat it as the baseline:
 
 - **Keep cluster labels and identity stable** — reviewers have collapse state and mental context attached to them. Do not rename or reorder gratuitously. A rename moves its notes document per **Documents**.
 - Place new or previously-unclustered files into the existing cluster they belong to, or a new one if they are a new logical change.
-- Drop `files` entries no longer in the review set. Carry `moves`, `notes` and `levels` entries forward per the preservation rules in **Declaring a move**, **Notes** and **Review levels**, and `wait` and `waitPaths` per **Wait**.
+- Drop `files` entries no longer in the review set. Carry `moves` forward per the preservation rule in **Declaring a move**, `notes` and `levels` per step 5, and `wait` and `waitPaths` per step 6.
 - Run the re-run relocation rule in **Declaring an extraction** before declaring anything new.
 - Refresh a `label`/`summary` only where the meaning of the change actually shifted.
 
@@ -246,7 +238,13 @@ Add new `moves` entries per **Declaring a move** and **Declaring an extraction**
 
 ### 5. Write notes
 
-Fill `notes` per the Contract's **Notes** section and `levels` per **Review levels**, on top of the entries preserved in step 3. Set `version` per the Contract.
+Fill `notes` and `levels` on top of the entries preserved in step 3, encoded and maintained per the Contract's **Notes** and **Review levels**. Set `version` per the Contract.
+
+- Write a `notes` entry for a file that warrants a one-line remark.
+- On a cold re-run, preserve existing file-level strings and ranged items' `text` unchanged.
+- At the end of a task, the entry of a file that task touched may be rewritten.
+- Mark `skim` a file the reviewer need not read line by line: tests mirroring code, mechanical edits, docs.
+- On a cold re-run, preserve existing `levels` entries.
 
 ### 6. Cluster the files
 
@@ -257,13 +255,19 @@ Clusters tell the narrative of the change — "Rename fetchUser → getUser", "N
 - Every changed file should be claimed by a cluster unless it genuinely belongs to no logical change.
 - Never invent a junk-drawer cluster ("Misc", "Other"). Unclaimed files surface as "Unclustered" — that is the scope-creep detector, and hiding them defeats it.
 - List each cluster's `files` in the order a reviewer should read them, per **Membership resolution**.
-- Set or clear `wait` and `waitPaths` entries per **Wait**.
+- Set `wait: true` on a cluster you still expect to change; clear it once the cluster is settled or plans change.
+- On a cold re-run, keep an existing `wait` only on a cluster whose label survives. A cold run sets no new `wait`.
+- List a file or directory in `waitPaths` when only part of a cluster is still expected to change; use the cluster's `wait` when all of it is. Remove an entry once that path is settled.
+- On a cold re-run, keep a `waitPaths` entry only while it still covers a file in the review set. A cold run adds no entry.
 - `label` — target **≤ 40 characters**, **50 is a hard cap**. It gets about 34 characters of a default sidebar and truncates from the right, so put the distinguishing words first and move any further detail into `summary`, which renders as a tooltip and is effectively unbounded.
 
 ### 7. Write notes documents
 
 Write or refresh a cluster notes document for each cluster that warrants one, and rename or delete documents of renamed or dropped clusters — replying first to their open review notes — per **Documents**.
 
+- Default shape: `# <label>`; an intro paragraph; `## Reading order`, a numbered list of the cluster's files in its `files` order; `## Check`, a list of questions for the reviewer.
+- Under guidance, the document is `# <label>` followed only by the sections the guidance asks for; `## Reading order` and `## Check` appear only if requested. Guidance asking for no sections means no document is written or refreshed for that cluster; an existing one is left unchanged, and **Documents**' rename/delete rules still apply.
+
 ### 8. Write and report
 
-Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the files marked `skim`, the clusters flagged `wait` and the paths in `waitPaths`, the notes documents written, renamed, or deleted (and any rename left undone), and any files you left unclustered (and why).
+Write per the Contract, then tell the user the cluster labels, file counts, any moves you declared, any extractions (path, origin, lines), any notes you wrote, the files marked `skim`, the clusters flagged `wait` and the paths in `waitPaths`, the notes documents written, renamed, or deleted (and any rename left undone), and any files you left unclustered (and why). This report applies under guidance unless the guidance says otherwise.
