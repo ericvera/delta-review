@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { BaseResolution } from "./diffBase";
-import { baseStatusPresentation, mergeBaseErrorMessage } from "./diffBaseUi";
+import {
+  basePickerEntries,
+  baseStatusPresentation,
+  mergeBaseErrorMessage,
+} from "./diffBaseUi";
 
 const SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
 
@@ -164,4 +168,95 @@ describe("mergeBaseErrorMessage", () => {
       expect(message).not.toContain("deltaReview.baseBranch");
     },
   );
+});
+
+describe("basePickerEntries", () => {
+  const refs = (entries: ReturnType<typeof basePickerEntries>): string[] =>
+    entries.flatMap((entry) => (entry.kind === "ref" ? [entry.ref] : []));
+
+  it("lists each ref once, in its first section", () => {
+    const entries = basePickerEntries(
+      resolution({
+        source: "detected",
+        base: "feat/a",
+        suggestions: {
+          forkPoint: "feat/a",
+          upstream: "main",
+          fallback: "main",
+        },
+      }),
+      ["main", "feat/a", "develop"],
+    );
+    expect(entries).toEqual([
+      { kind: "separator", label: "suggested" },
+      {
+        kind: "ref",
+        ref: "feat/a",
+        label: "$(check) $(git-compare) feat/a",
+        description: "auto-detected · forked from current",
+        current: true,
+      },
+      {
+        kind: "ref",
+        ref: "main",
+        label: "$(cloud) main",
+        description: "upstream",
+        current: false,
+      },
+      { kind: "separator", label: "local branches" },
+      {
+        kind: "ref",
+        ref: "develop",
+        label: "$(git-branch) develop",
+        description: undefined,
+        current: false,
+      },
+      { kind: "separator", label: "" },
+      { kind: "enterRef" },
+    ]);
+  });
+
+  it("checks only the current base", () => {
+    const entries = basePickerEntries(
+      resolution({ source: "explicit", base: "develop" }),
+      ["develop", "other"],
+    );
+    expect(
+      entries.flatMap((entry) =>
+        entry.kind === "ref" && entry.current ? [entry.label] : [],
+      ),
+    ).toEqual(["$(check) $(git-branch) develop"]);
+  });
+
+  it("offers automatic detection only for an explicit base", () => {
+    const automatic = (source: BaseResolution["source"]): boolean =>
+      basePickerEntries(resolution({ source }), []).some(
+        (entry) => entry.kind === "automatic",
+      );
+    expect(automatic("explicit")).toBe(true);
+    expect(automatic("detected")).toBe(false);
+    expect(automatic("fallback")).toBe(false);
+  });
+
+  it("moves preferFirst to the top of suggested", () => {
+    const entries = basePickerEntries(
+      resolution({
+        suggestions: {
+          forkPoint: "feat/a",
+          upstream: "origin/x",
+          fallback: "main",
+        },
+      }),
+      [],
+      { preferFirst: "main" },
+    );
+    expect(entries[0]).toEqual({ kind: "separator", label: "suggested" });
+    expect(refs(entries)).toEqual(["main", "feat/a", "origin/x"]);
+  });
+
+  it("excludes the current branch from local branches", () => {
+    expect(
+      refs(basePickerEntries(resolution({}), ["feat/b", "main", "develop"])),
+    ).toEqual(["main", "develop"]);
+  });
 });

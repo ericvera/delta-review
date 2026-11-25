@@ -38,8 +38,10 @@ import {
   loadReviewDocuments,
   ReviewDocuments,
 } from "./documents";
+import { showBasePicker } from "./basePicker";
 import {
   BaseResolution,
+  clearBranchBase,
   createDetectionCache,
   resetDetectionCache,
   resolveDiffBase,
@@ -200,6 +202,22 @@ export const activate = async (
     );
   };
   setClustersAvailable(false);
+  // Drive the empty-tree welcome links that lead to a base that works
+  const setBaseProblem = (
+    problem: "missing" | "mergeBaseFailed" | undefined,
+  ): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.baseMissing",
+      problem === "missing",
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.mergeBaseFailed",
+      problem === "mergeBaseFailed",
+    );
+  };
+  setBaseProblem(undefined);
 
   // Two persistence conventions share the collapsed set: default-expanded
   // elements (groups, clusters, folders) store their key while collapsed;
@@ -326,6 +344,7 @@ export const activate = async (
     vscode.StatusBarAlignment.Left,
     49,
   );
+  baseStatusItem.command = "deltaReview.setBranchBase";
   // StatusBarItem exposes no visibility, and the test hook reports it
   let baseStatusVisible = false;
   const renderBaseStatus = (presentation: BaseStatusPresentation): void => {
@@ -452,6 +471,7 @@ export const activate = async (
         "Open a folder inside a git repository to start reviewing.";
       statusBarItem.hide();
       baseResolution = undefined;
+      setBaseProblem(undefined);
       hideBaseStatus();
       notesKey = undefined;
       renderNoteThreads([]);
@@ -493,6 +513,7 @@ export const activate = async (
         treeView.badge = undefined;
         treeView.message = `⚠ Base ${resolution.base} for branch ${resolution.branch} does not resolve.`;
         statusBarItem.hide();
+        setBaseProblem("missing");
         renderBaseStatus(baseStatusPresentation(resolution, undefined));
         notesKey = undefined;
         renderNoteThreads([]);
@@ -658,6 +679,7 @@ export const activate = async (
       statusBarItem.text = `$(checklist) Review ${reviewedCount}/${model.files.length}`;
       statusBarItem.tooltip = `Delta Review: ${model.branch} vs ${baseBranch}`;
       statusBarItem.show();
+      setBaseProblem(undefined);
       renderBaseStatus(baseStatusPresentation(resolution, model.mergeBase));
 
       // Review-note threads: load, refresh derived positions against the
@@ -854,6 +876,7 @@ export const activate = async (
       // keeps the base item up: it is the way to a base that works.
       if (error instanceof MergeBaseError && resolution !== undefined) {
         treeView.message = mergeBaseErrorMessage(resolution);
+        setBaseProblem("mergeBaseFailed");
         renderBaseStatus(
           baseStatusPresentation(resolution, undefined, {
             mergeBaseFailed: true,
@@ -861,6 +884,7 @@ export const activate = async (
         );
       } else {
         treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
+        setBaseProblem(undefined);
         hideBaseStatus();
       }
       notesKey = undefined;
@@ -1574,8 +1598,68 @@ export const activate = async (
     await refresh();
   };
 
+  const setBranchBase = async (): Promise<void> => {
+    const activeGit = git;
+    const resolution = baseResolution;
+    if (activeGit === undefined || resolution === undefined) {
+      void vscode.window.showInformationMessage(
+        "Delta Review: no repository is active.",
+      );
+      return;
+    }
+    if (resolution.branch === "HEAD") {
+      void vscode.window.showInformationMessage(
+        "Delta Review: detached HEAD has no branch to set a base for.",
+      );
+      return;
+    }
+    try {
+      const { outcome } = await showBasePicker({ git: activeGit, resolution });
+      if (outcome === "cancelled") {
+        return;
+      }
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Delta Review: failed to set the diff base (${error instanceof Error ? error.message : String(error)})`,
+      );
+      return;
+    }
+    await refresh();
+  };
+
+  const useAutomaticBase = async (): Promise<void> => {
+    const activeGit = git;
+    const resolution = baseResolution;
+    if (activeGit === undefined || resolution === undefined) {
+      void vscode.window.showInformationMessage(
+        "Delta Review: no repository is active.",
+      );
+      return;
+    }
+    if (resolution.branch === "HEAD") {
+      return;
+    }
+    try {
+      await clearBranchBase(activeGit, resolution.branch);
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Delta Review: failed to clear the diff base (${error instanceof Error ? error.message : String(error)})`,
+      );
+      return;
+    }
+    await refresh();
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand("deltaReview.refresh", () => refresh()),
+
+    vscode.commands.registerCommand("deltaReview.setBranchBase", () =>
+      setBranchBase(),
+    ),
+
+    vscode.commands.registerCommand("deltaReview.useAutomaticBase", () =>
+      useAutomaticBase(),
+    ),
 
     vscode.commands.registerCommand(
       "deltaReview.addNote",
@@ -2314,6 +2398,7 @@ export const activate = async (
             text: baseStatusItem.text,
             tooltip: baseStatusItem.tooltip,
             visible: baseStatusVisible,
+            command: baseStatusItem.command,
           },
           treeMessage: treeView.message,
         };

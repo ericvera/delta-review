@@ -32,6 +32,16 @@
     },
     "viewsWelcome": [
       {
+        "view": "deltaReview",
+        "contents": "[Choose a base](command:deltaReview.setBranchBase) or [use automatic detection](command:deltaReview.useAutomaticBase).",
+        "when": "deltaReview.baseMissing"
+      },
+      {
+        "view": "deltaReview",
+        "contents": "[Choose a base](command:deltaReview.setBranchBase)",
+        "when": "deltaReview.mergeBaseFailed"
+      },
+      {
         "view": "deltaReviewNotes",
         "contents": "No review notes on this branch.\nHover a line in a review diff and click + to add one."
       }
@@ -41,6 +51,17 @@
         "command": "deltaReview.refresh",
         "title": "Refresh",
         "icon": "$(refresh)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.setBranchBase",
+        "title": "Set Diff Base for Branch",
+        "icon": "$(git-compare)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.useAutomaticBase",
+        "title": "Use Automatic Diff Base Detection",
         "category": "Delta Review"
       },
       {
@@ -287,6 +308,11 @@
           "command": "deltaReview.refresh",
           "when": "view == deltaReview",
           "group": "navigation@2"
+        },
+        {
+          "command": "deltaReview.setBranchBase",
+          "when": "view == deltaReview",
+          "group": "base@0"
         },
         {
           "command": "deltaReview.clearResolvedNotes",

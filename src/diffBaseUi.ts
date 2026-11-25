@@ -73,3 +73,83 @@ export const mergeBaseErrorMessage = (resolution: BaseResolution): string => {
       : " Click the base in the status bar to choose another.";
   return `⚠ Cannot compute merge-base with "${resolution.base}".${hint}`;
 };
+
+export type PickerEntry =
+  | { kind: "separator"; label: string }
+  | {
+      kind: "ref";
+      ref: string;
+      label: string;
+      description?: string;
+      current: boolean;
+    }
+  | { kind: "enterRef" }
+  | { kind: "automatic" };
+
+type RefEntry = Extract<PickerEntry, { kind: "ref" }>;
+
+export const basePickerEntries = (
+  resolution: BaseResolution,
+  localBranches: string[],
+  options?: { preferFirst?: string },
+): PickerEntry[] => {
+  const seen = new Set<string>();
+  const refEntry = (
+    ref: string,
+    icon: string,
+    description?: string,
+  ): RefEntry => {
+    const current = ref === resolution.base;
+    return {
+      kind: "ref",
+      ref,
+      label: `${current ? "$(check) " : ""}$(${icon}) ${ref}`,
+      description,
+      current,
+    };
+  };
+  const { forkPoint, upstream, fallback } = resolution.suggestions;
+  const candidates: [string | undefined, string, string][] = [
+    [forkPoint, "git-compare", "auto-detected · forked from current"],
+    [upstream, "cloud", "upstream"],
+    [fallback, "gear", "default (deltaReview.baseBranch)"],
+  ];
+  const suggested: RefEntry[] = [];
+  for (const [ref, icon, description] of candidates) {
+    if (ref !== undefined && !seen.has(ref)) {
+      seen.add(ref);
+      suggested.push(refEntry(ref, icon, description));
+    }
+  }
+  const preferred = options?.preferFirst;
+  if (preferred !== undefined) {
+    const index = suggested.findIndex((entry) => entry.ref === preferred);
+    if (index === -1) {
+      if (!seen.has(preferred)) {
+        seen.add(preferred);
+        suggested.unshift(refEntry(preferred, "git-branch"));
+      }
+    } else {
+      suggested.unshift(...suggested.splice(index, 1));
+    }
+  }
+  const locals: RefEntry[] = [];
+  for (const name of localBranches) {
+    if (name !== resolution.branch && !seen.has(name)) {
+      seen.add(name);
+      locals.push(refEntry(name, "git-branch"));
+    }
+  }
+  return [
+    { kind: "separator", label: "suggested" },
+    ...suggested,
+    ...(locals.length === 0
+      ? []
+      : [{ kind: "separator", label: "local branches" } as const, ...locals]),
+    { kind: "separator", label: "" },
+    { kind: "enterRef" },
+    ...(resolution.source === "explicit"
+      ? [{ kind: "automatic" } as const]
+      : []),
+  ];
+};
