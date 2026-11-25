@@ -11,8 +11,22 @@ would it be possible to add comments to the markdown preview? Like the branch no
 - Patterns: branch-doc detection like `clusterNotesFileName` (commentController.ts:197); parse rules in notes.ts (+notes.test.ts); target resolution in noteTarget.ts (+test); grouping/labels in notesGrouping.ts (`clusterNotesDocumentLabel` :48, +test); extension-host checks via `deltaReview.__inspect` (DEVELOPMENT.md:238-251).
 - Open: which doc "branch notes" means; whether source-mode notes should render in the preview; tooltip/click behaviour of the branch row (treeProvider.ts:661-688); preview UI change matches Mock conditions.
 
-## Open questions
+## Decisions
 
-1. Which document should take notes?
-2. How should notes show up while previewing?
-3. Contract value for branch-doc notes?
+- Notes target both the Branch overview document (`branch-<branch>.md`) and cluster notes documents, in the source (text) editor.
+- Edit mode only: the built-in markdown preview stays unchanged; no custom webview, notes are not rendered in the preview.
+- Branch-doc notes use a new notes-file `document` value (e.g. `"branch"`) without bumping the notes file version; older notes files stay readable. Bump the plugin version and update plugin/skills/review-notes/SKILL.md (the public contract).
+- If cluster notes docs fail to take notes in source mode (suspected realpath/symlink mismatch at commentController.ts:204), fix that too.
+
+## Assumptions
+
+- The Branch overview row tooltip gains the same "open as source to add notes" hint as cluster notes docs; click-to-preview behaviour stays.
+- REVIEW NOTES groups branch-doc notes under their own label, like cluster notes docs.
+- Extension version bumps (minor) alongside the plugin bump.
+- No mock: the change adds no tree structure, view mode, panel or command; only gutter availability and a tooltip line.
+
+## Proposal
+
+- Issue: the markdown preview can't take comments, and the Branch overview gets no note gutter even in source mode because notes only accept cluster notes files.
+- Approach: make the Branch overview (and cluster notes docs, robustly) commentable in source mode via a new `document: "branch"` notes value, with contract doc, grouping, target resolution and tooltip updates; preview unchanged.
+- Skips: nothing — spec and critic run because this changes the public notes contract.
