@@ -62,3 +62,9 @@ we should also add in this branch the ability to add review notes directly in th
 1. File-level note form.
 2. Where floating notes and their replies render.
 3. How notes are created from the pane.
+
+## Added scope 2 (owner, during goals)
+
+Als, currently... updates like marking a file reviewed often takes a few seconds and sometimes even fails and I have to mark it reviewed a couple of times. Like some sort of race condition. Any way to make things more responsive?
+
+- Investigate: the mark-reviewed path end to end (command → review state write → refresh → tree update), where the seconds go, and what race can drop a mark; try to reproduce.
