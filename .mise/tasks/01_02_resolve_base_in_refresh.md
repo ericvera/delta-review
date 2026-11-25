@@ -12,9 +12,9 @@ Make every refresh compute the review set against the per-branch resolved base i
 
 ## Background
 
-- Task 01_01 produced `src/diffBase.ts`: `resolveDiffBase(git, branch, fallback, cache)` returns a `BaseResolution` `{ branch, base, source: "explicit" | "detected" | "fallback", detectedVia?: "forkPoint" | "upstream", fallback, missing, stale, fileError?, suggestions }`. `DetectionCache` is a mutable object the caller owns.
+- Task 01_01 produced `src/diffBase.ts`: `resolveDiffBase(git, branch, fallback, cache)` returns a `BaseResolution` `{ branch, base, source: "explicit" | "detected" | "fallback", detectedVia?: "forkPoint" | "upstream", fallback, missing, stale, fileError?, suggestions }`. `DetectionCache` is a mutable object the caller owns, built only by `createDetectionCache()` (its `perCandidate` map is required) and emptied in place by `resetDetectionCache(cache)`.
 - `refresh()` lives at `src/extension.ts:405`. Today it reads `baseBranch` from configuration at `:424`, resolves the branch at `:432`, and passes `baseBranch` to `computeReviewModel` at `:464` and `:502` (the auto-mark recompute). The counter tooltip at `:592` reads `Delta Review: ${model.branch} vs ${baseBranch}`. The fatal catch branch at about `:780-791` hides the counter and sets `treeView.message`.
-- Caches cleared on repo switch: `hashCache.clear(); sliceCache.clear();` in `setActiveRepo` (`src/extension.ts:898-905`). Add the detection cache there.
+- Caches cleared on repo switch: `hashCache.clear(); sliceCache.clear();` in `setActiveRepo` (`src/extension.ts:898-905`). Reset the detection cache there.
 - The counter status item is created at `src/extension.ts:308-312` (left, priority 50, command `deltaReview.focus`) and pushed to `context.subscriptions` right after.
 - `computeReviewModel` (`src/model.ts:574`) throws `Cannot compute merge-base with "<base>". Check the deltaReview.baseBranch setting.` at `:606-608`. The base no longer always comes from the setting, so the hint moves to the extension, which knows the base's source. The fatal catch must keep a way out: with no merge-base the user still needs the setting hint (fallback source) and the base item to reach the picker (01_03 attaches its command).
 - `ReviewModel.mergeBase` (`src/model.ts:110`) feeds the tooltip's `Merge-base <short sha>`.
@@ -40,7 +40,7 @@ Make every refresh compute the review set against the per-branch resolved base i
   - Export both and unit-test every source variant.
 - `extension.ts`:
   - Create `baseStatusItem` (left, priority 49) and push it to subscriptions. Leave its `command` unset until 01_03.
-  - Hold `let baseResolution: BaseResolution | undefined` and `const baseDetectionCache: DetectionCache = {}`.
+  - Hold `let baseResolution: BaseResolution | undefined` and `const baseDetectionCache = createDetectionCache()` (typed `DetectionCache` by inference).
   - In `refresh()`, after `resolveBranch`, call `resolveDiffBase(git, branch, configuration.get("baseBranch") ?? "main", baseDetectionCache)`. Generation-check after the await, as the other awaits do.
   - When `resolution.missing`:
     - set `model`/`clusterModel` undefined
@@ -55,7 +55,7 @@ Make every refresh compute the review set against the per-branch resolved base i
   - Map the tint to `new vscode.ThemeColor("statusBarItem.errorBackground")` / `warningBackground` / undefined.
   - In the fatal catch: when the error is a `MergeBaseError` and `baseResolution` is current, set `treeView.message = mergeBaseErrorMessage(baseResolution)` and render the base item with `mergeBaseFailed: true` and keep it shown. Any other fatal error, and the `git === undefined` branch, hide the base item.
   - Assign `baseResolution` before calling `computeReviewModel`, so the catch can read it.
-- Add the detection cache clear to `setActiveRepo`.
+- In `setActiveRepo`, beside `hashCache.clear(); sliceCache.clear();`, call `resetDetectionCache(baseDetectionCache)` (in place, so the `const` binding stays valid for in-flight refreshes, which then bail on the generation check).
 - Extend `deltaReview.__inspect` (test hook, `src/extension.ts:~2200`) with `base: baseResolution` and `baseStatus: { text, tooltip, visible }`, so a host check can read them.
 
 ## Gotchas

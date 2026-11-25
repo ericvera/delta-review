@@ -26,6 +26,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
   - The row moves in the same frame with no progress spinner. The badge and `Review n/m` update with it.
   - On failure the row moves back and the error reads `Could not mark src/notesStore.ts reviewed: the review state changed in another window and the retry also failed. Your mark was undone.` with buttons `Retry` and `Show Log`. A non-conflict failure carries git's reason, e.g. `Could not mark src/notesStore.ts reviewed: cannot lock ref '…'. Your mark was undone.`
   - The same applies to unmark, mark-all and unmark-all.
+- `git.run` (`src/git.ts:30-33`) rejects with Node's raw `execFile` error. Its `message` is `Command failed: git update-ref …` followed by git's stderr on the next lines, and its `stderr` property holds the stderr (a Buffer, since `runGit` uses `encoding: "buffer"`). For a lock failure git prints `fatal: cannot lock ref 'refs/review/<branch>': Unable to create '<path>.lock': File exists.` (or `… Permission denied`).
 - Goals assumption: the silent no-ops report why (`model === undefined`, or the element is not a file: `src/extension.ts:1556-1561`, `:1577-1584`).
 
 ## Guides
@@ -40,6 +41,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
     - Reviewed sets `status = Reviewed, hasReviewSnapshot = true`. Unreviewed sets `status = NeedsReview, hasReviewSnapshot = false`.
     - Unknown paths are ignored.
   - `revertReviewStatus(model, prior)` restores those fields on the matching files of whatever model is current, again by copy.
+  - `gitErrorReason(error: unknown): string`: take stderr from `error.stderr` (Buffer → UTF-8, or string) when present, else the message lines after a first line starting `Command failed:`, else the whole message. Return the first line starting `fatal:` or `error:` with that prefix and surrounding whitespace removed; else the first non-empty line; else the message's first line. Strip one trailing `.` so the toast's own `. Your mark was undone.` does not double it. A non-Error value gives `String(error)`.
   - `applyPendingMarks(model, pending: readonly { paths: readonly string[]; reviewed: boolean }[]): ReviewModel` folds `withReviewStatus` over the entries in order (later entries win on a shared path) and returns the input unchanged when `pending` is empty.
 - `src/extension.ts`:
   - Create `const log = vscode.window.createOutputChannel("Delta Review")` (subscriptions).
@@ -50,7 +52,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
     1. If `optimistic` is set: push `{ token, paths, reviewed }` onto `pendingMarks`. If `model` is defined, run `withReviewStatus`, keep its `prior`, and `publishModel(result.model)`.
     2. `await reviewStateQueue.run(mutate)`. Then, in one synchronous step, remove the entry from `pendingMarks` and start `const done = refresh()` (its synchronous `++refreshGeneration` makes every older in-flight refresh bail before it can publish un-overlaid state); then `await done`.
     3. On error from the mutation: log the full error (stack) to `log`. In one synchronous step, remove the entry, and if a model is current, `publishModel(applyPendingMarks(revertReviewStatus(model, prior), pendingMarks))` (other still-pending changes stay applied), then `void refresh()`. An error from the post-write `refresh()` is logged and shown as `Delta Review: refresh failed (<msg>)` with no revert, since the write landed.
-    4. Show `Could not ${action} ${subject}: ${reason}. Your mark was undone.` Reasons: `ReviewStateConflictError` with `kind: "moved"` → `the review state changed in another window and the retry also failed`; `kind: "locked"` → `${error.ref} stayed locked by another git process (${error.lockPath}); if no git command is running, delete that file`; otherwise the error message's first line. Buttons are `Retry` (call the same `applyReviewStateChange` args again) and `Show Log` (`log.show()`).
+    4. Show `Could not ${action} ${subject}: ${reason}. Your mark was undone.` Reasons: `ReviewStateConflictError` with `kind: "moved"` → `the review state changed in another window and the retry also failed`; `kind: "locked"` → `${error.ref} stayed locked by another git process (${error.lockPath}); if no git command is running, delete that file`; otherwise `gitErrorReason(error)` (never Node's `Command failed: git …` line). Buttons are `Retry` (call the same `applyReviewStateChange` args again) and `Show Log` (`log.show()`).
   - `subject` is the file path for single files, `<n> files` for groups, and the label for clusters and folders.
   - Pass `optimistic` from every caller:
     - mark: the paths it marks
@@ -82,6 +84,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
   - `prior` captures the original values
   - `revertReviewStatus` on a different model instance restores only the listed paths
   - unknown paths are ignored
+  - `gitErrorReason`: an execFile-shaped error (`message` `Command failed: git update-ref refs/review/x abc def\nfatal: cannot lock ref 'refs/review/x': Unable to create '/r/.git/refs/review/x.lock': File exists.\n`, `stderr` as a Buffer of the same stderr) gives `cannot lock ref 'refs/review/x': Unable to create '/r/.git/refs/review/x.lock': File exists`; the same with no `stderr` property gives the same result; `error: …` stderr is stripped likewise; stderr with no prefixed line gives its first non-empty line; a plain `new Error("boom")` gives `boom`; a string gives itself
   - `applyPendingMarks` applies entries in order (a later unmark beats an earlier mark on the same path) and returns the same object for an empty list
   - `resolveClusterModel(contract, withReviewStatus(model, [p], true).model.files)` places `p` as reviewed in its cluster bucket (guards the grouped-mode wiring)
 - Run `yarn test`, `yarn lint`, `yarn build`.
