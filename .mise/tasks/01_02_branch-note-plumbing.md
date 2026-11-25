@@ -2,7 +2,7 @@
 
 ## Goal
 
-In the source (text) editor, the Branch overview document offers the review-note `+` gutter. Notes created there are saved as `document: "branch"`, render back on that document, re-anchor against it, and open from REVIEW NOTES at the note. Cluster notes documents keep working the same way.
+In the source (text) editor, the Branch overview document offers the review-note `+` gutter. Notes created there are saved as `document: "branch"` (verified by the scripted check driving `deltaReview.addNote`), render back on that document, re-anchor against it, and open from REVIEW NOTES at the note. Cluster notes documents keep working the same way.
 
 ## Files to modify/create
 
@@ -48,7 +48,7 @@ In the source (text) editor, the Branch overview document offers the review-note
 - `vscode` cannot be imported under Vitest; keep all new logic that needs tests in the pure modules (`documents.ts`, `noteTarget.ts`, `notesStore.ts`).
 - Narrow `note.document` before passing it (it is optional on `Note`); TypeScript will flag missed call sites once the signatures change.
 - `addNote` must store the document's file name, never a `.git/...` repo-relative path — the ref check stays before `repoRelativePath`.
-- `provideCommentingRanges` runs for every open document; the realpath call must stay behind `documentNoteRefFor`'s file-name filter (task 01_01), never on every file.
+- `provideCommentingRanges` runs for every open document; the realpath call must stay behind `documentNoteRefFor`'s file-name and parent-leaf filter (task 01_01), never on every file.
 - A document opened under a non-tree spelling gets the gutter and saves notes correctly, but threads render on the tree-path URI; this is by design, do not chase it.
 - Extension-host launches steal focus: run the scripted check once, batched, at the end.
 
@@ -61,4 +61,5 @@ In the source (text) editor, the Branch overview document offers the review-note
   - Take the `Branch overview` and `Cluster notes` rows from `__inspect().treeRows`, run `deltaReview.openDocument` with `vscode.Uri.parse(row.commandUri)` for each (the tree's own path), and assert `__inspect().commentableDocuments` contains both URIs.
   - Open each document again under the other spelling (`fs.realpathSync` of the tree path if it differs, else the `os.tmpdir()`-based spelling) via `vscode.workspace.openTextDocument` + `showTextDocument`, and assert those URIs are commentable too. Log both spellings; if they are identical on the test machine, add a `fs.symlinkSync` alias of the repo dir and open through that instead.
   - Write `branch-other.md` beside the branch document, open it the same way, and assert it is not commentable.
-  - Hand-write a notes file `.git/delta-review/notes-<branch>.json` (`"version": 2`) holding a `document: "branch"` note, refresh, and assert the REVIEW NOTES badge counts it.
+  - Exercise the controller's create path: with the tree-path Branch overview open, the harness creates its own controller (`vscode.comments.createCommentController("harness", "harness")`), a thread on the document's URI with `new vscode.Range(1, 0, 2, 0)` and no comments, and runs `vscode.commands.executeCommand("deltaReview.addNote", { thread, text: "branch note" })`. Then read `.git/delta-review/notes-<branch>.json` and assert `"version": 2` and one note with `"document": "branch"`, `"file": "branch-<sanitized branch>.md"`, `"side": "working"`, `startLine` 2, `endLine` 3. Repeat on the cluster notes document and assert that note has `"document": "clusterNotes"` and `file` = `<slug>.md`. Assert `__inspect().notesBadge` counts both.
+  - Run `deltaReview.refresh` and assert `__inspect().notesBadge` still counts both (the written file round-trips through `parseNotesFile`).
