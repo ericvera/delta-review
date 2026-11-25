@@ -27,6 +27,7 @@ currently it seems like the base commit/branch on a diff is always main or set p
 
 ## Assumptions
 
+- Responsiveness: a mark updates its row immediately (optimistic), rolled back with an error if the write fails; the extension's own ref writes do not restart the debounce or supersede the command's refresh; the debounce gets a max wait; review-state ref writes use compare-and-set with retry so concurrent windows/worktrees cannot drop a mark; the silent no-ops report why.
 - The agent-facing mechanism (git config key vs. file under the git common dir, which skill doc owns it) is left to the spec; it must be readable by `delta:cluster` and settable without the extension running.
 - Dismissing the stale-base prompt suppresses it for that branch/base pair until the base changes.
 - Docs (README, DEVELOPMENT.md, cluster SKILL.md) are updated to the per-branch model; `deltaReview.baseBranch` stays as the fallback.
@@ -69,3 +70,17 @@ we should also add in this branch the ability to add review notes directly in th
 Als, currently... updates like marking a file reviewed often takes a few seconds and sometimes even fails and I have to mark it reviewed a couple of times. Like some sort of race condition. Any way to make things more responsive?
 
 - Investigate: the mark-reviewed path end to end (command → review state write → refresh → tree update), where the seconds go, and what race can drop a mark; try to reproduce.
+
+### Investigation (added scope 2)
+
+- Not reproduced outside VS Code: on a 58-file diff `markReviewed` ~47 ms (9 git spawns), warm `computeReviewModel` ~44 ms. The seconds come from the refresh/event pipeline, not git.
+- Path: `deltaReview.markFileReviewed` (src/extension.ts:1554-1572) → `applyReviewStateChange` (:801-817): `withProgress` → `reviewStateQueue.run(mutate)` → full `refresh()`; tree updates only at `treeProvider.setModel` (:571), full re-render (src/treeProvider.ts:186-189).
+- Mutation src/reviewState.ts:121-170 (temp index, write-tree/commit-tree/update-ref :39-87), no compare-and-set (:83).
+- Likely cause: the ref write fires the repo watcher (extension.ts:846-856) and git `state.onDidChange` (:2258-2262) → `scheduleRefresh`, a 400 ms trailing debounce, no max wait, reset by each event (:828-834). That refresh bumps `refreshGeneration` (:406), so the command's own refresh bails at generation checks (:474, :539, :565) and publishes nothing → visible latency = git status + 400 ms + a second full refresh. Focus (:2160-2163) and saves (:2146) also reset the timer.
+- Each refresh then runs slice anchoring in the shared queue (:526-535; src/sliceAnchor.ts:51-111) — a click during it waits — and notes refresh does one `hash-object -w` per working-side note plus a `git diff` per moved note (src/notesStore.ts:765-794).
+- Apparent "failed" mark: the row keeps the needs-review `+` (package.json:313-317) until a refresh publishes, so the user clicks again (harmless extra write + cascade).
+- No in-window lost write (all writes via `createSerialQueue`, extension.ts:394; src/serialQueue.ts:9-24). Real loss possible across processes (another window/worktree on the same branch, external writer): `update-ref` lacks compare-and-set (reviewState.ts:83, sliceAnchor.ts:107).
+- Unverified: full-tree re-render on each `setModel` or the focus-triggered refresh may swap the row under the pointer and swallow an inline click (needs host run).
+- Silent no-op when `model === undefined` or element not a file (extension.ts:1556-1561).
+- refs/review/<branch> and refs/review-predeletion/<branch> are persistent shared state (reviewState.ts:13, :20); refresh-pipeline changes are in-memory only.
+- Tests: refresh coalescing/scheduling in a new vscode-free module with colocated test (beside serialQueue.test.ts); cross-process compare-and-set case in src/reviewState.test.ts; scripted host check for wiring/latency (DEVELOPMENT.md:238-251).
