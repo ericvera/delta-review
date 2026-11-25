@@ -1,0 +1,71 @@
+# 01_02 Resolve the per-branch base in refresh; base status-bar item
+
+## Goal
+
+Make every refresh compute the review set against the per-branch resolved base instead of the global setting. Show a new status-bar item `$(git-compare) ← <base>` whose tooltip names where the base came from. When an explicit base does not resolve, show an error state instead of the model.
+
+## Files to modify/create
+
+- src/extension.ts
+- src/model.ts
+- src/diffBaseUi.ts (new; test: src/diffBaseUi.test.ts)
+
+## Background
+
+- Task 01_01 produced `src/diffBase.ts`: `resolveDiffBase(git, branch, fallback, cache)` returns a `BaseResolution` `{ branch, base, source: "explicit" | "detected" | "fallback", detectedVia?: "forkPoint" | "upstream", fallback, missing, stale, fileError?, suggestions }`. `DetectionCache` is a mutable object the caller owns.
+- `refresh()` lives at `src/extension.ts:402`. Today it reads `baseBranch` from configuration at `:424`, resolves the branch at `:432`, and passes `baseBranch` to `computeReviewModel` at `:464` and `:502` (the auto-mark recompute). The counter tooltip at `:592` reads `Delta Review: ${model.branch} vs ${baseBranch}`. The fatal catch branch at about `:780-791` hides the counter and sets `treeView.message`.
+- Caches cleared on repo switch: `hashCache.clear(); sliceCache.clear();` in `setActiveRepo` (`src/extension.ts:898-905`). Add the detection cache there.
+- The counter status item is created at `src/extension.ts:308-312` (left, priority 50, command `deltaReview.focus`) and pushed to `context.subscriptions` right after.
+- `computeReviewModel` (`src/model.ts:578`) throws `Cannot compute merge-base with "<base>". Check the deltaReview.baseBranch setting.` at `:608`. The base no longer always comes from the setting, so drop the second sentence.
+- `ReviewModel.mergeBase` (`src/model.ts:110`) feeds the tooltip's `Merge-base <short sha>`.
+- Mock text (`.mise/mock/status-bar.html`, `base-error.html`), with each tooltip line on its own line:
+  - Explicit: `Delta Review base: <base>` / `Set for branch <branch> (all worktrees on this branch).` / `Merge-base <sha7>` / `Click to change the base.`
+  - Detected fork point: `Delta Review base: <base> (auto-detected)` / `Closest local branch this branch forked from.` / `Merge-base <sha7>` / `Click to pin a base for this branch.`
+  - Detected upstream: second line is `Upstream of this branch (<upstream>).`
+  - Fallback: `Delta Review base: <base> (default)` / `From setting deltaReview.baseBranch.` / `Merge-base <sha7>` / `Click to pin a base for this branch.`
+  - Missing: text `$(warning) ← <base>`, error tint, tooltip `Base <base> not found. Click to choose a base.`
+  - When `fileError` is set, append `Base file ignored: <error>`.
+  - Tooltips name the source, never whether a user or an agent set the base.
+
+## Guides
+
+- DEVELOPMENT.md (doc): build/run/packaging, how review state works internally, manual test script
+
+## Implementation details
+
+- `src/diffBaseUi.ts` (pure, no vscode): `baseStatusPresentation(resolution, mergeBase: string | undefined): { text: string; tooltip: string; tint: "none" | "warning" | "error" }`. `warning` is not produced yet (01_04 adds stale), so return `none` / `error` only. Export it and unit-test every source variant.
+- `extension.ts`:
+  - Create `baseStatusItem` (left, priority 49) and push it to subscriptions. Leave its `command` unset until 01_03.
+  - Hold `let baseResolution: BaseResolution | undefined` and `const baseDetectionCache: DetectionCache = {}`.
+  - In `refresh()`, after `resolveBranch`, call `resolveDiffBase(git, branch, configuration.get("baseBranch") ?? "main", baseDetectionCache)`. Generation-check after the await, as the other awaits do.
+  - When `resolution.missing`:
+    - set `model`/`clusterModel` undefined
+    - `treeProvider.setModel(undefined)`
+    - `treeView.badge = undefined`
+    - `treeView.message = \`⚠ Base ${base} for branch ${branch} does not resolve.\``
+    - hide the counter
+    - render the base item with error tint
+    - clear note threads exactly like the fatal path does
+    - return
+  - Otherwise pass `resolution.base` to both `computeReviewModel` calls. Set the counter tooltip to `Delta Review: ${model.branch} vs ${resolution.base}`. Render and show the base item with `model.mergeBase`.
+  - Map the tint to `new vscode.ThemeColor("statusBarItem.errorBackground")` / `warningBackground` / undefined.
+  - In the fatal catch and the `git === undefined` branch, hide the base item too, except for the missing-base path above.
+- Add the detection cache clear to `setActiveRepo`.
+- Extend `deltaReview.__inspect` (test hook, `src/extension.ts:~2200`) with `base: baseResolution` and `baseStatus: { text, tooltip, visible }`, so a host check can read them.
+
+## Gotchas
+
+- Keep `resolveDiffBase` inside the existing `try`, so a torn-down repo still reaches the fatal banner.
+- The contract-dir watcher (`watchContractDir`, glob `{*.json,...}`) already refreshes on `base-*.json` changes. Don't add a watcher.
+- `StatusBarItem.tooltip` accepts a string with `\n`. Plain text is fine.
+- Don't touch the stale logic or the picker. Those are 01_03 and 01_04.
+
+## Verification
+
+- `src/diffBaseUi.test.ts` covers the explicit, detected fork-point, detected upstream, fallback, missing and fileError tooltips and texts.
+- Add or adjust the `src/model.test.ts` assertion on the merge-base error message (search for `Check the deltaReview.baseBranch setting`) to the new text.
+- Run `yarn test`, `yarn lint`, `yarn build`.
+- Scripted extension-host check (DEVELOPMENT.md "Scripted extension-host checks"; launch with `env -u ELECTRON_RUN_AS_NODE` and a short `--user-data-dir`; batch with other checks where possible). Use a temp repo with `main` → `feat/a` → `feat/b` checked out.
+  - `__inspect().base.source === "detected"`, `base === "feat/a"`, and the status text is `$(git-compare) ← feat/a`.
+  - Write `.git/delta-review/base-feat-b.json` = `{"version":1,"base":"main"}`. After the refresh, the source is explicit and the files are the diff vs main.
+  - Set the base to `nope`. The tree has no rows, `baseStatus.text` contains `$(warning)`.
