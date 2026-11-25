@@ -15,7 +15,7 @@ description: >-
 
 # Review Notes
 
-Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. A third file, the **archive**, is history the extension writes when the reviewer clears resolved notes and nobody in this loop reads. Loop: the reviewer notes diff lines → you handle one note and append its response → the extension shows your reply, flips the note to **Addressed** (or **Pending** when the reply is marked pending), and relocates it via your anchor.
+Two JSON files per branch form the contract: a **notes file** the extension writes and you read, and a **responses file** you write and the extension reads — one writer per file. A third file, the **archive**, is history the extension writes when the reviewer clears resolved notes and nobody in this loop reads. Loop: the reviewer notes diff lines, whole files, or the branch as a whole → you handle one note and append its response → the extension shows your reply, flips the note to **Addressed** (or **Pending** when the reply is marked pending), and relocates it via your anchor.
 
 ## Contract
 
@@ -68,13 +68,55 @@ Never write, reformat, or repair the notes file. If it exists but is not valid J
 ```
 
 - `turns` — reviewer messages, oldest first. The newest reviewer turn is the instruction; earlier turns and your prior responses are context.
+- `status`, `contentBlob`, `appliedAnchorAt` — extension bookkeeping; `status` matters only in the work-set rule below.
+- `version` is `1`, `2` or `3`. Version 2 adds `document`, present (right after `file`) only on a note anchored to a review document; its value is `"clusterNotes"` (a cluster notes document) or `"branch"` (the branch overview). Version 3 adds `scope` (see Scoped notes).
+
+Line notes (no `scope`; the example above):
+
 - `snapshot` — exact text of the noted lines at note time, one entry per line; the authoritative locator — search the file for it. `currentStartLine`/`currentEndLine` are hints refreshed only while the extension runs; never trust them over content.
 - `side: "working"` — the note is on current code in `file`. `side: "base"` — it is on old/removed code from the diff's left side; that text may no longer exist anywhere, so address the intent of what replaced it (or its deletion).
 - `outdated: true` — the noted lines changed after the note was written; `snapshot` is what they were.
-- `status`, `contentBlob`, `appliedAnchorAt` — extension bookkeeping; `status` matters only in the work-set rule below.
-- `version` is `1` or `2`. Version 2 adds `document`, present (right after `file`) only on a note anchored to a review document; its value is `"clusterNotes"` (a cluster notes document) or `"branch"` (the branch overview).
 - Document note: `file` is the document's file name, at `<COMMON_DIR>/delta-review/cluster-notes-<sanitized-branch>/<file>` for `"clusterNotes"` and `<COMMON_DIR>/delta-review/<file>` (the branch overview, `branch-<sanitized-branch>.md`) for `"branch"`; `side` is always `"working"`; fixing it means editing that markdown file. A response `anchor` on a document note is ignored — omit it.
 - A document note whose file no longer exists is answered by reply only; never recreate the old file to re-home it. Renames and deletions of notes documents follow the cluster skill's **Documents** section.
+
+Scoped notes (version 3; `scope` is `"file"` or `"general"`):
+
+```json
+{
+  "version": 3,
+  "notes": [
+    {
+      "scope": "file",
+      "id": "d4e5f6",
+      "file": "src/api.ts",
+      "contentBlob": "<sha>",
+      "turns": [
+        { "text": "Split this module by concern", "at": "2026-07-18T20:00:00Z" }
+      ],
+      "status": "open",
+      "outdated": false,
+      "createdAt": "2026-07-18T20:00:00Z"
+    },
+    {
+      "scope": "general",
+      "id": "g7h8i9",
+      "turns": [
+        {
+          "text": "Add a changelog entry for this change",
+          "at": "2026-07-18T20:01:00Z"
+        }
+      ],
+      "status": "open",
+      "outdated": false,
+      "createdAt": "2026-07-18T20:01:00Z"
+    }
+  ]
+}
+```
+
+- File note (`"scope": "file"`) — concerns `file` as a whole; no `side`, lines, `snapshot`, `document` or `appliedAnchorAt`, so there is no locator. `outdated: true` means `file` left the review diff. Address it by editing `file` or by reply.
+- General note (`"scope": "general"`) — concerns the branch or change as a whole, not a file; no `file` or `contentBlob`; `outdated` is always `false`. Address it by code changes wherever needed, or by reply.
+- A response `anchor` on a scoped note is ignored — omit it.
 
 ### Responses file (write)
 
@@ -116,9 +158,9 @@ Entry conventions: `response` is concise — what you changed and where, written
 
 ### Archive file (read-only history)
 
-- Written by the extension when the reviewer runs Clear Resolved: every note it removes, appended as the note object exactly as it stood in the notes file plus `deletedAt`, the removal time (ISO-8601 UTC); shape `{ "version": 1, "notes": [ … ] }`; append-only. Explicit deletes (thread trash icon, row Delete, deleting a note's only turn) are not archived.
+- Written by the extension when the reviewer runs Clear Resolved: every note it removes (line, document, file or general), appended as the note object exactly as it stood in the notes file plus `deletedAt`, the removal time (ISO-8601 UTC); shape `{ "version": 1, "notes": [ … ] }`; append-only. Explicit deletes (thread trash icon, row Delete, deleting a note's only turn) are not archived.
 - Never write, repair, or reorder it; never count it toward the work set — archived notes are closed. Missing means nothing has been cleared yet; unparsable → ignore it (the extension moves it aside on its next append).
-- Agent replies for an archived note stay in the responses file keyed by `noteId` — join by id. An archived note's `contentBlob` may no longer resolve; its `snapshot` is the text record.
+- Agent replies for an archived note stay in the responses file keyed by `noteId` — join by id. An archived note's `contentBlob` may no longer resolve. A note without `scope` keeps `snapshot` as its text record; a scoped note has no `snapshot`, so its record is `turns` (plus `file` for a file note).
 
 ### Work set
 
@@ -144,14 +186,14 @@ Binds any driver that responds to notes. Read-only drivers (summarize, triage, d
 
 ### Schema changes
 
-The extension accepts notes `version` 1 and 2, responses and archive `version` 1 only. An additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file, like `pending`) needs no `version` bump. Every other change, including any notes-file change (additive or not), requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version it does not list, and it rebuilds notes from known keys and re-saves them on each refresh, so an older extension would strip a newer notes key. `src/notes.ts` also owns the archive's parser, which validates only `version` and `notes`.
+The extension accepts notes `version` 1, 2 and 3, responses and archive `version` 1 only. An additive optional key in the responses file that an older extension can safely ignore (it drops unknown keys and never rewrites that file, like `pending`) needs no `version` bump. Every other change, including any notes-file change (additive or not), requires bumping `version` and updating the extension's parser (`src/notes.ts` in the delta-review repo) in the same commit — the extension rejects any version it does not list, and it rebuilds notes from known keys and re-saves them on each refresh, so an older extension would strip a newer notes key. `src/notes.ts` also owns the archive's parser, which validates only `version` and `notes`. Archive entries follow the notes-file schema, so a notes-file version bump needs no archive bump; only a change to the archive shell does.
 
 ## Default workflow: addressing the notes
 
 The default when the user asks to address their review notes; other skills or instructions may drive different behavior on the same contract (summarize, triage, custom fix policies) — the Contract still governs all file access. One note per iteration: address, respond, re-read, repeat.
 
 1. **Locate and read the notes** per the Contract. Missing file or empty `notes` array → report "no review notes on this branch" and stop. Corrupt JSON → stop per the Contract.
-2. **Compute and order the work set** from both files per the Contract, excluding notes skipped per Channel discipline. Order: notes whose thread already holds your prior responses (reviewer follow-ups) first, then brand-new notes; within each class, existing file/line order. Empty → step 6.
+2. **Compute and order the work set** from both files per the Contract, excluding notes skipped per Channel discipline. Order: notes whose thread already holds your prior responses (reviewer follow-ups) first, then brand-new notes; within each class, general notes first, then by file, with file notes before that file's line notes, then by line. Empty → step 6.
 3. **Take the first note**: read its whole thread (`turns` plus your prior responses, interleaved oldest → newest by `at`), locate the target per the Contract's reading semantics, and make the change the newest reviewer turn asks for, following project conventions — or compose the reply or question that turn calls for, per Channel discipline.
 4. **Respond immediately**: append that one note's entry per the Contract's entry conventions and write rules, before moving on. Never batch responses.
 5. **Re-read the notes file** — the reviewer may have added notes or replied while you worked — and repeat from step 2.
