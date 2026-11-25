@@ -1,5 +1,5 @@
 import { sanitizeBranchForFilename } from "./clusters";
-import { CLUSTER_NOTES_FILE_PATTERN } from "./documents";
+import { isDocumentNoteFileName } from "./documents";
 
 // The notes contract: three versioned JSON files per branch under
 // <git common dir>/delta-review/. The notes file is extension-owned (review
@@ -14,7 +14,7 @@ export type NoteSide = "base" | "working";
 
 export type NoteStatus = "open" | "addressed" | "resolved";
 
-export type NoteDocument = "clusterNotes";
+export type NoteDocument = "clusterNotes" | "branch";
 
 export interface ReviewerTurn {
   text: string;
@@ -25,9 +25,11 @@ export interface ReviewerTurn {
 export interface Note {
   id: string;
   // Repo-relative path the note anchors to; for a document note, the
-  // document's file name inside the cluster notes dir
+  // document's file name: inside the cluster notes dir for "clusterNotes",
+  // inside the delta-review dir for "branch"
   file: string;
-  // Set on notes anchored to a cluster notes document (version 2 only)
+  // Set on notes anchored to a cluster notes document or the Branch overview
+  // document (version 2 only)
   document?: NoteDocument;
   side: NoteSide;
   // 1-based, inclusive range at creation time
@@ -154,12 +156,17 @@ const parseNote = (
   }
   const document = version === 2 ? value.document : undefined;
   if (document !== undefined) {
-    if (document !== "clusterNotes") {
-      return { error: `${where2}: "document" must be "clusterNotes"` };
-    }
-    if (!CLUSTER_NOTES_FILE_PATTERN.test(value.file)) {
+    if (document !== "clusterNotes" && document !== "branch") {
       return {
-        error: `${where2}: a document note's "file" must be a cluster notes file name`,
+        error: `${where2}: "document" must be "clusterNotes" or "branch"`,
+      };
+    }
+    if (!isDocumentNoteFileName(document, value.file)) {
+      return {
+        error:
+          document === "clusterNotes"
+            ? `${where2}: a document note's "file" must be a cluster notes file name`
+            : `${where2}: a branch document note's "file" must be a branch document file name`,
       };
     }
     if (value.side !== "working") {
