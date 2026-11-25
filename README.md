@@ -66,7 +66,7 @@ The plugin ships two skills: `/delta:cluster` (this section) and `/delta:review-
 - Provenance is declared, never inferred: Claude records only the moves and extractions it made or that you described — it never guesses one from the diff. (The panel still recognizes ordinary git renames on its own, contract or not.)
 - Claude can also leave a one-line remark on any file. That remark and the file's origin ride together in a pinned, read-only comment at the top of its diff — context before the code, with nothing to reply to or resolve. A remark can also sit on a line range, as a read-only thread on those lines.
 - Files Claude marks for skimming show `· skim` after their name — a glance is enough, no line-by-line read expected.
-- Claude can write markdown documents for the review: a **Branch overview** row first in the tree opens the branch-wide one, and a **Cluster notes** row first in a cluster opens that cluster's reading guide. You can leave review notes on a cluster notes document like on any diff.
+- Claude can write markdown documents for the review: a **Branch overview** row first in the tree opens the branch-wide one, and a **Cluster notes** row first in a cluster opens that cluster's reading guide. You can leave review notes on the Branch overview and on cluster notes documents: use the row's Open Source, then select lines.
 - A group-by-cluster button appears in the panel: review cluster by cluster, with `reviewed/total` counts per cluster, files no cluster claims called out under **Unclustered**, and Auto files last. Clusters with nothing left to review (done, waiting on the agent, or empty) render dimmed, and an `agent` icon marks a cluster still waiting on the agent.
 - In list mode a cluster's files appear in Claude's reading order; tree mode stays alphabetical.
 - A cluster row's `$(diff-multiple)` action opens all its needs-review files in one combined diff, each against its own base.
@@ -95,8 +95,8 @@ Agent loop:
 
 REVIEW NOTES view:
 
-- A sibling section in the Source Control sidebar lists every note, grouped by file with status icons. Notes on a cluster notes document come first, under `<cluster label> — notes`.
-- Click a note to open its diff with the cursor on the noted line and the thread expanded. A cluster notes document note opens that document (or its snapshot, if the document is gone) at the note instead.
+- A sibling section in the Source Control sidebar lists every note, grouped by file with status icons. Branch overview notes come first, under `Branch overview`, then cluster notes document notes, under `<cluster label> — notes`.
+- Click a note to open its diff with the cursor on the noted line and the thread expanded. A review-document note (Branch overview or cluster notes) opens that document (or its snapshot, if the document is gone) at the note instead.
 - The **Clear Resolved** title button clears resolved notes (they are archived to `.git/delta-review/archive-<branch>.json` for tooling); the badge counts every note not yet resolved, pending ones included.
 - Notes are per-branch, live inside `.git`, and are never pushed — like all Delta Review state.
 

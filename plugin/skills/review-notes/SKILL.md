@@ -72,8 +72,8 @@ Never write, reformat, or repair the notes file. If it exists but is not valid J
 - `side: "working"` — the note is on current code in `file`. `side: "base"` — it is on old/removed code from the diff's left side; that text may no longer exist anywhere, so address the intent of what replaced it (or its deletion).
 - `outdated: true` — the noted lines changed after the note was written; `snapshot` is what they were.
 - `status`, `contentBlob`, `appliedAnchorAt` — extension bookkeeping; `status` matters only in the work-set rule below.
-- `version` is `1` or `2`. Version 2 adds `document`, present (right after `file`) only on a note anchored to a cluster notes document; its value is always `"clusterNotes"`.
-- Document note: `file` is the document's file name, at `<COMMON_DIR>/delta-review/cluster-notes-<sanitized-branch>/<file>`; `side` is always `"working"`; fixing it means editing that markdown file. A response `anchor` on a document note is ignored — omit it.
+- `version` is `1` or `2`. Version 2 adds `document`, present (right after `file`) only on a note anchored to a review document; its value is `"clusterNotes"` (a cluster notes document) or `"branch"` (the branch overview).
+- Document note: `file` is the document's file name, at `<COMMON_DIR>/delta-review/cluster-notes-<sanitized-branch>/<file>` for `"clusterNotes"` and `<COMMON_DIR>/delta-review/<file>` (the branch overview, `branch-<sanitized-branch>.md`) for `"branch"`; `side` is always `"working"`; fixing it means editing that markdown file. A response `anchor` on a document note is ignored — omit it.
 - A document note whose file no longer exists is answered by reply only; never recreate the old file to re-home it. Renames and deletions of notes documents follow the cluster skill's **Documents** section.
 
 ### Responses file (write)
