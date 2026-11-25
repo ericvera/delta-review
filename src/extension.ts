@@ -18,6 +18,7 @@ import {
 } from "./clusterChanges";
 import {
   ClusterModel,
+  ClustersContract,
   clusterFilesForKey,
   LineNote,
   loadClustersContract,
@@ -106,12 +107,25 @@ import {
   refreshDerived,
   setResolved,
 } from "./notesStore";
+import {
+  applyPendingMarks,
+  describeReviewChange,
+  gitErrorReason,
+  noModelMessage,
+  ReviewChange,
+  reviewChangeFailedMessage,
+  ReviewStatusFields,
+  ReviewUnavailable,
+  revertReviewStatus,
+  withReviewStatus,
+} from "./optimisticModel";
 import { agentLineNoteEntriesFor, provenanceEntriesFor } from "./provenance";
 import {
   clearAllReviewSnapshots,
   deletePreDeletionRef,
   markReviewed,
   reviewRefForBranch,
+  ReviewStateConflictError,
   unmarkReviewed,
 } from "./reviewState";
 import { createSerialQueue } from "./serialQueue";
@@ -138,6 +152,9 @@ let lastNotesWarning: string | undefined;
 let lastNotesFileWarning: string | undefined;
 let lastResponsesFileWarning: string | undefined;
 
+const SELECT_FILE_ROW_MESSAGE =
+  "Delta Review: select a file row to mark it reviewed.";
+
 const warnOnce = (lastWarned: string | undefined, warning: string): string => {
   if (warning !== lastWarned) {
     void vscode.window.showWarningMessage(warning);
@@ -151,6 +168,10 @@ export const activate = async (
   let git: Git | undefined;
   let model: ReviewModel | undefined;
   let clusterModel: ClusterModel | undefined;
+  let clusterContract: ClustersContract | undefined;
+  // Why `model` is undefined when no review can exist, so a mark command can
+  // say so instead of claiming the review is still loading
+  let reviewUnavailable: ReviewUnavailable;
   let reviewDocuments: ReviewDocuments | undefined;
 
   // Group/folder collapse state, kept across refreshes and window reloads
@@ -349,6 +370,7 @@ export const activate = async (
     50,
   );
   statusBarItem.command = "deltaReview.focus";
+  const log = vscode.window.createOutputChannel("Delta Review");
   const baseStatusItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Left,
     49,
@@ -392,6 +414,7 @@ export const activate = async (
     notesTreeView,
     statusBarItem,
     baseStatusItem,
+    log,
     vscode.workspace.registerTextDocumentContentProvider(
       REVIEW_BASE_SCHEME,
       createReviewBaseContentProvider(() => git),
@@ -480,11 +503,42 @@ export const activate = async (
   // blob and declared lines, so it too is invalidated by content rather than by
   // branch — and cleared alongside the hash cache on a repo switch.
   const sliceCache = new Map<string, string>();
+
+  // Review-state changes whose write has not settled, re-applied by every
+  // refresh that publishes meanwhile
+  const pendingMarks: { token: number; paths: string[]; reviewed: boolean }[] =
+    [];
+  let nextPendingToken = 0;
+
+  const publishModel = (next: ReviewModel): void => {
+    model = next;
+    clusterModel =
+      clusterContract === undefined
+        ? undefined
+        : resolveClusterModel(clusterContract, next.files);
+    treeProvider.setModel(next);
+    const reviewedCount = next.files.filter(
+      (file) => file.status === FileReviewStatus.Reviewed,
+    ).length;
+    const needsReviewCount = next.files.length - reviewedCount;
+    treeView.badge =
+      needsReviewCount > 0
+        ? {
+            value: needsReviewCount,
+            tooltip: `${needsReviewCount} file${needsReviewCount === 1 ? "" : "s"} to review`,
+          }
+        : undefined;
+    statusBarItem.text = `$(checklist) Review ${reviewedCount}/${next.files.length}`;
+    statusBarItem.show();
+  };
+
   const refresh = async (): Promise<void> => {
     const generation = ++refreshGeneration;
     if (git === undefined) {
       model = undefined;
       clusterModel = undefined;
+      clusterContract = undefined;
+      reviewUnavailable = undefined;
       reviewDocuments = undefined;
       setClustersAvailable(false);
       treeProvider.setModel(undefined);
@@ -533,6 +587,12 @@ export const activate = async (
       if (resolution.missing) {
         model = undefined;
         clusterModel = undefined;
+        clusterContract = undefined;
+        reviewUnavailable = {
+          kind: "baseMissing",
+          base: resolution.base,
+          branch: resolution.branch,
+        };
         setClustersAvailable(false);
         treeProvider.setModel(undefined);
         treeView.badge = undefined;
@@ -655,17 +715,14 @@ export const activate = async (
 
       let contractWarning: string | undefined;
       if (contractResult.state === "ok") {
-        clusterModel = resolveClusterModel(
-          contractResult.contract,
-          computed.files,
-        );
+        clusterContract = contractResult.contract;
       } else {
-        clusterModel = undefined;
+        clusterContract = undefined;
         if (contractResult.state === "invalid") {
           contractWarning = `⚠ Clusters contract: ${contractResult.error}`;
         }
       }
-      setClustersAvailable(clusterModel !== undefined);
+      setClustersAvailable(clusterContract !== undefined);
 
       // Labels only from a valid contract; the branch document needs none
       const documents = await loadReviewDocuments(
@@ -680,31 +737,25 @@ export const activate = async (
       }
       reviewDocuments = documents;
 
-      model = computed;
-      treeProvider.setModel(model);
+      // Marks whose write has not settled stay applied: this refresh may have
+      // read the ref before they landed
+      const published = applyPendingMarks(computed, pendingMarks);
+      publishModel(published);
       publishCount += 1;
+      reviewUnavailable = undefined;
       // Rebuilt from the model beside the tree, not inside renderNoteThreads:
       // provenance comes from the clusters contract, so it must survive a
       // notes file that fails to load below.
-      commentController.renderProvenanceThreads(provenanceEntriesFor(model));
-      commentController.renderAgentLineThreads(agentLineNoteEntriesFor(model));
+      commentController.renderProvenanceThreads(
+        provenanceEntriesFor(published),
+      );
+      commentController.renderAgentLineThreads(
+        agentLineNoteEntriesFor(published),
+      );
       treeView.message = contractWarning;
       void syncActiveClusterChanges();
 
-      const reviewedCount = model.files.filter(
-        (file) => file.status === FileReviewStatus.Reviewed,
-      ).length;
-      const needsReviewCount = model.files.length - reviewedCount;
-      treeView.badge =
-        needsReviewCount > 0
-          ? {
-              value: needsReviewCount,
-              tooltip: `${needsReviewCount} file${needsReviewCount === 1 ? "" : "s"} to review`,
-            }
-          : undefined;
-      statusBarItem.text = `$(checklist) Review ${reviewedCount}/${model.files.length}`;
-      statusBarItem.tooltip = `Delta Review: ${model.branch} vs ${baseBranch}`;
-      statusBarItem.show();
+      statusBarItem.tooltip = `Delta Review: ${published.branch} vs ${baseBranch}`;
       setBaseProblem(undefined);
       const promptStale =
         resolutionStaleKey !== undefined &&
@@ -718,7 +769,7 @@ export const activate = async (
         stalePrompting.add(resolutionStaleKey);
       }
       renderBaseStatus(
-        baseStatusPresentation(resolution, model.mergeBase, {
+        baseStatusPresentation(resolution, published.mergeBase, {
           promptOpen:
             resolutionStaleKey !== undefined &&
             stalePrompting.has(resolutionStaleKey),
@@ -914,6 +965,8 @@ export const activate = async (
       }
       model = undefined;
       clusterModel = undefined;
+      clusterContract = undefined;
+      reviewUnavailable = undefined;
       setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
@@ -922,6 +975,7 @@ export const activate = async (
       // keeps the base item up: it is the way to a base that works.
       if (error instanceof MergeBaseError && resolution !== undefined) {
         treeView.message = mergeBaseErrorMessage(resolution);
+        reviewUnavailable = { kind: "mergeBaseFailed", base: resolution.base };
         setBaseProblem("mergeBaseFailed");
         renderBaseStatus(
           baseStatusPresentation(resolution, undefined, {
@@ -940,39 +994,110 @@ export const activate = async (
     }
   };
 
-  // Command-side wrapper for a review-state mutation: serialize the write,
-  // then refresh outside the queue. A failure anywhere (the git write or the
-  // refresh that follows) is the user's click going nowhere, so it always
-  // becomes a visible error rather than a rejected command promise. The view's
-  // built-in progress bar covers the whole thing — queue wait included — so a
-  // click issued while another mark is still running reads as busy rather than
-  // as dead.
+  const reviewChangeReason = (error: unknown): string => {
+    if (error instanceof ReviewStateConflictError) {
+      return error.kind === "moved"
+        ? "the review state changed in another window and the retry also failed"
+        : `${error.ref} stayed locked by another git process (${error.lockPath}); if no git command is running, delete that file`;
+    }
+    return gitErrorReason(error);
+  };
+
+  interface ReviewStateChangeRequest {
+    description: string;
+    mutate: () => Promise<void>;
+    optimistic?: { paths: string[]; reviewed: boolean };
+  }
+
+  // Command-side wrapper for a review-state mutation: publish the change
+  // optimistically, serialize the write, then refresh outside the queue. A
+  // failed write rolls the rows back and becomes a visible error rather than a
+  // rejected command promise.
   const applyReviewStateChange = async (
-    action: string,
-    mutate: () => Promise<void>,
-  ): Promise<void> =>
-    vscode.window.withProgress(
-      { location: { viewId: "deltaReview" } },
-      async () => {
-        try {
-          await reviewStateQueue.run(mutate);
-          await refresh();
-        } catch (error) {
-          void vscode.window.showErrorMessage(
-            `Delta Review: failed to ${action} (${error instanceof Error ? error.message : String(error)})`,
-          );
-        }
-      },
-    );
+    request: ReviewStateChangeRequest,
+  ): Promise<void> => {
+    const { description, mutate, optimistic } = request;
+    const token = nextPendingToken++;
+    let prior: Map<string, ReviewStatusFields> | undefined;
+    if (optimistic !== undefined) {
+      pendingMarks.push({ token, ...optimistic });
+      if (model !== undefined) {
+        const result = withReviewStatus(
+          model,
+          optimistic.paths,
+          optimistic.reviewed,
+        );
+        prior = result.prior;
+        publishModel(result.model);
+      }
+    }
+    const settle = (): void => {
+      const index = pendingMarks.findIndex((entry) => entry.token === token);
+      if (index !== -1) {
+        pendingMarks.splice(index, 1);
+      }
+    };
+    try {
+      await reviewStateQueue.run(mutate);
+    } catch (error) {
+      log.appendLine(
+        `Could not ${description}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+      );
+      settle();
+      if (model !== undefined && prior !== undefined) {
+        publishModel(
+          applyPendingMarks(revertReviewStatus(model, prior), pendingMarks),
+        );
+      }
+      void refresh();
+      void vscode.window
+        .showErrorMessage(
+          reviewChangeFailedMessage(description, reviewChangeReason(error)),
+          "Retry",
+          "Show Log",
+        )
+        .then((choice) => {
+          if (choice === "Retry") {
+            void applyReviewStateChange(request);
+          } else if (choice === "Show Log") {
+            log.show();
+          }
+        });
+      return;
+    }
+    // Settling and starting the refresh in one synchronous step: the refresh
+    // bumps the generation before any older, un-overlaid one can publish
+    settle();
+    const done = refresh();
+    try {
+      await done;
+    } catch (error) {
+      log.appendLine(
+        `Refresh after "${description}" failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+      );
+      void vscode.window.showErrorMessage(
+        `Delta Review: refresh failed (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  };
+
+  const describeChange = (
+    reviewed: boolean,
+    scope: ReviewChange["scope"],
+    subject: string,
+  ): string => describeReviewChange({ reviewed, scope, subject });
 
   const markClusterPaths = async (
     activeGit: Git,
     branch: string,
+    label: string,
     paths: string[],
   ): Promise<void> =>
-    applyReviewStateChange("mark cluster reviewed", () =>
-      markReviewed(activeGit, branch, paths),
-    );
+    applyReviewStateChange({
+      description: describeChange(true, "cluster", label),
+      mutate: () => markReviewed(activeGit, branch, paths),
+      optimistic: { paths, reviewed: true },
+    });
 
   const refreshScheduler = createRefreshScheduler({
     delayMs: 400,
@@ -1060,6 +1185,7 @@ export const activate = async (
     hashCache.clear();
     sliceCache.clear();
     resetDetectionCache(baseDetectionCache);
+    reviewUnavailable = undefined;
     if (repoRoot === undefined) {
       git = undefined;
       disposeRepoWatcher();
@@ -1827,11 +1953,14 @@ export const activate = async (
     vscode.commands.registerCommand(
       "deltaReview.markFileReviewed",
       async (element?: ReviewTreeElement) => {
-        if (
-          git === undefined ||
-          model === undefined ||
-          element?.kind !== "file"
-        ) {
+        if (git === undefined || model === undefined) {
+          void vscode.window.showInformationMessage(
+            noModelMessage(reviewUnavailable),
+          );
+          return;
+        }
+        if (element?.kind !== "file") {
+          void vscode.window.showInformationMessage(SELECT_FILE_ROW_MESSAGE);
           return;
         }
         // Read out of `git`/`model`/`element` before enqueueing: a refresh or
@@ -1839,31 +1968,43 @@ export const activate = async (
         const activeGit = git;
         const branch = model.branch;
         const paths = [element.file.path];
-        await applyReviewStateChange("mark reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(true, "file", element.file.path),
+          mutate: () => markReviewed(activeGit, branch, paths),
+          optimistic: { paths, reviewed: true },
+        });
       },
     ),
 
     vscode.commands.registerCommand(
       "deltaReview.unmarkFileReviewed",
       async (element?: ReviewTreeElement) => {
-        if (
-          git === undefined ||
-          model === undefined ||
-          element?.kind !== "file" ||
-          // Without a snapshot there is nothing to drop, and the write would
-          // be a no-op state commit
-          !element.file.hasReviewSnapshot
-        ) {
+        if (git === undefined || model === undefined) {
+          void vscode.window.showInformationMessage(
+            noModelMessage(reviewUnavailable),
+          );
+          return;
+        }
+        if (element?.kind !== "file") {
+          void vscode.window.showInformationMessage(SELECT_FILE_ROW_MESSAGE);
+          return;
+        }
+        // Without a snapshot there is nothing to drop, and the write would be
+        // a no-op state commit
+        if (!element.file.hasReviewSnapshot) {
+          void vscode.window.showInformationMessage(
+            `Delta Review: ${element.file.path} has no reviewed snapshot to drop.`,
+          );
           return;
         }
         const activeGit = git;
         const branch = model.branch;
         const paths = reviewSnapshotPaths(element.file);
-        await applyReviewStateChange("unmark reviewed", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "file", element.file.path),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: { paths: [element.file.path], reviewed: false },
+        });
       },
     ),
 
@@ -1871,16 +2012,24 @@ export const activate = async (
       "deltaReview.unmarkAllReviewed",
       async () => {
         if (git === undefined || model === undefined) {
+          void vscode.window.showInformationMessage(
+            noModelMessage(reviewUnavailable),
+          );
           return;
         }
         const activeGit = git;
         const branch = model.branch;
+        const rowPaths = model.files
+          .filter((file) => file.hasReviewSnapshot)
+          .map((file) => file.path);
         // Scoped to the branch, not to the review set: a snapshot for a path
         // that no longer shows up would survive a path list and keep acting
         // as that path's diff base if it came back
-        await applyReviewStateChange("unmark all files", () =>
-          clearAllReviewSnapshots(activeGit, branch),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "all", String(rowPaths.length)),
+          mutate: () => clearAllReviewSnapshots(activeGit, branch),
+          optimistic: { paths: rowPaths, reviewed: false },
+        });
       },
     ),
     vscode.commands.registerCommand("deltaReview.openDiff", openDiff),
@@ -2106,9 +2255,11 @@ export const activate = async (
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("mark folder reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(true, "folder", element.path),
+          mutate: () => markReviewed(activeGit, branch, paths),
+          optimistic: { paths, reviewed: true },
+        });
       },
     ),
 
@@ -2132,9 +2283,20 @@ export const activate = async (
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("unmark folder", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "folder", element.path),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: {
+            paths: renderedFolderFiles(element)
+              .filter(
+                (file) =>
+                  file.hasReviewSnapshot &&
+                  file.path.startsWith(`${element.path}/`),
+              )
+              .map((file) => file.path),
+            reviewed: false,
+          },
+        });
       },
     ),
 
@@ -2252,7 +2414,7 @@ export const activate = async (
           void vscode.window.showInformationMessage(result.message);
           return;
         }
-        await markClusterPaths(activeGit, branch, result.paths);
+        await markClusterPaths(activeGit, branch, entry.label, result.paths);
       },
     ),
 
@@ -2273,7 +2435,12 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await markClusterPaths(git, model.branch, paths);
+        await markClusterPaths(
+          git,
+          model.branch,
+          clusterLabelForKey(clusterModel, element.clusterKey),
+          paths,
+        );
       },
     ),
 
@@ -2289,17 +2456,27 @@ export const activate = async (
           return;
         }
         // Full membership, matching the counts the cluster header shows
-        const paths = pathsWithReviewSnapshot(
-          clusterFilesForKey(clusterModel, element.clusterKey),
-        );
+        const members = clusterFilesForKey(clusterModel, element.clusterKey);
+        const paths = pathsWithReviewSnapshot(members);
         if (paths.length === 0) {
           return;
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("unmark cluster", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(
+            false,
+            "cluster",
+            clusterLabelForKey(clusterModel, element.clusterKey),
+          ),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: {
+            paths: members
+              .filter((file) => file.hasReviewSnapshot)
+              .map((file) => file.path),
+            reviewed: false,
+          },
+        });
       },
     ),
 
@@ -2325,9 +2502,11 @@ export const activate = async (
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("mark auto files reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(true, "auto", String(paths.length)),
+          mutate: () => markReviewed(activeGit, branch, paths),
+          optimistic: { paths, reviewed: true },
+        });
       },
     ),
 
@@ -2343,24 +2522,31 @@ export const activate = async (
         }
         // One Auto subgroup exists per status group, so the press must stay
         // inside the pressed group's rows
-        const paths = pathsWithReviewSnapshot(
-          model.files.filter(
-            (file) => file.triage === "auto" && file.status === element.status,
-          ),
+        const autoFiles = model.files.filter(
+          (file) => file.triage === "auto" && file.status === element.status,
         );
+        const paths = pathsWithReviewSnapshot(autoFiles);
         if (paths.length === 0) {
           return;
         }
+        const rowPaths = autoFiles
+          .filter((file) => file.hasReviewSnapshot)
+          .map((file) => file.path);
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("unmark auto files", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "auto", String(rowPaths.length)),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: { paths: rowPaths, reviewed: false },
+        });
       },
     ),
 
     vscode.commands.registerCommand("deltaReview.markAllReviewed", async () => {
       if (git === undefined || model === undefined) {
+        void vscode.window.showInformationMessage(
+          noModelMessage(reviewUnavailable),
+        );
         return;
       }
       const paths = model.files
@@ -2371,9 +2557,11 @@ export const activate = async (
       }
       const activeGit = git;
       const branch = model.branch;
-      await applyReviewStateChange("mark all files reviewed", () =>
-        markReviewed(activeGit, branch, paths),
-      );
+      await applyReviewStateChange({
+        description: describeChange(true, "all", String(paths.length)),
+        mutate: () => markReviewed(activeGit, branch, paths),
+        optimistic: { paths, reviewed: true },
+      });
     }),
 
     vscode.commands.registerCommand(
