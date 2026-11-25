@@ -68,11 +68,10 @@ Make every refresh compute the review set against the per-branch resolved base i
 ## Verification
 
 - `src/diffBaseUi.test.ts` covers the explicit, detected fork-point, detected upstream, fallback, missing, `mergeBaseFailed` and fileError tooltips and texts, and `mergeBaseErrorMessage` for fallback (contains `deltaReview.baseBranch`) and explicit/detected (does not).
-- `src/model.test.ts`: a base with no common history rejects with a `MergeBaseError` whose `base` is that ref.
-- Add or adjust the `src/model.test.ts` assertion on the merge-base error message (search for `Check the deltaReview.baseBranch setting`) to the new text.
+- `src/model.test.ts`: `computeReviewModel` with a failing merge-base rejects with a `MergeBaseError` whose `base` is the ref passed and whose message is `Cannot compute merge-base with "<base>".` (no setting hint). The `computeReviewModel` suite's Git stub (`setUp`, `src/model.test.ts:~968-1000`) always answers `merge-base` with `MERGE_BASE` (`~:991`), so extend it: add an optional `mergeBaseFails?: boolean` to `FakeRepo` (`src/model.test.ts:877`) and make the `merge-base` branch reject (e.g. `throw new Error("fatal: no merge base")`) when it is set. No existing test asserts the old `Check the deltaReview.baseBranch setting` text, so there is nothing to adjust.
 - Run `yarn test`, `yarn lint`, `yarn build`.
 - Scripted extension-host check (DEVELOPMENT.md "Scripted extension-host checks"; launch with `env -u ELECTRON_RUN_AS_NODE` and a short `--user-data-dir`; batch with other checks where possible). Use a temp repo with `main` → `feat/a` → `feat/b` checked out.
   - `__inspect().base.source === "detected"`, `base === "feat/a"`, and the status text is `$(git-compare) ← feat/a`.
-  - Write `.git/delta-review/base-feat-b.json` = `{"version":1,"base":"main"}`. After the refresh, the source is explicit and the files are the diff vs main.
+  - Write `.git/delta-review/base-feat-b.json` = `{"version":1,"branch":"feat/b","base":"main"}`. After the refresh, the source is explicit and the files are the diff vs main.
   - Set the base to `nope`. The tree has no rows, `baseStatus.text` contains `$(warning)`.
   - Create an orphan branch `lonely` (`git checkout --orphan lonely && git commit --allow-empty -m x && git checkout feat/b`) and set the base to `lonely`. `baseStatus.visible` is true, its text contains `$(warning)`, and the tree message contains `Click the base in the status bar`.

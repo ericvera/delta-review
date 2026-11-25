@@ -21,7 +21,7 @@ Make writes to `refs/review/<branch>` and `refs/review-predeletion/<branch>` com
   - Both exit 128.
   - A concurrent writer holding `<ref>.lock` makes update-ref fail with `cannot lock ref '<ref>': Unable to create '<path>.lock': File exists.` (exit 128) while the ref may still equal `expectedOld`. That is contention, not a hard failure.
   - `git.run` rejections carry git's stderr in the error message (`src/git.ts:11-14`).
-- Existing tests in `src/reviewState.test.ts` use a recording Git stub (`setUp`, `:27+`) that asserts exact call sequences. Those expectations will need the extra `update-ref` argument. Temp-repo pattern for the cross-process test: `src/model.test.ts:959`.
+- Existing tests in `src/reviewState.test.ts` use a recording Git stub (`setUp`, `:27+`) that asserts exact call sequences. Those expectations will need the extra `update-ref` argument. Real temp-repo pattern for the cross-process test: `src/notesStore.test.ts:57-67` (`mkdtemp` under `tmpdir()`, `createGit(repoRoot)`, `init -b main`, user config, `commit.gpgsign false`, first commit) and `src/git.test.ts:115`. (`src/model.test.ts` around `:958-1000` stubs Git; it is not a real repo.)
 
 ## Guides
 

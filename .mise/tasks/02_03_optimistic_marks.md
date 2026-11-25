@@ -28,6 +28,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
   - The same applies to unmark, mark-all and unmark-all.
 - `git.run` (`src/git.ts:30-33`) rejects with Node's raw `execFile` error. Its `message` is `Command failed: git update-ref …` followed by git's stderr on the next lines, and its `stderr` property holds the stderr (a Buffer, since `runGit` uses `encoding: "buffer"`). For a lock failure git prints `fatal: cannot lock ref 'refs/review/<branch>': Unable to create '<path>.lock': File exists.` (or `… Permission denied`).
 - Goals assumption: the silent no-ops report why (`model === undefined`, or the element is not a file: `src/extension.ts:1556-1561`, `:1577-1584`).
+- `model` is also undefined when no review can exist, not only while loading: task 01_02 leaves it undefined when the explicit base is missing (`baseResolution.missing`, early return in `refresh()`) and in the fatal catch on a `MergeBaseError` (`src/model.ts`) with no merge-base; 01_03 sets context keys `deltaReview.baseMissing` / `deltaReview.mergeBaseFailed` at those same two sites. "Still loading" is wrong there.
 
 ## Guides
 
@@ -42,6 +43,10 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
     - Unknown paths are ignored.
   - `revertReviewStatus(model, prior)` restores those fields on the matching files of whatever model is current, again by copy.
   - `gitErrorReason(error: unknown): string`: take stderr from `error.stderr` (Buffer → UTF-8, or string) when present, else the message lines after a first line starting `Command failed:`, else the whole message. Return the first line starting `fatal:` or `error:` with that prefix and surrounding whitespace removed; else the first non-empty line; else the message's first line. Strip one trailing `.` so the toast's own `. Your mark was undone.` does not double it. A non-Error value gives `String(error)`.
+  - `noModelMessage(unavailable: { kind: "baseMissing"; base: string; branch: string } | { kind: "mergeBaseFailed"; base: string } | undefined): string`:
+    - undefined: `Delta Review: the review is still loading — try again in a moment.`
+    - `baseMissing`: `Delta Review: nothing to mark — base <base> for branch <branch> does not resolve. Click the base in the status bar to choose one.`
+    - `mergeBaseFailed`: `Delta Review: nothing to mark — no merge-base with "<base>". Click the base in the status bar to choose another.`
   - `applyPendingMarks(model, pending: readonly { paths: readonly string[]; reviewed: boolean }[]): ReviewModel` folds `withReviewStatus` over the entries in order (later entries win on a shared path) and returns the input unchanged when `pending` is empty.
 - `src/extension.ts`:
   - Create `const log = vscode.window.createOutputChannel("Delta Review")` (subscriptions).
@@ -59,7 +64,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
     - unmark: the paths whose rows it affects (for `unmarkFileReviewed` that is `element.file.path`; `reviewSnapshotPaths` still drives the mutation)
     - unmarkAll: all model file paths with `hasReviewSnapshot`
   - No-op reasons, as info messages:
-    - model undefined: `Delta Review: the review is still loading — try again in a moment.`
+    - model undefined: `noModelMessage(reviewUnavailable)`. Hold `let reviewUnavailable: Parameters<typeof noModelMessage>[0]` in `extension.ts`: set it to `{ kind: "baseMissing", base, branch }` in `refresh()`'s missing-base early return and to `{ kind: "mergeBaseFailed", base }` in the `MergeBaseError` fatal path (the same two sites that set the 01_03 context keys true); set it to `undefined` at every other outcome of `refresh()` (successful publish, other fatal errors, no git) and in `setActiveRepo`.
     - element not a file: `Delta Review: select a file row to mark it reviewed.`
     - unmark without a snapshot: `Delta Review: <path> has no reviewed snapshot to drop.`
 - DEVELOPMENT.md:
@@ -85,6 +90,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
   - `revertReviewStatus` on a different model instance restores only the listed paths
   - unknown paths are ignored
   - `gitErrorReason`: an execFile-shaped error (`message` `Command failed: git update-ref refs/review/x abc def\nfatal: cannot lock ref 'refs/review/x': Unable to create '/r/.git/refs/review/x.lock': File exists.\n`, `stderr` as a Buffer of the same stderr) gives `cannot lock ref 'refs/review/x': Unable to create '/r/.git/refs/review/x.lock': File exists`; the same with no `stderr` property gives the same result; `error: …` stderr is stripped likewise; stderr with no prefixed line gives its first non-empty line; a plain `new Error("boom")` gives `boom`; a string gives itself
+  - `noModelMessage` gives the loading text for undefined, and the base-missing and no-merge-base texts (each naming the base, neither saying `loading`)
   - `applyPendingMarks` applies entries in order (a later unmark beats an earlier mark on the same path) and returns the same object for an empty list
   - `resolveClusterModel(contract, withReviewStatus(model, [p], true).model.files)` places `p` as reviewed in its cluster bucket (guards the grouped-mode wiring)
 - Run `yarn test`, `yarn lint`, `yarn build`.
