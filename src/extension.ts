@@ -85,6 +85,7 @@ import {
 } from "./noteTarget";
 import {
   AnyNoteThread,
+  isFileThread,
   isLineThread,
   mergeThreads,
   NoteThread,
@@ -197,7 +198,7 @@ export const activate = async (
     {},
   );
   let notesKey: { repo: string; branch: string } | undefined;
-  const isUnread = (thread: NoteThread): boolean =>
+  const isUnread = (thread: AnyNoteThread): boolean =>
     isPendingUnread(
       thread,
       notesKey === undefined
@@ -443,11 +444,11 @@ export const activate = async (
 
   // The currently rendered thread set — what Clear Resolved operates on.
   // Only renderNoteThreads assigns it, so it always matches both surfaces.
-  let currentNoteThreads: NoteThread[] = [];
+  let currentNoteThreads: AnyNoteThread[] = [];
 
   // Re-styles in place and never prunes: rendering here would dispose the
   // thread of a just-added note whose refresh has not landed yet
-  const markRead = (thread: NoteThread): void => {
+  const markRead = (thread: AnyNoteThread): void => {
     if (notesKey === undefined) {
       return;
     }
@@ -463,17 +464,19 @@ export const activate = async (
     marks = next;
     void context.workspaceState.update(pendingReadMarksKey, marks);
     commentController.restyleThreads();
-    notesTreeProvider.setThreads(currentNoteThreads);
+    notesTreeProvider.setThreads(currentNoteThreads.filter(isLineThread));
   };
 
   // Renders the merged threads into both notes surfaces: the inline comment
   // threads and the REVIEW NOTES tree (with its to-handle badge). Every call
   // site is generation-guarded inside refresh(), so the two surfaces always
   // show the same thread set.
-  const renderNoteThreads = (threads: NoteThread[]): void => {
+  const renderNoteThreads = (threads: AnyNoteThread[]): void => {
     currentNoteThreads = threads;
-    commentController.renderThreads(threads);
-    notesTreeProvider.setThreads(threads);
+    commentController.renderThreads(
+      threads.filter((thread) => isLineThread(thread) || isFileThread(thread)),
+    );
+    notesTreeProvider.setThreads(threads.filter(isLineThread));
     // Open, addressed and pending (read or unread) are not done; resolved notes are.
     const toHandle = threads.filter(
       (thread) => thread.status !== "resolved",
@@ -939,7 +942,7 @@ export const activate = async (
             repo: gitForNotes.repoRoot,
             branch: readMarkBranch(computed.branch),
           };
-          renderNoteThreads(threads.filter(isLineThread));
+          renderNoteThreads(threads);
         } else {
           // Missing or empty — clear any rendered threads
           if (notesResult.state === "ok") {
@@ -1930,6 +1933,12 @@ export const activate = async (
     ),
 
     vscode.commands.registerCommand(
+      "deltaReview.cancelNoteDraft",
+      (thread: vscode.CommentThread) =>
+        commentController.cancelNoteDraft(thread),
+    ),
+
+    vscode.commands.registerCommand(
       "deltaReview.deleteNoteThread",
       (thread: vscode.CommentThread) =>
         commentController.deleteNoteThread(thread),
@@ -2679,6 +2688,7 @@ export const activate = async (
           files,
           threads: commentController.provenanceThreads(),
           agentLineThreads: commentController.agentLineThreads(),
+          noteThreads: commentController.noteThreadSnapshots(),
           // Row text as tree mode renders it (no directory text), by path
           rows: Object.fromEntries(
             files.map((file) => [

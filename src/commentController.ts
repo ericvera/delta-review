@@ -10,15 +10,21 @@ import {
 } from "./documents";
 import { Git } from "./git";
 import { ReviewModel } from "./model";
-import { Note, NoteDocument, NoteSide } from "./notes";
+import { FileNote, isFileNote, Note, NoteDocument, NoteSide } from "./notes";
 import {
   clampNoteRange,
+  fileNoteTargetFor,
   NoteLineSource,
   NoteTarget,
   noteAnchorLines,
   noteTargetFor,
 } from "./noteTarget";
-import { NoteThread, ThreadStatus, deriveThreadStatus } from "./noteThreads";
+import {
+  AnyNoteThread,
+  NoteThread,
+  ThreadStatus,
+  deriveThreadStatus,
+} from "./noteThreads";
 import {
   appendReviewerTurn,
   createNote,
@@ -104,9 +110,30 @@ export interface AgentLineThreadSnapshot {
   body: string;
 }
 
+// A note thread that renders as a comment thread: line notes at their range,
+// file notes as range-less whole-file threads
+export type RenderedNoteThread = NoteThread<Note | FileNote>;
+
+// A rendered note thread, inspection-only like ProvenanceThreadSnapshot.
+// range is the rendered 0-based [startLine, endLine]; null is file-level.
+export interface NoteThreadSnapshot {
+  noteId: string;
+  uri: string;
+  range: null | [number, number];
+  label: string | undefined;
+  contextValue: string | undefined;
+}
+
 export interface NoteCommentController extends vscode.Disposable {
   // Reconciles rendered comment threads with the given display threads
-  renderThreads: (threads: NoteThread[]) => void;
+  renderThreads: (threads: RenderedNoteThread[]) => void;
+  // Inspection accessor for the scripted extension-host check
+  noteThreadSnapshots: () => NoteThreadSnapshot[];
+  // Opens an empty whole-file draft thread on uri; Add Note saves it as a
+  // file note with the given id
+  startFileNoteDraft: (uri: vscode.Uri, path: string, noteId: string) => void;
+  // Handler for the deltaReview.cancelNoteDraft thread action
+  cancelNoteDraft: (thread: vscode.CommentThread) => void;
   // Reconciles the read-only file-level provenance threads with the given
   // entries. Independent of renderThreads: provenance comes from the review
   // model, not the notes file, so a broken notes file leaves it standing.
@@ -174,8 +201,8 @@ export const createNoteCommentController = (
   getModel: () => ReviewModel | undefined,
   onDidChangeNotes: () => void,
   pendingRead: {
-    isUnread: (thread: NoteThread) => boolean;
-    markRead: (thread: NoteThread) => void;
+    isUnread: (thread: AnyNoteThread) => boolean;
+    markRead: (thread: AnyNoteThread) => void;
   },
   getReviewDocuments: () => ReviewDocuments | undefined,
 ): NoteCommentController => {
@@ -282,16 +309,17 @@ export const createNoteCommentController = (
     );
   };
 
-  const commentsFor = (thread: NoteThread): NoteComment[] => {
+  const commentsFor = (thread: RenderedNoteThread): NoteComment[] => {
     let reviewerTurnIndex = 0;
+    const note = thread.note;
     return thread.turns.map((turn, index) => {
       const body = new vscode.MarkdownString();
       body.appendMarkdown(turn.text);
-      if (index === 0 && thread.note.outdated) {
+      if (index === 0 && note.outdated && !isFileNote(note)) {
         // Mock 4: a dimmed one-liner with the first anchored line's original
         // text (italic is the closest to dimmed a MarkdownString gets)
         body.appendMarkdown(
-          `\n\n*line was: ${inlineCode(thread.note.snapshot[0] ?? "")}*`,
+          `\n\n*line was: ${inlineCode(note.snapshot[0] ?? "")}*`,
         );
       }
       const comment: NoteComment = {
@@ -332,7 +360,7 @@ export const createNoteCommentController = (
   // — see restyle for the invariant that keeps it from flipping false→true.
   const styleThread = (
     commentThread: vscode.CommentThread,
-    thread: NoteThread,
+    thread: RenderedNoteThread,
   ): void => {
     // A background re-render must not blow away an in-progress edit:
     // comments left in Editing mode are carried over by turn timestamp —
@@ -369,10 +397,14 @@ export const createNoteCommentController = (
       commentThread.comments = comments;
     }
     const unread = pendingRead.isUnread(thread);
+    const outdatedText = isFileNote(thread.note)
+      ? " • file left the diff"
+      : " • Outdated";
     const label =
       statusLabels[thread.status] +
       (unread ? " • Unread" : "") +
-      (thread.note.outdated ? " • Outdated" : "");
+      (isFileNote(thread.note) ? " • whole file" : "") +
+      (thread.note.outdated ? outdatedText : "");
     if (commentThread.label !== label) {
       commentThread.label = label;
     }
@@ -461,16 +493,48 @@ export const createNoteCommentController = (
     return new vscode.Range(start, 0, end, 0);
   };
 
+  // undefined is the file-level placement of a whole-file thread
+  const rangeForThread = (
+    noteThread: RenderedNoteThread,
+    lines: ThreadLines,
+    document: vscode.TextDocument | undefined,
+  ): vscode.Range | undefined => {
+    const note = noteThread.note;
+    return isFileNote(note) || lines === "file"
+      ? undefined
+      : rangeFor(note, lines, document);
+  };
+
+  // The typings demand a range at creation; clearing it afterwards is what
+  // pins a whole-file thread above line 1
+  const createThread = (
+    uri: vscode.Uri,
+    range: vscode.Range | undefined,
+    comments: vscode.Comment[],
+  ): vscode.CommentThread => {
+    const created = controller.createCommentThread(
+      uri,
+      range ?? new vscode.Range(0, 0, 0, 0),
+      comments,
+    );
+    if (range === undefined) {
+      created.range = undefined;
+    }
+    return created;
+  };
+
   // Rendered threads by note id; uriKey detects base-sha changes (thread
   // URIs are immutable, so those need dispose + recreate). noteThread is the
   // last rendered display thread — action handlers restyle from it eagerly
   // before the authoritative refresh re-render lands. lines is the target's
-  // coordinate choice, cached so a re-clamp needs no model or fs access.
+  // coordinate choice, cached so a re-clamp needs no model or fs access;
+  // "file" marks a whole-file thread, which never gets a range.
+  type ThreadLines = NoteLineSource | "file";
   interface ThreadEntry {
     thread: vscode.CommentThread;
     uriKey: string;
-    noteThread: NoteThread;
-    lines: NoteLineSource;
+    noteThread: RenderedNoteThread;
+    lines: ThreadLines;
   }
   const threadCache = new Map<string, ThreadEntry>();
   // Reverse lookup for the thread-level handlers, which receive a
@@ -496,13 +560,13 @@ export const createNoteCommentController = (
     entry: ThreadEntry,
     noteId: string,
     uri: vscode.Uri,
-    range: vscode.Range,
+    range: vscode.Range | undefined,
     comments: NoteComment[],
   ): void => {
     const collapsibleState = entry.thread.collapsibleState;
     threadNoteIds.delete(entry.thread);
     entry.thread.dispose();
-    const created = controller.createCommentThread(uri, range, comments);
+    const created = createThread(uri, range, comments);
     created.collapsibleState = collapsibleState;
     entry.thread = created;
     entry.uriKey = uri.toString();
@@ -515,14 +579,17 @@ export const createNoteCommentController = (
   // replyable (addressed or pending) is recreated rather than flipped in
   // place. The recreate drops an in-progress turn edit on that thread (the
   // typed text lives in the disposed widget either way). It never recurses — the fresh thread is replyable.
-  const restyle = (entry: ThreadEntry, noteThread: NoteThread): void => {
+  const restyle = (
+    entry: ThreadEntry,
+    noteThread: RenderedNoteThread,
+  ): void => {
     if (
       shouldRecreateThread(entry.thread.canReply !== false, noteThread.status)
     ) {
       const uri = entry.thread.uri;
       const range =
         entry.thread.range ??
-        rangeFor(entry.noteThread.note, entry.lines, openDocumentFor(uri));
+        rangeForThread(entry.noteThread, entry.lines, openDocumentFor(uri));
       replaceThread(
         entry,
         noteThread.note.id,
@@ -537,7 +604,7 @@ export const createNoteCommentController = (
   // The merged-turns index of the reviewer turn with the given note.turns
   // index (the stable merge keeps reviewer turns in file order)
   const mergedReviewerTurnIndex = (
-    noteThread: NoteThread,
+    noteThread: RenderedNoteThread,
     reviewerTurnIndex: number,
   ): number => {
     let count = 0;
@@ -774,7 +841,43 @@ export const createNoteCommentController = (
       };
     });
 
-  const renderThreads = (threads: NoteThread[]): void => {
+  // The rendered placement of a thread: its document, its range (undefined
+  // for a whole-file thread) and the lines marker cached on its entry
+  const placementFor = (
+    git: Git,
+    model: ReviewModel | undefined,
+    thread: RenderedNoteThread,
+  ): {
+    uri: vscode.Uri;
+    range: vscode.Range | undefined;
+    lines: ThreadLines;
+  } => {
+    const note = thread.note;
+    if (isFileNote(note)) {
+      const target = fileNoteTargetFor(
+        model,
+        note,
+        existsSync(join(git.repoRoot, note.file)),
+      );
+      return {
+        uri:
+          target.kind === "working"
+            ? vscode.Uri.file(join(git.repoRoot, target.path))
+            : createReviewBaseUri(target.path, target.sha),
+        range: undefined,
+        lines: "file",
+      };
+    }
+    const target = threadTargetFor(git, model, note);
+    const uri = uriForTarget(git, target);
+    return {
+      uri,
+      range: rangeFor(note, target.lines, openDocumentFor(uri)),
+      lines: target.lines,
+    };
+  };
+
+  const renderThreads = (threads: RenderedNoteThread[]): void => {
     const git = getGit();
     if (git === undefined) {
       for (const entry of threadCache.values()) {
@@ -792,24 +895,18 @@ export const createNoteCommentController = (
     const rendered = new Set<string>();
     for (const thread of threads) {
       rendered.add(thread.note.id);
-      const target = threadTargetFor(git, model, thread.note);
-      const uri = uriForTarget(git, target);
+      const { uri, range, lines } = placementFor(git, model, thread);
       const uriKey = uri.toString();
-      const range = rangeFor(thread.note, target.lines, openDocumentFor(uri));
       const entry = threadCache.get(thread.note.id);
       if (entry === undefined) {
-        const created = controller.createCommentThread(
-          uri,
-          range,
-          commentsFor(thread),
-        );
+        const created = createThread(uri, range, commentsFor(thread));
         created.collapsibleState =
           vscode.CommentThreadCollapsibleState.Expanded;
         const fresh: ThreadEntry = {
           thread: created,
           uriKey,
           noteThread: thread,
-          lines: target.lines,
+          lines,
         };
         threadCache.set(thread.note.id, fresh);
         threadNoteIds.set(created, thread.note.id);
@@ -817,7 +914,7 @@ export const createNoteCommentController = (
         continue;
       }
       entry.noteThread = thread;
-      entry.lines = target.lines;
+      entry.lines = lines;
       // Thread URIs are immutable: relocation (anchor application, base-sha
       // progression) means dispose + recreate, keeping the collapse state
       if (entry.uriKey !== uriKey) {
@@ -828,7 +925,9 @@ export const createNoteCommentController = (
       // Before the range write: restyle may dispose this thread, and a range
       // written to a disposed thread is wasted
       restyle(entry, thread);
-      entry.thread.range = range;
+      if (range !== undefined) {
+        entry.thread.range = range;
+      }
     }
     for (const noteId of threadCache.keys()) {
       if (!rendered.has(noteId)) {
@@ -851,12 +950,9 @@ export const createNoteCommentController = (
   const reclampThreadsFor = (document: vscode.TextDocument): void => {
     const uriKey = document.uri.toString();
     for (const entry of threadCache.values()) {
-      if (entry.uriKey === uriKey) {
-        entry.thread.range = rangeFor(
-          entry.noteThread.note,
-          entry.lines,
-          document,
-        );
+      const range = rangeForThread(entry.noteThread, entry.lines, document);
+      if (entry.uriKey === uriKey && range !== undefined) {
+        entry.thread.range = range;
       }
     }
     for (const entry of agentLineCache.values()) {
@@ -869,6 +965,18 @@ export const createNoteCommentController = (
       }
     }
   };
+
+  const noteThreadSnapshots = (): NoteThreadSnapshot[] =>
+    [...threadCache].map(([noteId, entry]) => {
+      const range = entry.thread.range;
+      return {
+        noteId,
+        uri: entry.thread.uri.toString(),
+        range: range === undefined ? null : [range.start.line, range.end.line],
+        label: entry.thread.label,
+        contextValue: entry.thread.contextValue,
+      };
+    });
 
   const restyleThreads = (): void => {
     for (const entry of threadCache.values()) {
@@ -884,7 +992,84 @@ export const createNoteCommentController = (
     }
   };
 
+  // Drafts opened by startFileNoteDraft, until Add Note adopts or Cancel
+  // disposes them
+  const fileNoteDrafts = new Map<
+    vscode.CommentThread,
+    { path: string; noteId: string }
+  >();
+
+  const startFileNoteDraft = (
+    uri: vscode.Uri,
+    path: string,
+    noteId: string,
+  ): void => {
+    const draft = createThread(uri, undefined, []);
+    draft.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    draft.canReply = true;
+    draft.contextValue = "fileNoteDraft";
+    draft.label = `File note · ${path}`;
+    fileNoteDrafts.set(draft, { path, noteId });
+  };
+
+  const cancelNoteDraft = (thread: vscode.CommentThread): void => {
+    fileNoteDrafts.delete(thread);
+    thread.dispose();
+  };
+
+  const addFileNote = async (
+    reply: vscode.CommentReply,
+    draft: { path: string; noteId: string },
+  ): Promise<void> => {
+    const context = activeContext();
+    if (context === undefined) {
+      showFailure("save note", "no active review");
+      return;
+    }
+    const pending = reply.thread;
+    try {
+      const content =
+        openDocumentFor(pending.uri)?.getText() ??
+        new TextDecoder().decode(
+          await vscode.workspace.fs.readFile(pending.uri),
+        );
+      const note = await createNote(context.git, context.model.branch, {
+        scope: "file",
+        file: draft.path,
+        content,
+        text: reply.text,
+        id: draft.noteId,
+      });
+      if (!isFileNote(note)) {
+        throw new Error("store returned a non-file note");
+      }
+      const noteThread: RenderedNoteThread = {
+        note,
+        turns: [{ author: "reviewer", text: reply.text, at: note.createdAt }],
+        status: "open",
+      };
+      threadCache.set(note.id, {
+        thread: pending,
+        uriKey: pending.uri.toString(),
+        noteThread,
+        lines: "file",
+      });
+      threadNoteIds.set(pending, note.id);
+      fileNoteDrafts.delete(pending);
+      styleThread(pending, noteThread);
+      onDidChangeNotes();
+    } catch (error) {
+      // The draft stays alive so the typed text is not lost
+      showFailure("save note", errorText(error));
+    }
+  };
+
   const addNote = async (reply: vscode.CommentReply): Promise<void> => {
+    const draft = fileNoteDrafts.get(reply.thread);
+    if (draft !== undefined) {
+      await addFileNote(reply, draft);
+      return;
+    }
     const context = activeContext();
     const pending = reply.thread;
     const uri = pending.uri;
@@ -1189,6 +1374,9 @@ export const createNoteCommentController = (
 
   return {
     renderThreads,
+    noteThreadSnapshots,
+    startFileNoteDraft,
+    cancelNoteDraft,
     renderProvenanceThreads,
     provenanceThreads,
     renderAgentLineThreads,
@@ -1211,6 +1399,7 @@ export const createNoteCommentController = (
       // Disposing the controller disposes its threads
       threadCache.clear();
       threadNoteIds.clear();
+      fileNoteDrafts.clear();
       clearProvenanceThreads();
       clearAgentLineThreads();
       controller.dispose();

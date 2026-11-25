@@ -211,6 +211,11 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.cancelNoteDraft",
+        "title": "Cancel",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.deleteNoteThread",
         "title": "Delete Thread",
         "icon": "$(trash)",
@@ -525,6 +530,11 @@
       ],
       "comments/commentThread/context": [
         {
+          "command": "deltaReview.cancelNoteDraft",
+          "when": "commentController == deltaReview.notes && commentThread == fileNoteDraft",
+          "group": "inline@0"
+        },
+        {
           "command": "deltaReview.addNote",
           "when": "commentController == deltaReview.notes && commentThreadIsEmpty",
           "group": "inline"
@@ -611,6 +621,10 @@
         },
         {
           "command": "deltaReview.cancelNoteTurn",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.cancelNoteDraft",
           "when": "false"
         },
         {
