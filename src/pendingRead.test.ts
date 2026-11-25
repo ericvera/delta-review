@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeThreads } from "./noteThreads";
-import type { NoteThread } from "./noteThreads";
+import type { AnyNoteThread } from "./noteThreads";
 import type { Note, NoteStatus, ResponseEntry } from "./notes";
 import {
   isPendingUnread,
@@ -38,14 +38,17 @@ const response = (overrides: Partial<ResponseEntry> = {}): ResponseEntry => ({
   ...overrides,
 });
 
-const threadsOf = (notes: Note[], responses: ResponseEntry[]): NoteThread[] =>
+const threadsOf = (
+  notes: Note[],
+  responses: ResponseEntry[],
+): AnyNoteThread[] =>
   mergeThreads({ version: 1, notes }, { version: 1, responses }, () => true);
 
 const threadOf = (
   responses: ResponseEntry[],
   status: NoteStatus = "open",
   id = "n1",
-): NoteThread => {
+): AnyNoteThread => {
   const [thread] = threadsOf(
     [note({ id, status })],
     responses.map((entry) => ({ ...entry, noteId: id })),
@@ -56,7 +59,7 @@ const threadOf = (
   return thread;
 };
 
-const pendingThread = (id = "n1"): NoteThread =>
+const pendingThread = (id = "n1"): AnyNoteThread =>
   threadOf(
     [
       response({ at: "2026-07-01T11:00:00Z" }),

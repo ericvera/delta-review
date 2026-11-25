@@ -83,7 +83,12 @@ import {
   noteTargetFor,
   reviewDiffIsEmpty,
 } from "./noteTarget";
-import { mergeThreads, NoteThread } from "./noteThreads";
+import {
+  AnyNoteThread,
+  isLineThread,
+  mergeThreads,
+  NoteThread,
+} from "./noteThreads";
 import {
   isPendingUnread,
   marksFor,
@@ -820,7 +825,7 @@ export const activate = async (
         // Prunes the loaded repo's marks on a successful notes load; false
         // when a newer refresh superseded this one
         const pruneReadMarks = async (
-          threads: readonly NoteThread[],
+          threads: readonly AnyNoteThread[],
         ): Promise<boolean> => {
           let liveBranches: Set<string> | undefined;
           if (
@@ -919,6 +924,8 @@ export const activate = async (
               baseBlobFor: (path, contentBlob) =>
                 baseBlobForNote(computed, path, contentBlob),
               anchorResolves,
+              isInReviewSet: (path) =>
+                computed.files.some((f) => f.path === path),
             },
           );
           if (generation !== refreshGeneration) {
@@ -932,7 +939,7 @@ export const activate = async (
             repo: gitForNotes.repoRoot,
             branch: readMarkBranch(computed.branch),
           };
-          renderNoteThreads(threads);
+          renderNoteThreads(threads.filter(isLineThread));
         } else {
           // Missing or empty — clear any rendered threads
           if (notesResult.state === "ok") {

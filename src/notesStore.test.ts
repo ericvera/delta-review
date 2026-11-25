@@ -14,7 +14,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createGit, Git } from "./git";
 import {
+  AnyNote,
   ArchiveShell,
+  isLineNote,
   Note,
   NotesFile,
   parseArchiveFile,
@@ -32,6 +34,8 @@ import {
   deleteNotes,
   deleteReviewerTurn,
   editReviewerTurn,
+  FileNoteDraft,
+  GeneralNoteDraft,
   loadNotes,
   loadResponses,
   NoteDraft,
@@ -69,6 +73,13 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(repoRoot, { recursive: true, force: true });
 });
+
+const line = (note: AnyNote | undefined): Note => {
+  if (note === undefined || !isLineNote(note)) {
+    throw new Error("expected a line note");
+  }
+  return note;
+};
 
 const draft = (overrides: Partial<NoteDraft> = {}): NoteDraft => ({
   file: "a.txt",
@@ -888,8 +899,8 @@ describe("refreshDerived", () => {
     );
     expect(spy.commands).not.toContain("diff");
     expect(refreshed.notes[0].outdated).toBe(false);
-    expect(refreshed.notes[0].currentStartLine).toBe(2);
-    expect(refreshed.notes[0].currentEndLine).toBe(3);
+    expect(line(refreshed.notes[0]).currentStartLine).toBe(2);
+    expect(line(refreshed.notes[0]).currentEndLine).toBe(3);
   });
 
   it("shifts the current range for an edit above the note (real git diff)", async () => {
@@ -911,7 +922,7 @@ describe("refreshDerived", () => {
       endLine: 3,
     });
     // Persisted
-    expect((await loadedNotes()).notes[0].currentStartLine).toBe(3);
+    expect(line((await loadedNotes()).notes[0]).currentStartLine).toBe(3);
   });
 
   it("marks the note outdated when its own lines changed", async () => {
@@ -1117,7 +1128,9 @@ describe("anchor application", () => {
       appliedAnchorAt: responseAt,
     });
     // Persisted, including the one-shot guard field
-    expect((await loadedNotes()).notes[0].appliedAnchorAt).toBe(responseAt);
+    expect(line((await loadedNotes()).notes[0]).appliedAnchorAt).toBe(
+      responseAt,
+    );
     // The re-snapshot blob is re-anchored on the notes ref in the same pass
     const tree = await git.run([
       "ls-tree",
@@ -1198,7 +1211,7 @@ describe("anchor application", () => {
       // ignored
       status: "addressed",
     });
-    expect(refreshed.notes[0].appliedAnchorAt).toBeUndefined();
+    expect(line(refreshed.notes[0]).appliedAnchorAt).toBeUndefined();
   });
 
   it("treats a traversal anchor as dangling even when an injected resolver accepts it", async () => {
@@ -1235,7 +1248,7 @@ describe("anchor application", () => {
       // ignored
       status: "addressed",
     });
-    expect(refreshed.notes[0].appliedAnchorAt).toBeUndefined();
+    expect(line(refreshed.notes[0]).appliedAnchorAt).toBeUndefined();
   });
 
   it("ignores an anchor whose line is beyond the file's line count", async () => {
@@ -1253,7 +1266,7 @@ describe("anchor application", () => {
       endLine: 3,
       contentBlob: note.contentBlob,
     });
-    expect(refreshed.notes[0].appliedAnchorAt).toBeUndefined();
+    expect(line(refreshed.notes[0]).appliedAnchorAt).toBeUndefined();
   });
 });
 
@@ -1367,7 +1380,7 @@ describe("document notes", () => {
   it("createNote stores the document key", async () => {
     const note = await createNote(git, "main", docDraft());
     expect(note.document).toBe("clusterNotes");
-    expect((await loadedNotes()).notes[0]?.document).toBe("clusterNotes");
+    expect(line((await loadedNotes()).notes[0]).document).toBe("clusterNotes");
   });
 
   it("saveNotes writes version 2 only while a document note exists", async () => {
@@ -1485,6 +1498,203 @@ describe("document notes", () => {
       currentStartLine: 3,
       outdated: false,
     });
-    expect(refreshed.notes[0]?.appliedAnchorAt).toBeUndefined();
+    expect(line(refreshed.notes[0]).appliedAnchorAt).toBeUndefined();
+  });
+});
+
+describe("scoped notes", () => {
+  const fileDraft = (id?: string): FileNoteDraft => ({
+    scope: "file",
+    file: "a.txt",
+    content: fileContent,
+    text: "split this file",
+    ...(id === undefined ? {} : { id }),
+  });
+  const generalDraft = (id?: string): GeneralNoteDraft => ({
+    scope: "general",
+    text: "add a changelog entry",
+    ...(id === undefined ? {} : { id }),
+  });
+
+  const loadedNotes = async (): Promise<NotesFile> => {
+    const result = await loadNotes(git, "main");
+    if (result.state !== "ok") {
+      throw new Error(`expected notes, got ${result.state}`);
+    }
+    return result.file;
+  };
+
+  const onDisk = async (): Promise<{
+    version: unknown;
+    notes: Array<Record<string, unknown>>;
+  }> => JSON.parse(await readFile(notesPath(), "utf8"));
+
+  const anchorTree = (): Promise<string> =>
+    git.run(["ls-tree", "-r", reviewNotesRefForBranch("main")]);
+
+  it("createNote with a file draft writes v3, anchors its blob, and keeps a pre-allocated id", async () => {
+    const note = await createNote(git, "main", fileDraft("pre-1"));
+    const blob = await writeContentBlob(git, fileContent);
+    expect(note).toEqual({
+      scope: "file",
+      id: "pre-1",
+      file: "a.txt",
+      contentBlob: blob,
+      turns: [{ text: "split this file", at: note.createdAt }],
+      status: "open",
+      outdated: false,
+      createdAt: note.createdAt,
+    });
+    const file = await onDisk();
+    expect(file.version).toBe(3);
+    expect(file.notes).toEqual([note]);
+    const tree = await anchorTree();
+    expect(tree).toContain(`${blob}\tpre-1`);
+  });
+
+  it("a general note has no blob and the ref lists only blob-bearing notes", async () => {
+    const general = await createNote(git, "main", generalDraft());
+    expect(general).not.toHaveProperty("contentBlob");
+    await expect(
+      git.run([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        reviewNotesRefForBranch("main"),
+      ]),
+    ).rejects.toThrow();
+
+    const lineNote = await createNote(git, "main", draft());
+    const fileNote = await createNote(git, "main", fileDraft());
+    const tree = await anchorTree();
+    expect(tree).toContain(lineNote.id);
+    expect(tree).toContain(fileNote.id);
+    expect(tree).not.toContain(general.id);
+    expect(tree.trim().split("\n")).toHaveLength(2);
+    expect((await onDisk()).version).toBe(3);
+  });
+
+  it("rejects a duplicate id", async () => {
+    await createNote(git, "main", generalDraft("dup"));
+    await expect(createNote(git, "main", fileDraft("dup"))).rejects.toThrow(
+      'note "dup" already exists',
+    );
+    await expect(createNote(git, "main", draft({ id: "dup" }))).rejects.toThrow(
+      'note "dup" already exists',
+    );
+    expect((await loadedNotes()).notes).toHaveLength(1);
+  });
+
+  it("refreshDerived flags a file note outside the review set, never a general note, and ignores agent anchors", async () => {
+    const fileNote = await createNote(git, "main", fileDraft());
+    const general = await createNote(git, "main", generalDraft());
+    await writeFile(join(repoRoot, "b.txt"), "one\ntwo\n");
+    await writeResponseEntries([
+      {
+        noteId: fileNote.id,
+        anchor: { file: "b.txt", line: 1, snapshot: "one" },
+      },
+      {
+        noteId: general.id,
+        anchor: { file: "b.txt", line: 2, snapshot: "two" },
+      },
+    ]);
+    const refresh = async (inSet: boolean): Promise<NotesFile> =>
+      refreshDerived(
+        git,
+        "main",
+        await loadedNotes(),
+        await loadedResponses(),
+        refreshOptions({
+          isInReviewSet: () => inSet,
+          anchorResolves: () => true,
+        }),
+      );
+
+    const outside = await refresh(false);
+    expect(outside.notes).toEqual([
+      { ...fileNote, status: "addressed", outdated: true },
+      { ...general, status: "addressed", outdated: false },
+    ]);
+    expect(await loadedNotes()).toEqual(outside);
+
+    const inside = await refresh(true);
+    expect(inside.notes).toEqual([
+      { ...fileNote, status: "addressed", outdated: false },
+      { ...general, status: "addressed", outdated: false },
+    ]);
+  });
+
+  it("refreshDerived without isInReviewSet falls back to the working tree", async () => {
+    await createNote(git, "main", fileDraft());
+    await unlink(join(repoRoot, "a.txt"));
+    const refreshed = await refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      undefined,
+      refreshOptions(),
+    );
+    expect(refreshed.notes[0]?.outdated).toBe(true);
+  });
+
+  it("setResolved, appendReviewerTurn and deleteNotes work on scoped notes", async () => {
+    const fileNote = await createNote(git, "main", fileDraft());
+    const general = await createNote(git, "main", generalDraft());
+
+    expect((await setResolved(git, "main", general.id, true)).status).toBe(
+      "resolved",
+    );
+    const appended = await appendReviewerTurn(
+      git,
+      "main",
+      fileNote.id,
+      "and rename it",
+    );
+    expect(appended.turns.map((turn) => turn.text)).toEqual([
+      "split this file",
+      "and rename it",
+    ]);
+    expect((await loadedNotes()).notes.map((note) => note.status)).toEqual([
+      "open",
+      "resolved",
+    ]);
+
+    expect(await deleteNotes(git, "main", [general.id])).toMatchObject({
+      deleted: 1,
+    });
+    expect((await loadedNotes()).notes.map((note) => note.id)).toEqual([
+      fileNote.id,
+    ]);
+    expect(await anchorTree()).toContain(fileNote.id);
+  });
+
+  it("deleteNotes archives resolved scoped notes verbatim in a version 1 archive", async () => {
+    const fileNote = await createNote(git, "main", fileDraft());
+    const general = await createNote(git, "main", generalDraft());
+    await setResolved(git, "main", fileNote.id, true);
+    await setResolved(git, "main", general.id, true);
+    const before = (await onDisk()).notes;
+
+    const result = await deleteNotes(git, "main", [fileNote.id, general.id]);
+
+    expect(result).toEqual({ deleted: 2, archive: { state: "archived" } });
+    const archive = await readArchive();
+    expect(archive.version).toBe(1);
+    const entries = archive.notes as Array<Record<string, unknown>>;
+    const deletedAt = entries[0]?.deletedAt;
+    expect(entries).toEqual(before.map((note) => ({ ...note, deletedAt })));
+    expect(entries.map((entry) => entry.scope)).toEqual(["file", "general"]);
+    for (const entry of entries) {
+      expect(entry).not.toHaveProperty("snapshot");
+    }
+    await expect(
+      git.run([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        reviewNotesRefForBranch("main"),
+      ]),
+    ).rejects.toThrow();
   });
 });

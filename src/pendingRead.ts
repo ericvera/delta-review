@@ -1,4 +1,4 @@
-import type { NoteThread } from "./noteThreads";
+import type { AnyNoteThread } from "./noteThreads";
 
 // Pending-note read state: which agent turn the reviewer last marked read,
 // keyed per repo and branch, plus the pruning that keeps the workspace-state
@@ -20,7 +20,9 @@ export type RepoReadMarks = Readonly<Record<string, BranchReadMarks>>;
 export const readMarkBranch = (branch: string): string =>
   branch.startsWith("heads/") ? branch.slice("heads/".length) : branch;
 
-export const newestAgentTurnAt = (thread: NoteThread): string | undefined => {
+export const newestAgentTurnAt = (
+  thread: AnyNoteThread,
+): string | undefined => {
   for (let index = thread.turns.length - 1; index >= 0; index--) {
     const turn = thread.turns[index];
     if (turn !== undefined && turn.author === "agent") {
@@ -31,7 +33,7 @@ export const newestAgentTurnAt = (thread: NoteThread): string | undefined => {
 };
 
 export const isPendingUnread = (
-  thread: NoteThread,
+  thread: AnyNoteThread,
   marks: PendingReadMarks,
 ): boolean =>
   thread.status === "pending" &&
@@ -39,7 +41,7 @@ export const isPendingUnread = (
 
 export const withReadMark = (
   marks: PendingReadMarks,
-  thread: NoteThread,
+  thread: AnyNoteThread,
 ): PendingReadMarks => {
   const at = newestAgentTurnAt(thread);
   if (at === undefined) {
@@ -50,7 +52,7 @@ export const withReadMark = (
 
 export const prunedReadMarks = (
   marks: PendingReadMarks,
-  threads: readonly NoteThread[],
+  threads: readonly AnyNoteThread[],
 ): PendingReadMarks => {
   const ids = new Set(threads.map((thread) => thread.note.id));
   const kept = Object.entries(marks).filter(([id]) => ids.has(id));
@@ -63,7 +65,7 @@ export const prunedReadMarks = (
 export const prunedBranchMarks = (
   all: BranchReadMarks,
   branch: string,
-  threads: readonly NoteThread[],
+  threads: readonly AnyNoteThread[],
   liveBranches: ReadonlySet<string> | undefined,
 ): BranchReadMarks => {
   let changed = false;
@@ -100,7 +102,7 @@ export const withRepoReadMark = (
   all: RepoReadMarks,
   repo: string,
   branch: string,
-  thread: NoteThread,
+  thread: AnyNoteThread,
 ): RepoReadMarks => {
   const current = marksFor(all, repo, branch);
   const next = withReadMark(current, thread);
@@ -114,7 +116,7 @@ export const prunedRepoMarks = (
   all: RepoReadMarks,
   repo: string,
   branch: string,
-  threads: readonly NoteThread[],
+  threads: readonly AnyNoteThread[],
   liveBranches: ReadonlySet<string> | undefined,
 ): RepoReadMarks => {
   const current = all[repo];
