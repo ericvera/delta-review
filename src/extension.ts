@@ -56,6 +56,11 @@ import {
   staleKey,
   withStaleDismissed,
 } from "./diffBaseUi";
+import {
+  createGeneralNotePanels,
+  GeneralNoteContext,
+  renderMarkdown,
+} from "./generalNotePanel";
 import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
 import type { HashCacheEntry } from "./hashCache";
@@ -86,6 +91,7 @@ import {
 import {
   AnyNoteThread,
   isFileThread,
+  isGeneralThread,
   isLineThread,
   mergeThreads,
   NoteThread,
@@ -446,6 +452,25 @@ export const activate = async (
   // Only renderNoteThreads assigns it, so it always matches both surfaces.
   let currentNoteThreads: AnyNoteThread[] = [];
 
+  const generalNotePanels = createGeneralNotePanels({
+    markdownToHtml: renderMarkdown,
+    isUnread,
+    markRead: (thread) => markRead(thread),
+    onDidChangeNotes: () => void refresh(),
+  });
+  context.subscriptions.push(generalNotePanels);
+
+  // The key must be the stripped branch: a tag-shadowed `heads/<name>` would
+  // never equal notesKey, so the panel would never update or close
+  const generalNoteContext = (): GeneralNoteContext | undefined =>
+    git === undefined || model === undefined
+      ? undefined
+      : {
+          repoRoot: git.repoRoot,
+          storeBranch: model.branch,
+          key: { repo: git.repoRoot, branch: readMarkBranch(model.branch) },
+        };
+
   // Re-styles in place and never prunes: rendering here would dispose the
   // thread of a just-added note whose refresh has not landed yet
   const markRead = (thread: AnyNoteThread): void => {
@@ -477,6 +502,9 @@ export const activate = async (
       threads.filter((thread) => isLineThread(thread) || isFileThread(thread)),
     );
     notesTreeProvider.setThreads(threads.filter(isLineThread));
+    if (notesKey !== undefined) {
+      generalNotePanels.update(threads, notesKey);
+    }
     // Open, addressed and pending (read or unread) are not done; resolved notes are.
     const toHandle = threads.filter(
       (thread) => thread.status !== "resolved",
@@ -2128,6 +2156,34 @@ export const activate = async (
         element?.kind === "note" && markRead(element.thread),
     ),
 
+    vscode.commands.registerCommand(
+      "deltaReview.openGeneralNote",
+      (thread?: AnyNoteThread) => {
+        if (thread === undefined || !isGeneralThread(thread)) {
+          return;
+        }
+        const ctx = generalNoteContext();
+        if (ctx === undefined) {
+          void vscode.window.showInformationMessage(
+            "Delta Review: the review is still loading — try again in a moment.",
+          );
+          return;
+        }
+        generalNotePanels.open(thread, ctx);
+      },
+    ),
+
+    vscode.commands.registerCommand("deltaReview.newGeneralNote", () => {
+      const ctx = generalNoteContext();
+      if (ctx === undefined) {
+        void vscode.window.showInformationMessage(
+          "Delta Review: the review is still loading — try again in a moment.",
+        );
+        return;
+      }
+      generalNotePanels.openDraft(ctx);
+    }),
+
     // Unlike the thread's trash icon — which sits inside an expanded thread —
     // a tree row is an easy misclick, so this one confirms first
     vscode.commands.registerCommand(
@@ -2717,6 +2773,8 @@ export const activate = async (
           },
           treeMessage: treeView.message,
           publishCount,
+          generalNotePanels: generalNotePanels.list(),
+          allNoteThreads: currentNoteThreads,
         };
       }),
     );

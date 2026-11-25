@@ -48,6 +48,16 @@
     ],
     "commands": [
       {
+        "command": "deltaReview.openGeneralNote",
+        "title": "Open General Note",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.newGeneralNote",
+        "title": "New General Note",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.refresh",
         "title": "Refresh",
         "icon": "$(refresh)",
@@ -551,6 +561,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "deltaReview.openGeneralNote",
+          "when": "false"
+        },
+        {
+          "command": "deltaReview.newGeneralNote",
+          "when": "false"
+        },
         {
           "command": "deltaReview.openDiff",
           "when": "false"
