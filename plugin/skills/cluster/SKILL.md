@@ -41,6 +41,87 @@ Sanitize the branch with `[^A-Za-z0-9._-]` → `-` (`feature/x` → `feature-x`;
 
 Never commit, stage, or push the contract. It lives under the git directory, invisible to `git status`, and must stay that way.
 
+### Diff base
+
+The review set is computed against a per-branch base, shared by every worktree on the branch.
+
+Contract file: `<COMMON_DIR>/delta-review/base-<sanitized-branch>.json`, sanitized as in **File location**. Never committed, like the clusters file.
+
+```json
+{ "version": 1, "branch": "feature/x", "base": "feature/parent" }
+```
+
+- `branch` (required, non-empty): the owning branch's full name, without a leading `heads/`. Sanitization maps `feature/x` and `feature-x` to one file, so a file whose `branch` differs from the current branch is ignored (treated as absent).
+- `base` (required, non-empty): any ref `git rev-parse` resolves.
+- Writers: the extension's picker, and any agent that creates or drives a branch and knows its parent.
+- Set: `mkdir -p` the directory, write a temp file in it, then `mv` it over the target. Writing overwrites a file owned by another branch.
+- Clear: delete the file.
+- Invalid (bad JSON, `version` other than 1, missing or empty `branch` or `base`): ignored.
+- Resolution order: explicit file → detected → fallback (`deltaReview.baseBranch`, default `main`). On the fallback branch itself, and on a detached HEAD, detection is skipped.
+- Detection limitations — write the file instead of relying on detection when: the branch has no reflog (a child branch can win; a brand-new branch picks a farther ancestor until its first commit); every own commit a child branch holds is older than the branch's 32 newest; another branch was created at a commit this branch only fast-forwarded or reset to; several candidates share a commit and none is the branch's creation source.
+- The fallback is read from `.vscode/settings.json` (JSONC, read as text). The extension reads the merged VS Code configuration, so a `deltaReview.baseBranch` set in user-scope settings is invisible here; if the base looks wrong, ask the user to set it in the workspace's `.vscode/settings.json`.
+
+This prints the resolved base exactly as the extension computes it (bash 3.2 or zsh; detection needs git >= 2.41 for `%(ahead-behind:…)`). A printed explicit base that does not resolve is an error: stop and ask the user.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+COMMON_DIR=$(git rev-parse --git-common-dir)
+BRANCH=$(git rev-parse --abbrev-ref HEAD); BRANCH=${BRANCH#heads/}
+FALLBACK=$(cat .vscode/settings.json 2>/dev/null | tr -d '\n' | grep -o '"deltaReview\.baseBranch"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+FALLBACK=${FALLBACK:-main}
+BASE=
+BASE_FILE="$COMMON_DIR/delta-review/base-$(printf '%s' "$BRANCH" | sed 's/[^A-Za-z0-9._-]/-/g').json"
+if [ "$BRANCH" != HEAD ] && [ -f "$BASE_FILE" ]; then
+  FILE_JSON=$(tr -d '\n' < "$BASE_FILE")
+  FILE_BRANCH=$(printf '%s' "$FILE_JSON" | grep -o '"branch"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+  FILE_BASE=$(printf '%s' "$FILE_JSON" | grep -o '"base"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+  if printf '%s' "$FILE_JSON" | grep -q '"version"[[:space:]]*:[[:space:]]*1[[:space:]]*[,}]' &&
+    [ "$FILE_BRANCH" = "$BRANCH" ] && [ -n "$FILE_BASE" ]; then
+    BASE=$FILE_BASE
+  fi
+fi
+if [ -z "$BASE" ] && [ "$BRANCH" != HEAD ] && [ "$BRANCH" != "$FALLBACK" ]; then
+  HEAD_SHA=$(git rev-parse HEAD)
+  TOTAL=$(git rev-list --count HEAD)
+  REFLOG=$(git reflog show --format='%H %gs' "refs/heads/$BRANCH" -- 2>/dev/null)
+  CREATED_FROM=$(printf '%s\n' "$REFLOG" | awk 'NF { last = $0 }
+    END { if (sub(/^[^ ]* branch: Created from /, "", last) && last != "") {
+      sub(/^refs\/heads\//, "", last); if (last != "HEAD") print last } }')
+  UNMOVED=$(printf '%s\n' "$REFLOG" | awk -v head="$HEAD_SHA" 'NF { n++; last = $0 }
+    END { print (n == 1 && last ~ /^[^ ]* branch: Created from ./ && substr(last, 1, index(last, " ") - 1) == head) ? 1 : 0 }')
+  OWN=$(printf '%s\n' "$REFLOG" | awk 'NF { n++; line[n] = $0 }
+    END { for (i = 1; i <= n; i++) {
+      sp = index(line[i], " "); sha = sp ? substr(line[i], 1, sp - 1) : line[i]; subj = sp ? substr(line[i], sp + 1) : ""
+      if (i == n && subj ~ /^branch: Created from ./) continue
+      if (subj ~ /\(finish\): .* onto [0-9a-f]+$/) { onto = subj; sub(/.* onto /, "", onto); if (onto == sha) continue }
+      if ((subj ~ /^(commit|cherry-pick|revert|rebase)/ || (subj ~ /^(merge|pull)/ && index(subj, "Fast-forward") == 0)) && !seen[sha]++) print sha
+    } }')
+  CONTAINING=
+  if [ -n "$OWN" ]; then
+    CONTAINING=$(git for-each-ref --format='%(refname:lstrip=2)' $(printf '%s\n' "$OWN" | head -n 32 | sed 's/^/--contains=/') refs/heads | tr '\n' ' ')
+  fi
+  BASE=$(git for-each-ref --format='%(refname:lstrip=2) %(objectname) %(ahead-behind:HEAD)' refs/heads |
+    awk -v cur="$BRANCH" -v total="$TOTAL" -v unmoved="$UNMOVED" -v fb="$FALLBACK" -v cref="$CREATED_FROM" -v containing="$CONTAINING" '
+      BEGIN { n = split(containing, c, " "); for (i = 1; i <= n; i++) held[c[i]] = 1 }
+      NF >= 4 && $1 != cur {
+        behind = $NF + 0
+        if (behind == total + 0 || (behind == 0 && unmoved != 1) || (($1 in held) && $1 != fb)) next
+        rank = $1 == fb ? 0 : ($1 == cref ? 1 : 2)
+        if (!found || behind < best_d || (behind == best_d && rank < best_r)) { found = 1; best = $1; best_d = behind; best_r = rank }
+      }
+      END { if (found) print best }')
+  if [ -z "$BASE" ]; then
+    UPSTREAM=$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
+    case "$UPSTREAM" in
+      "" | */"$BRANCH") ;;
+      *) git merge-base "$UPSTREAM" HEAD > /dev/null 2>&1 && BASE=$UPSTREAM ;;
+    esac
+  fi
+fi
+BASE=${BASE:-$FALLBACK}
+echo "$BASE"
+```
+
 ### Schema (version 4)
 
 ```json
@@ -139,7 +220,7 @@ A repo move whose destination came from a line region of its origin also carries
 
 Write `fromLines` and `baseBlob` together: `fromLines` alone is unverifiable — the extension slices it but can never confirm the content — while `baseBlob` alone stays a valid base without a line pointer.
 
-Compute `baseBlob` from the merge base, never the working tree (`MERGE_BASE` is the merge base with the base branch, computed in workflow step 2):
+Compute `baseBlob` from the merge base, never the working tree (`MERGE_BASE` is the merge base with the branch's diff base, computed in workflow step 2):
 
 ```bash
 git show "${MERGE_BASE}:<origin>" | sed -n '<start>,<end>p' | git hash-object -w --stdin
@@ -204,11 +285,9 @@ Any further change requires bumping `version` and updating the extension's parse
 
 The default when clustering the branch. Guidance from `/delta:cluster` arguments, the user's message, or a calling skill's instructions replaces any step or rule here it addresses; user over calling skill over this workflow. Where guidance is silent, this workflow applies. The Contract binds regardless.
 
-### 1. Resolve the repo root and base branch
+### 1. Resolve the repo root and base
 
-Work from the repo root per the Contract. Read `deltaReview.baseBranch` from `.vscode/settings.json` at the repo root; absent file or key → `main`. It is JSONC, so read it as text rather than assuming strict `JSON.parse`/`jq` succeeds.
-
-The extension reads the _merged_ VS Code configuration, so a `deltaReview.baseBranch` set in user-scope settings is invisible here. If clusters look computed against the wrong base, ask the user to set it in the workspace's `.vscode/settings.json`.
+Work from the repo root per the Contract. Resolve the base per **Diff base**.
 
 ### 2. Compute the review set
 

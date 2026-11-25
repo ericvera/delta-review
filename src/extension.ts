@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import * as vscode from "vscode";
 import { baseBlobForNote } from "./baseDocument";
 import {
@@ -18,6 +19,7 @@ import {
 } from "./clusterChanges";
 import {
   ClusterModel,
+  ClustersContract,
   clusterFilesForKey,
   LineNote,
   loadClustersContract,
@@ -38,12 +40,40 @@ import {
   loadReviewDocuments,
   ReviewDocuments,
 } from "./documents";
+import { showBasePicker } from "./basePicker";
+import {
+  BaseResolution,
+  clearBranchBase,
+  createDetectionCache,
+  resetDetectionCache,
+  resolveDiffBase,
+  writeBranchBase,
+} from "./diffBase";
+import {
+  BaseStatusPresentation,
+  baseStatusPresentation,
+  mergeBaseErrorMessage,
+  shouldPromptStale,
+  staleKey,
+  withStaleDismissed,
+} from "./diffBaseUi";
+import {
+  createGeneralNotePanels,
+  GeneralNoteContext,
+  renderMarkdown,
+} from "./generalNotePanel";
 import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
 import type { HashCacheEntry } from "./hashCache";
 import {
+  createRefreshScheduler,
+  headFingerprint,
+  isSelfWriteEventPath,
+} from "./refreshScheduler";
+import {
   computeReviewModel,
   FileReviewStatus,
+  MergeBaseError,
   pathsWithReviewSnapshot,
   reviewSnapshotPaths,
   resolveBranch,
@@ -51,15 +81,24 @@ import {
   ReviewModel,
 } from "./model";
 import { buildDiffTitle, buildRowDescription } from "./moveDisplay";
-import type { NoteDocument, ResponsesFile } from "./notes";
+import type { FileNote, NoteDocument, ResponsesFile } from "./notes";
 import { documentNoteGroupLabel } from "./notesGrouping";
+import { fileNoteAvailability } from "./newNoteChoice";
 import {
+  fileNoteTargetFor,
   noteAnchorLines,
   NoteTarget,
   noteTargetFor,
   reviewDiffIsEmpty,
 } from "./noteTarget";
-import { mergeThreads, NoteThread } from "./noteThreads";
+import {
+  AnyNoteThread,
+  isFileThread,
+  isGeneralThread,
+  isLineThread,
+  mergeThreads,
+  NoteThread,
+} from "./noteThreads";
 import {
   isPendingUnread,
   marksFor,
@@ -83,12 +122,25 @@ import {
   refreshDerived,
   setResolved,
 } from "./notesStore";
+import {
+  applyPendingMarks,
+  describeReviewChange,
+  gitErrorReason,
+  noModelMessage,
+  ReviewChange,
+  reviewChangeFailedMessage,
+  ReviewStatusFields,
+  ReviewUnavailable,
+  revertReviewStatus,
+  withReviewStatus,
+} from "./optimisticModel";
 import { agentLineNoteEntriesFor, provenanceEntriesFor } from "./provenance";
 import {
   clearAllReviewSnapshots,
   deletePreDeletionRef,
   markReviewed,
   reviewRefForBranch,
+  ReviewStateConflictError,
   unmarkReviewed,
 } from "./reviewState";
 import { createSerialQueue } from "./serialQueue";
@@ -115,6 +167,9 @@ let lastNotesWarning: string | undefined;
 let lastNotesFileWarning: string | undefined;
 let lastResponsesFileWarning: string | undefined;
 
+const SELECT_FILE_ROW_MESSAGE =
+  "Delta Review: select a file row to mark it reviewed.";
+
 const warnOnce = (lastWarned: string | undefined, warning: string): string => {
   if (warning !== lastWarned) {
     void vscode.window.showWarningMessage(warning);
@@ -128,6 +183,10 @@ export const activate = async (
   let git: Git | undefined;
   let model: ReviewModel | undefined;
   let clusterModel: ClusterModel | undefined;
+  let clusterContract: ClustersContract | undefined;
+  // Why `model` is undefined when no review can exist, so a mark command can
+  // say so instead of claiming the review is still loading
+  let reviewUnavailable: ReviewUnavailable;
   let reviewDocuments: ReviewDocuments | undefined;
 
   // Group/folder collapse state, kept across refreshes and window reloads
@@ -148,7 +207,7 @@ export const activate = async (
     {},
   );
   let notesKey: { repo: string; branch: string } | undefined;
-  const isUnread = (thread: NoteThread): boolean =>
+  const isUnread = (thread: AnyNoteThread): boolean =>
     isPendingUnread(
       thread,
       notesKey === undefined
@@ -188,6 +247,22 @@ export const activate = async (
     );
   };
   setClustersAvailable(false);
+  // Drive the empty-tree welcome links that lead to a base that works
+  const setBaseProblem = (
+    problem: "missing" | "mergeBaseFailed" | undefined,
+  ): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.baseMissing",
+      problem === "missing",
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "deltaReview.mergeBaseFailed",
+      problem === "mergeBaseFailed",
+    );
+  };
+  setBaseProblem(undefined);
 
   // Two persistence conventions share the collapsed set: default-expanded
   // elements (groups, clusters, folders) store their key while collapsed;
@@ -280,13 +355,19 @@ export const activate = async (
       persistCollapsed();
     }),
     notesTreeView.onDidCollapseElement((event) => {
-      if (event.element.kind === "fileGroup") {
+      if (
+        event.element.kind === "fileGroup" ||
+        event.element.kind === "generalGroup"
+      ) {
         collapsed.add(notesCollapseKeyFor(event.element));
         persistCollapsed();
       }
     }),
     notesTreeView.onDidExpandElement((event) => {
-      if (event.element.kind === "fileGroup") {
+      if (
+        event.element.kind === "fileGroup" ||
+        event.element.kind === "generalGroup"
+      ) {
         collapsed.delete(notesCollapseKeyFor(event.element));
         persistCollapsed();
       }
@@ -310,11 +391,51 @@ export const activate = async (
     50,
   );
   statusBarItem.command = "deltaReview.focus";
+  const log = vscode.window.createOutputChannel("Delta Review");
+  const baseStatusItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    49,
+  );
+  baseStatusItem.command = "deltaReview.setBranchBase";
+  // StatusBarItem exposes no visibility, and the test hook reports it
+  let baseStatusVisible = false;
+  const renderBaseStatus = (presentation: BaseStatusPresentation): void => {
+    baseStatusItem.text = presentation.text;
+    baseStatusItem.tooltip = presentation.tooltip;
+    baseStatusItem.backgroundColor =
+      presentation.tint === "error"
+        ? new vscode.ThemeColor("statusBarItem.errorBackground")
+        : presentation.tint === "warning"
+          ? new vscode.ThemeColor("statusBarItem.warningBackground")
+          : undefined;
+    baseStatusItem.show();
+    baseStatusVisible = true;
+  };
+  const hideBaseStatus = (): void => {
+    baseStatusItem.hide();
+    baseStatusVisible = false;
+  };
+  let baseResolution: BaseResolution | undefined;
+  const baseDetectionCache = createDetectionCache();
+  const staleDismissedKey = "deltaReview.staleBaseDismissed";
+  let staleDismissed = context.workspaceState.get<Record<string, string>>(
+    staleDismissedKey,
+    {},
+  );
+  const stalePrompting = new Set<string>();
+  const staleKeyFor = async (activeGit: Git, branch: string): Promise<string> =>
+    staleKey(dirname(await deltaReviewDirFor(activeGit)), branch);
+  const dismissStale = (key: string, base: string): void => {
+    staleDismissed = withStaleDismissed(staleDismissed, key, base);
+    void context.workspaceState.update(staleDismissedKey, staleDismissed);
+  };
 
   context.subscriptions.push(
     treeView,
     notesTreeView,
     statusBarItem,
+    baseStatusItem,
+    log,
     vscode.workspace.registerTextDocumentContentProvider(
       REVIEW_BASE_SCHEME,
       createReviewBaseContentProvider(() => git),
@@ -338,11 +459,30 @@ export const activate = async (
 
   // The currently rendered thread set — what Clear Resolved operates on.
   // Only renderNoteThreads assigns it, so it always matches both surfaces.
-  let currentNoteThreads: NoteThread[] = [];
+  let currentNoteThreads: AnyNoteThread[] = [];
+
+  const generalNotePanels = createGeneralNotePanels({
+    markdownToHtml: renderMarkdown,
+    isUnread,
+    markRead: (thread) => markRead(thread),
+    onDidChangeNotes: () => void refresh(),
+  });
+  context.subscriptions.push(generalNotePanels);
+
+  // The key must be the stripped branch: a tag-shadowed `heads/<name>` would
+  // never equal notesKey, so the panel would never update or close
+  const generalNoteContext = (): GeneralNoteContext | undefined =>
+    git === undefined || model === undefined
+      ? undefined
+      : {
+          repoRoot: git.repoRoot,
+          storeBranch: model.branch,
+          key: { repo: git.repoRoot, branch: readMarkBranch(model.branch) },
+        };
 
   // Re-styles in place and never prunes: rendering here would dispose the
   // thread of a just-added note whose refresh has not landed yet
-  const markRead = (thread: NoteThread): void => {
+  const markRead = (thread: AnyNoteThread): void => {
     if (notesKey === undefined) {
       return;
     }
@@ -365,10 +505,15 @@ export const activate = async (
   // threads and the REVIEW NOTES tree (with its to-handle badge). Every call
   // site is generation-guarded inside refresh(), so the two surfaces always
   // show the same thread set.
-  const renderNoteThreads = (threads: NoteThread[]): void => {
+  const renderNoteThreads = (threads: AnyNoteThread[]): void => {
     currentNoteThreads = threads;
-    commentController.renderThreads(threads);
+    commentController.renderThreads(
+      threads.filter((thread) => isLineThread(thread) || isFileThread(thread)),
+    );
     notesTreeProvider.setThreads(threads);
+    if (notesKey !== undefined) {
+      generalNotePanels.update(threads, notesKey);
+    }
     // Open, addressed and pending (read or unread) are not done; resolved notes are.
     const toHandle = threads.filter(
       (thread) => thread.status !== "resolved",
@@ -385,6 +530,7 @@ export const activate = async (
   // Refreshes run concurrently (watcher bursts, repo switches); the generation
   // counter keeps a slow, older computation from overwriting a newer result
   let refreshGeneration = 0;
+  let publishCount = 0;
   // Every write to refs/review/<branch> — user commands and the auto-mark
   // pass below — goes through this one queue. Each mutation is a read of the
   // ref, a change, then a write; two of them overlapping lose one side's
@@ -402,11 +548,42 @@ export const activate = async (
   // blob and declared lines, so it too is invalidated by content rather than by
   // branch — and cleared alongside the hash cache on a repo switch.
   const sliceCache = new Map<string, string>();
+
+  // Review-state changes whose write has not settled, re-applied by every
+  // refresh that publishes meanwhile
+  const pendingMarks: { token: number; paths: string[]; reviewed: boolean }[] =
+    [];
+  let nextPendingToken = 0;
+
+  const publishModel = (next: ReviewModel): void => {
+    model = next;
+    clusterModel =
+      clusterContract === undefined
+        ? undefined
+        : resolveClusterModel(clusterContract, next.files);
+    treeProvider.setModel(next);
+    const reviewedCount = next.files.filter(
+      (file) => file.status === FileReviewStatus.Reviewed,
+    ).length;
+    const needsReviewCount = next.files.length - reviewedCount;
+    treeView.badge =
+      needsReviewCount > 0
+        ? {
+            value: needsReviewCount,
+            tooltip: `${needsReviewCount} file${needsReviewCount === 1 ? "" : "s"} to review`,
+          }
+        : undefined;
+    statusBarItem.text = `$(checklist) Review ${reviewedCount}/${next.files.length}`;
+    statusBarItem.show();
+  };
+
   const refresh = async (): Promise<void> => {
     const generation = ++refreshGeneration;
     if (git === undefined) {
       model = undefined;
       clusterModel = undefined;
+      clusterContract = undefined;
+      reviewUnavailable = undefined;
       reviewDocuments = undefined;
       setClustersAvailable(false);
       treeProvider.setModel(undefined);
@@ -414,6 +591,9 @@ export const activate = async (
       treeView.message =
         "Open a folder inside a git repository to start reviewing.";
       statusBarItem.hide();
+      baseResolution = undefined;
+      setBaseProblem(undefined);
+      hideBaseStatus();
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
@@ -421,9 +601,11 @@ export const activate = async (
       return;
     }
     const configuration = vscode.workspace.getConfiguration("deltaReview");
-    const baseBranch = configuration.get<string>("baseBranch") ?? "main";
     const autoReviewGlobs =
       configuration.get<string[]>("autoReview.globs") ?? [];
+    // This refresh's own resolution, so the fatal catch never reads one a
+    // newer refresh left behind
+    let resolution: BaseResolution | undefined;
     try {
       // The branch, then the clusters contract, are resolved before anything
       // is computed: the contract's move declarations feed the review model,
@@ -434,6 +616,42 @@ export const activate = async (
       if (generation !== refreshGeneration) {
         return;
       }
+      resolution = await resolveDiffBase(
+        git,
+        branch,
+        configuration.get<string>("baseBranch") ?? "main",
+        baseDetectionCache,
+      );
+      const resolutionStaleKey = resolution.stale
+        ? await staleKeyFor(git, resolution.branch)
+        : undefined;
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      baseResolution = resolution;
+      if (resolution.missing) {
+        model = undefined;
+        clusterModel = undefined;
+        clusterContract = undefined;
+        reviewUnavailable = {
+          kind: "baseMissing",
+          base: resolution.base,
+          branch: resolution.branch,
+        };
+        setClustersAvailable(false);
+        treeProvider.setModel(undefined);
+        treeView.badge = undefined;
+        treeView.message = `⚠ Base ${resolution.base} for branch ${resolution.branch} does not resolve.`;
+        statusBarItem.hide();
+        setBaseProblem("missing");
+        renderBaseStatus(baseStatusPresentation(resolution, undefined));
+        notesKey = undefined;
+        renderNoteThreads([]);
+        commentController.renderProvenanceThreads([]);
+        commentController.renderAgentLineThreads([]);
+        return;
+      }
+      const baseBranch = resolution.base;
       // Loaded once per refresh, so correctness never depends on watcher
       // delivery, and re-applied to every computation below — a contract
       // rewritten mid-refresh cannot yield a model whose moves and clusters
@@ -542,17 +760,14 @@ export const activate = async (
 
       let contractWarning: string | undefined;
       if (contractResult.state === "ok") {
-        clusterModel = resolveClusterModel(
-          contractResult.contract,
-          computed.files,
-        );
+        clusterContract = contractResult.contract;
       } else {
-        clusterModel = undefined;
+        clusterContract = undefined;
         if (contractResult.state === "invalid") {
           contractWarning = `⚠ Clusters contract: ${contractResult.error}`;
         }
       }
-      setClustersAvailable(clusterModel !== undefined);
+      setClustersAvailable(clusterContract !== undefined);
 
       // Labels only from a valid contract; the branch document needs none
       const documents = await loadReviewDocuments(
@@ -567,30 +782,47 @@ export const activate = async (
       }
       reviewDocuments = documents;
 
-      model = computed;
-      treeProvider.setModel(model);
+      // Marks whose write has not settled stay applied: this refresh may have
+      // read the ref before they landed
+      const published = applyPendingMarks(computed, pendingMarks);
+      publishModel(published);
+      publishCount += 1;
+      reviewUnavailable = undefined;
       // Rebuilt from the model beside the tree, not inside renderNoteThreads:
       // provenance comes from the clusters contract, so it must survive a
       // notes file that fails to load below.
-      commentController.renderProvenanceThreads(provenanceEntriesFor(model));
-      commentController.renderAgentLineThreads(agentLineNoteEntriesFor(model));
+      commentController.renderProvenanceThreads(
+        provenanceEntriesFor(published),
+      );
+      commentController.renderAgentLineThreads(
+        agentLineNoteEntriesFor(published),
+      );
       treeView.message = contractWarning;
       void syncActiveClusterChanges();
 
-      const reviewedCount = model.files.filter(
-        (file) => file.status === FileReviewStatus.Reviewed,
-      ).length;
-      const needsReviewCount = model.files.length - reviewedCount;
-      treeView.badge =
-        needsReviewCount > 0
-          ? {
-              value: needsReviewCount,
-              tooltip: `${needsReviewCount} file${needsReviewCount === 1 ? "" : "s"} to review`,
-            }
-          : undefined;
-      statusBarItem.text = `$(checklist) Review ${reviewedCount}/${model.files.length}`;
-      statusBarItem.tooltip = `Delta Review: ${model.branch} vs ${baseBranch}`;
-      statusBarItem.show();
+      statusBarItem.tooltip = `Delta Review: ${published.branch} vs ${baseBranch}`;
+      setBaseProblem(undefined);
+      const promptStale =
+        resolutionStaleKey !== undefined &&
+        shouldPromptStale(
+          resolution,
+          staleDismissed,
+          resolutionStaleKey,
+          stalePrompting,
+        );
+      if (promptStale) {
+        stalePrompting.add(resolutionStaleKey);
+      }
+      renderBaseStatus(
+        baseStatusPresentation(resolution, published.mergeBase, {
+          promptOpen:
+            resolutionStaleKey !== undefined &&
+            stalePrompting.has(resolutionStaleKey),
+        }),
+      );
+      if (promptStale) {
+        void promptStaleBase(git, resolution, resolutionStaleKey);
+      }
 
       // Review-note threads: load, refresh derived positions against the
       // current documents, and render. The store never creates a notes file
@@ -633,7 +865,7 @@ export const activate = async (
         // Prunes the loaded repo's marks on a successful notes load; false
         // when a newer refresh superseded this one
         const pruneReadMarks = async (
-          threads: readonly NoteThread[],
+          threads: readonly AnyNoteThread[],
         ): Promise<boolean> => {
           let liveBranches: Set<string> | undefined;
           if (
@@ -732,6 +964,8 @@ export const activate = async (
               baseBlobFor: (path, contentBlob) =>
                 baseBlobForNote(computed, path, contentBlob),
               anchorResolves,
+              isInReviewSet: (path) =>
+                computed.files.some((f) => f.path === path),
             },
           );
           if (generation !== refreshGeneration) {
@@ -778,12 +1012,28 @@ export const activate = async (
       }
       model = undefined;
       clusterModel = undefined;
+      clusterContract = undefined;
+      reviewUnavailable = undefined;
       setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
-      // Fatal model errors win over any contract warning
-      treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
+      // Fatal model errors win over any contract warning. A failed merge-base
+      // keeps the base item up: it is the way to a base that works.
+      if (error instanceof MergeBaseError && resolution !== undefined) {
+        treeView.message = mergeBaseErrorMessage(resolution);
+        reviewUnavailable = { kind: "mergeBaseFailed", base: resolution.base };
+        setBaseProblem("mergeBaseFailed");
+        renderBaseStatus(
+          baseStatusPresentation(resolution, undefined, {
+            mergeBaseFailed: true,
+          }),
+        );
+      } else {
+        treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
+        setBaseProblem(undefined);
+        hideBaseStatus();
+      }
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
@@ -791,47 +1041,120 @@ export const activate = async (
     }
   };
 
-  // Command-side wrapper for a review-state mutation: serialize the write,
-  // then refresh outside the queue. A failure anywhere (the git write or the
-  // refresh that follows) is the user's click going nowhere, so it always
-  // becomes a visible error rather than a rejected command promise. The view's
-  // built-in progress bar covers the whole thing — queue wait included — so a
-  // click issued while another mark is still running reads as busy rather than
-  // as dead.
+  const reviewChangeReason = (error: unknown): string => {
+    if (error instanceof ReviewStateConflictError) {
+      return error.kind === "moved"
+        ? "the review state changed in another window and the retry also failed"
+        : `${error.ref} stayed locked by another git process (${error.lockPath}); if no git command is running, delete that file`;
+    }
+    return gitErrorReason(error);
+  };
+
+  interface ReviewStateChangeRequest {
+    description: string;
+    mutate: () => Promise<void>;
+    optimistic?: { paths: string[]; reviewed: boolean };
+  }
+
+  // Command-side wrapper for a review-state mutation: publish the change
+  // optimistically, serialize the write, then refresh outside the queue. A
+  // failed write rolls the rows back and becomes a visible error rather than a
+  // rejected command promise.
   const applyReviewStateChange = async (
-    action: string,
-    mutate: () => Promise<void>,
-  ): Promise<void> =>
-    vscode.window.withProgress(
-      { location: { viewId: "deltaReview" } },
-      async () => {
-        try {
-          await reviewStateQueue.run(mutate);
-          await refresh();
-        } catch (error) {
-          void vscode.window.showErrorMessage(
-            `Delta Review: failed to ${action} (${error instanceof Error ? error.message : String(error)})`,
-          );
-        }
-      },
-    );
+    request: ReviewStateChangeRequest,
+  ): Promise<void> => {
+    const { description, mutate, optimistic } = request;
+    const token = nextPendingToken++;
+    let prior: Map<string, ReviewStatusFields> | undefined;
+    if (optimistic !== undefined) {
+      pendingMarks.push({ token, ...optimistic });
+      if (model !== undefined) {
+        const result = withReviewStatus(
+          model,
+          optimistic.paths,
+          optimistic.reviewed,
+        );
+        prior = result.prior;
+        publishModel(result.model);
+      }
+    }
+    const settle = (): void => {
+      const index = pendingMarks.findIndex((entry) => entry.token === token);
+      if (index !== -1) {
+        pendingMarks.splice(index, 1);
+      }
+    };
+    try {
+      await reviewStateQueue.run(mutate);
+    } catch (error) {
+      log.appendLine(
+        `Could not ${description}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+      );
+      settle();
+      if (model !== undefined && prior !== undefined) {
+        publishModel(
+          applyPendingMarks(revertReviewStatus(model, prior), pendingMarks),
+        );
+      }
+      void refresh();
+      void vscode.window
+        .showErrorMessage(
+          reviewChangeFailedMessage(description, reviewChangeReason(error)),
+          "Retry",
+          "Show Log",
+        )
+        .then((choice) => {
+          if (choice === "Retry") {
+            void applyReviewStateChange(request);
+          } else if (choice === "Show Log") {
+            log.show();
+          }
+        });
+      return;
+    }
+    // Settling and starting the refresh in one synchronous step: the refresh
+    // bumps the generation before any older, un-overlaid one can publish
+    settle();
+    const done = refresh();
+    try {
+      await done;
+    } catch (error) {
+      log.appendLine(
+        `Refresh after "${description}" failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+      );
+      void vscode.window.showErrorMessage(
+        `Delta Review: refresh failed (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  };
+
+  const describeChange = (
+    reviewed: boolean,
+    scope: ReviewChange["scope"],
+    subject: string,
+  ): string => describeReviewChange({ reviewed, scope, subject });
 
   const markClusterPaths = async (
     activeGit: Git,
     branch: string,
+    label: string,
     paths: string[],
   ): Promise<void> =>
-    applyReviewStateChange("mark cluster reviewed", () =>
-      markReviewed(activeGit, branch, paths),
-    );
+    applyReviewStateChange({
+      description: describeChange(true, "cluster", label),
+      mutate: () => markReviewed(activeGit, branch, paths),
+      optimistic: { paths, reviewed: true },
+    });
 
-  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  const scheduleRefresh = (): void => {
-    if (refreshTimer !== undefined) {
-      clearTimeout(refreshTimer);
-    }
-    refreshTimer = setTimeout(() => void refresh(), 400);
-  };
+  const refreshScheduler = createRefreshScheduler({
+    delayMs: 400,
+    maxWaitMs: 1500,
+    run: refresh,
+  });
+  const scheduleRefresh = (): void => refreshScheduler.schedule();
+  context.subscriptions.push(
+    new vscode.Disposable(() => refreshScheduler.cancel()),
+  );
 
   // The active repo can live outside the workspace folders (e.g. a sibling
   // worktree selected in the Source Control view), so the watcher is scoped
@@ -848,11 +1171,16 @@ export const activate = async (
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(repoRoot), "**/*"),
     );
+    const onRepoEvent = (uri: vscode.Uri): void => {
+      if (!isSelfWriteEventPath(uri.fsPath)) {
+        scheduleRefresh();
+      }
+    };
     repoWatcherDisposables = [
       watcher,
-      watcher.onDidChange(scheduleRefresh),
-      watcher.onDidCreate(scheduleRefresh),
-      watcher.onDidDelete(scheduleRefresh),
+      watcher.onDidChange(onRepoEvent),
+      watcher.onDidCreate(onRepoEvent),
+      watcher.onDidDelete(onRepoEvent),
     ];
   };
   // The clusters contract lives under the git common dir — event delivery for
@@ -903,6 +1231,8 @@ export const activate = async (
     // objects in this checkout's database, so neither means anything in another
     hashCache.clear();
     sliceCache.clear();
+    resetDetectionCache(baseDetectionCache);
+    reviewUnavailable = undefined;
     if (repoRoot === undefined) {
       git = undefined;
       disposeRepoWatcher();
@@ -1335,6 +1665,40 @@ export const activate = async (
     commentController.expandThread(thread.note.id);
   };
 
+  // A file note's thread sits at the top of the diff, so no selection; with
+  // no usable diff it opens on the note's own target document
+  const openFileNote = async (
+    activeGit: Git,
+    thread: NoteThread<FileNote>,
+  ): Promise<void> => {
+    const file = model?.files.find(
+      (candidate) => candidate.path === thread.note.file,
+    );
+    if (file !== undefined && !reviewDiffIsEmpty(file)) {
+      await openDiff(file);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      commentController.expandThread(thread.note.id);
+      await revealFileRow(file);
+      return;
+    }
+    let onDisk = true;
+    try {
+      await access(join(activeGit.repoRoot, thread.note.file));
+    } catch {
+      onDisk = false;
+    }
+    const target = fileNoteTargetFor(model, thread.note, onDisk);
+    await vscode.window.showTextDocument(
+      target.kind === "working"
+        ? vscode.Uri.file(join(activeGit.repoRoot, target.path))
+        : createReviewBaseUri(target.path, target.sha),
+    );
+    commentController.expandThread(thread.note.id);
+    if (file !== undefined) {
+      await revealFileRow(file);
+    }
+  };
+
   // Selection sync from REVIEW NOTES: put the noted file's row in DELTA
   // REVIEW, expanding whatever ancestors are collapsed. Best effort — reveal
   // rejects on a view that cannot be shown, and that must never fail the
@@ -1494,8 +1858,125 @@ export const activate = async (
     await refresh();
   };
 
+  // Acts on the repo, branch and bases captured when the prompt opened, even
+  // if the active repo has changed since
+  const promptStaleBase = async (
+    activeGit: Git,
+    resolution: BaseResolution,
+    key: string,
+  ): Promise<void> => {
+    const { branch, base, fallback } = resolution;
+    const switchLabel = `Switch to ${fallback}`;
+    const keepLabel = `Keep ${base}`;
+    try {
+      const choice = await vscode.window.showWarningMessage(
+        `Base ${base} is fully merged into ${fallback}. Switch the diff base for ${branch} to ${fallback}?`,
+        switchLabel,
+        keepLabel,
+        "Choose…",
+      );
+      if (choice === switchLabel) {
+        await writeBranchBase(activeGit, branch, fallback);
+      } else if (choice === keepLabel) {
+        await writeBranchBase(activeGit, branch, base);
+        dismissStale(key, base);
+      } else if (choice === "Choose…") {
+        const picked = await showBasePicker({
+          git: activeGit,
+          resolution,
+          preferFirst: fallback,
+        });
+        if (picked.outcome === "cancelled") {
+          dismissStale(key, base);
+        } else if (picked.outcome === "picked") {
+          dismissStale(key, picked.ref);
+        }
+      } else {
+        dismissStale(key, base);
+      }
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Delta Review: failed to set the diff base (${error instanceof Error ? error.message : String(error)})`,
+      );
+    } finally {
+      stalePrompting.delete(key);
+    }
+    await refresh();
+  };
+
+  const setBranchBase = async (): Promise<void> => {
+    const activeGit = git;
+    const resolution = baseResolution;
+    if (activeGit === undefined || resolution === undefined) {
+      void vscode.window.showInformationMessage(
+        "Delta Review: no repository is active.",
+      );
+      return;
+    }
+    if (resolution.branch === "HEAD") {
+      void vscode.window.showInformationMessage(
+        "Delta Review: detached HEAD has no branch to set a base for.",
+      );
+      return;
+    }
+    try {
+      const key = await staleKeyFor(activeGit, resolution.branch);
+      const picked = await showBasePicker({
+        git: activeGit,
+        resolution,
+        preferFirst:
+          resolution.stale && stalePrompting.has(key)
+            ? resolution.fallback
+            : undefined,
+      });
+      if (picked.outcome === "cancelled") {
+        return;
+      }
+      if (picked.outcome === "picked") {
+        dismissStale(key, picked.ref);
+      }
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Delta Review: failed to set the diff base (${error instanceof Error ? error.message : String(error)})`,
+      );
+      return;
+    }
+    await refresh();
+  };
+
+  const useAutomaticBase = async (): Promise<void> => {
+    const activeGit = git;
+    const resolution = baseResolution;
+    if (activeGit === undefined || resolution === undefined) {
+      void vscode.window.showInformationMessage(
+        "Delta Review: no repository is active.",
+      );
+      return;
+    }
+    if (resolution.branch === "HEAD") {
+      return;
+    }
+    try {
+      await clearBranchBase(activeGit, resolution.branch);
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Delta Review: failed to clear the diff base (${error instanceof Error ? error.message : String(error)})`,
+      );
+      return;
+    }
+    await refresh();
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand("deltaReview.refresh", () => refresh()),
+
+    vscode.commands.registerCommand("deltaReview.setBranchBase", () =>
+      setBranchBase(),
+    ),
+
+    vscode.commands.registerCommand("deltaReview.useAutomaticBase", () =>
+      useAutomaticBase(),
+    ),
 
     vscode.commands.registerCommand(
       "deltaReview.addNote",
@@ -1520,6 +2001,12 @@ export const activate = async (
     vscode.commands.registerCommand(
       "deltaReview.deleteNoteTurn",
       (comment: vscode.Comment) => commentController.deleteNoteTurn(comment),
+    ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.cancelNoteDraft",
+      (thread: vscode.CommentThread) =>
+        commentController.cancelNoteDraft(thread),
     ),
 
     vscode.commands.registerCommand(
@@ -1553,11 +2040,14 @@ export const activate = async (
     vscode.commands.registerCommand(
       "deltaReview.markFileReviewed",
       async (element?: ReviewTreeElement) => {
-        if (
-          git === undefined ||
-          model === undefined ||
-          element?.kind !== "file"
-        ) {
+        if (git === undefined || model === undefined) {
+          void vscode.window.showInformationMessage(
+            noModelMessage(reviewUnavailable),
+          );
+          return;
+        }
+        if (element?.kind !== "file") {
+          void vscode.window.showInformationMessage(SELECT_FILE_ROW_MESSAGE);
           return;
         }
         // Read out of `git`/`model`/`element` before enqueueing: a refresh or
@@ -1565,31 +2055,43 @@ export const activate = async (
         const activeGit = git;
         const branch = model.branch;
         const paths = [element.file.path];
-        await applyReviewStateChange("mark reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(true, "file", element.file.path),
+          mutate: () => markReviewed(activeGit, branch, paths),
+          optimistic: { paths, reviewed: true },
+        });
       },
     ),
 
     vscode.commands.registerCommand(
       "deltaReview.unmarkFileReviewed",
       async (element?: ReviewTreeElement) => {
-        if (
-          git === undefined ||
-          model === undefined ||
-          element?.kind !== "file" ||
-          // Without a snapshot there is nothing to drop, and the write would
-          // be a no-op state commit
-          !element.file.hasReviewSnapshot
-        ) {
+        if (git === undefined || model === undefined) {
+          void vscode.window.showInformationMessage(
+            noModelMessage(reviewUnavailable),
+          );
+          return;
+        }
+        if (element?.kind !== "file") {
+          void vscode.window.showInformationMessage(SELECT_FILE_ROW_MESSAGE);
+          return;
+        }
+        // Without a snapshot there is nothing to drop, and the write would be
+        // a no-op state commit
+        if (!element.file.hasReviewSnapshot) {
+          void vscode.window.showInformationMessage(
+            `Delta Review: ${element.file.path} has no reviewed snapshot to drop.`,
+          );
           return;
         }
         const activeGit = git;
         const branch = model.branch;
         const paths = reviewSnapshotPaths(element.file);
-        await applyReviewStateChange("unmark reviewed", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "file", element.file.path),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: { paths: [element.file.path], reviewed: false },
+        });
       },
     ),
 
@@ -1597,16 +2099,24 @@ export const activate = async (
       "deltaReview.unmarkAllReviewed",
       async () => {
         if (git === undefined || model === undefined) {
+          void vscode.window.showInformationMessage(
+            noModelMessage(reviewUnavailable),
+          );
           return;
         }
         const activeGit = git;
         const branch = model.branch;
+        const rowPaths = model.files
+          .filter((file) => file.hasReviewSnapshot)
+          .map((file) => file.path);
         // Scoped to the branch, not to the review set: a snapshot for a path
         // that no longer shows up would survive a path list and keep acting
         // as that path's diff base if it came back
-        await applyReviewStateChange("unmark all files", () =>
-          clearAllReviewSnapshots(activeGit, branch),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "all", String(rowPaths.length)),
+          mutate: () => clearAllReviewSnapshots(activeGit, branch),
+          optimistic: { paths: rowPaths, reviewed: false },
+        });
       },
     ),
     vscode.commands.registerCommand("deltaReview.openDiff", openDiff),
@@ -1616,8 +2126,22 @@ export const activate = async (
     // no usable diff falls back to the note's own target document
     vscode.commands.registerCommand(
       "deltaReview.openNoteInDiff",
-      async (thread: NoteThread) => {
+      async (thread: AnyNoteThread) => {
         if (git === undefined) {
+          return;
+        }
+        if (isGeneralThread(thread)) {
+          await vscode.commands.executeCommand(
+            "deltaReview.openGeneralNote",
+            thread,
+          );
+          return;
+        }
+        if (isFileThread(thread)) {
+          await openFileNote(git, thread);
+          return;
+        }
+        if (!isLineThread(thread)) {
           return;
         }
         if (thread.note.document !== undefined) {
@@ -1688,6 +2212,102 @@ export const activate = async (
       (element?: NotesTreeElement) =>
         element?.kind === "note" && markRead(element.thread),
     ),
+
+    vscode.commands.registerCommand(
+      "deltaReview.openGeneralNote",
+      (thread?: AnyNoteThread) => {
+        if (thread === undefined || !isGeneralThread(thread)) {
+          return;
+        }
+        const ctx = generalNoteContext();
+        if (ctx === undefined) {
+          void vscode.window.showInformationMessage(
+            "Delta Review: the review is still loading — try again in a moment.",
+          );
+          return;
+        }
+        generalNotePanels.open(thread, ctx);
+      },
+    ),
+
+    vscode.commands.registerCommand("deltaReview.newNote", () => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const uri =
+        input instanceof vscode.TabInputTextDiff
+          ? input.modified
+          : input instanceof vscode.TabInputText
+            ? input.uri
+            : undefined;
+      const repoRoot = git?.repoRoot;
+      const availability =
+        repoRoot === undefined
+          ? { reason: "Open a file from the Delta Review diff" }
+          : fileNoteAvailability(
+              uri,
+              repoRoot,
+              model?.files ?? [],
+              REVIEW_BASE_SCHEME,
+            );
+      const fileItem: vscode.QuickPickItem = {
+        label: "$(file) File note",
+        description:
+          "path" in availability ? availability.path : availability.reason,
+        detail: "whole-file thread at the top of the diff",
+      };
+      const generalItem: vscode.QuickPickItem = {
+        label: "$(comment-discussion) General note",
+        description: "not tied to a file",
+      };
+      const picker = vscode.window.createQuickPick();
+      picker.title = "New Review Note";
+      picker.placeholder = "Choose the kind of note";
+      picker.items = [fileItem, generalItem];
+      picker.activeItems = [generalItem];
+      picker.onDidAccept(() => {
+        const choice = picker.activeItems[0];
+        if (choice === fileItem) {
+          // Enter fires even on the unavailable item; keep the picker open
+          if (!("path" in availability)) {
+            return;
+          }
+          picker.hide();
+          const { path } = availability;
+          const file = model?.files.find((entry) => entry.path === path);
+          const activeGit = git;
+          if (file === undefined || activeGit === undefined) {
+            return;
+          }
+          void (async () => {
+            await openDiff(file);
+            // The draft must attach after the diff editor exists
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            commentController.startFileNoteDraft(
+              vscode.Uri.file(join(activeGit.repoRoot, path)),
+              path,
+              randomUUID(),
+            );
+          })();
+          return;
+        }
+        if (choice === generalItem) {
+          picker.hide();
+          void vscode.commands.executeCommand("deltaReview.newGeneralNote");
+        }
+      });
+      picker.onDidHide(() => picker.dispose());
+      picker.show();
+    }),
+
+    vscode.commands.registerCommand("deltaReview.newGeneralNote", () => {
+      const ctx = generalNoteContext();
+      if (ctx === undefined) {
+        void vscode.window.showInformationMessage(
+          "Delta Review: the review is still loading — try again in a moment.",
+        );
+        return;
+      }
+      generalNotePanels.openDraft(ctx);
+    }),
 
     // Unlike the thread's trash icon — which sits inside an expanded thread —
     // a tree row is an easy misclick, so this one confirms first
@@ -1832,9 +2452,11 @@ export const activate = async (
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("mark folder reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(true, "folder", element.path),
+          mutate: () => markReviewed(activeGit, branch, paths),
+          optimistic: { paths, reviewed: true },
+        });
       },
     ),
 
@@ -1858,9 +2480,20 @@ export const activate = async (
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("unmark folder", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "folder", element.path),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: {
+            paths: renderedFolderFiles(element)
+              .filter(
+                (file) =>
+                  file.hasReviewSnapshot &&
+                  file.path.startsWith(`${element.path}/`),
+              )
+              .map((file) => file.path),
+            reviewed: false,
+          },
+        });
       },
     ),
 
@@ -1978,7 +2611,7 @@ export const activate = async (
           void vscode.window.showInformationMessage(result.message);
           return;
         }
-        await markClusterPaths(activeGit, branch, result.paths);
+        await markClusterPaths(activeGit, branch, entry.label, result.paths);
       },
     ),
 
@@ -1999,7 +2632,12 @@ export const activate = async (
         if (paths.length === 0) {
           return;
         }
-        await markClusterPaths(git, model.branch, paths);
+        await markClusterPaths(
+          git,
+          model.branch,
+          clusterLabelForKey(clusterModel, element.clusterKey),
+          paths,
+        );
       },
     ),
 
@@ -2015,17 +2653,27 @@ export const activate = async (
           return;
         }
         // Full membership, matching the counts the cluster header shows
-        const paths = pathsWithReviewSnapshot(
-          clusterFilesForKey(clusterModel, element.clusterKey),
-        );
+        const members = clusterFilesForKey(clusterModel, element.clusterKey);
+        const paths = pathsWithReviewSnapshot(members);
         if (paths.length === 0) {
           return;
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("unmark cluster", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(
+            false,
+            "cluster",
+            clusterLabelForKey(clusterModel, element.clusterKey),
+          ),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: {
+            paths: members
+              .filter((file) => file.hasReviewSnapshot)
+              .map((file) => file.path),
+            reviewed: false,
+          },
+        });
       },
     ),
 
@@ -2051,9 +2699,11 @@ export const activate = async (
         }
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("mark auto files reviewed", () =>
-          markReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(true, "auto", String(paths.length)),
+          mutate: () => markReviewed(activeGit, branch, paths),
+          optimistic: { paths, reviewed: true },
+        });
       },
     ),
 
@@ -2069,24 +2719,31 @@ export const activate = async (
         }
         // One Auto subgroup exists per status group, so the press must stay
         // inside the pressed group's rows
-        const paths = pathsWithReviewSnapshot(
-          model.files.filter(
-            (file) => file.triage === "auto" && file.status === element.status,
-          ),
+        const autoFiles = model.files.filter(
+          (file) => file.triage === "auto" && file.status === element.status,
         );
+        const paths = pathsWithReviewSnapshot(autoFiles);
         if (paths.length === 0) {
           return;
         }
+        const rowPaths = autoFiles
+          .filter((file) => file.hasReviewSnapshot)
+          .map((file) => file.path);
         const activeGit = git;
         const branch = model.branch;
-        await applyReviewStateChange("unmark auto files", () =>
-          unmarkReviewed(activeGit, branch, paths),
-        );
+        await applyReviewStateChange({
+          description: describeChange(false, "auto", String(rowPaths.length)),
+          mutate: () => unmarkReviewed(activeGit, branch, paths),
+          optimistic: { paths: rowPaths, reviewed: false },
+        });
       },
     ),
 
     vscode.commands.registerCommand("deltaReview.markAllReviewed", async () => {
       if (git === undefined || model === undefined) {
+        void vscode.window.showInformationMessage(
+          noModelMessage(reviewUnavailable),
+        );
         return;
       }
       const paths = model.files
@@ -2097,9 +2754,11 @@ export const activate = async (
       }
       const activeGit = git;
       const branch = model.branch;
-      await applyReviewStateChange("mark all files reviewed", () =>
-        markReviewed(activeGit, branch, paths),
-      );
+      await applyReviewStateChange({
+        description: describeChange(true, "all", String(paths.length)),
+        mutate: () => markReviewed(activeGit, branch, paths),
+        optimistic: { paths, reviewed: true },
+      });
     }),
 
     vscode.commands.registerCommand(
@@ -2203,6 +2862,24 @@ export const activate = async (
           ...collectTreeRows(child),
         ];
       });
+    const collectNotesRows = (element?: NotesTreeElement): unknown[] =>
+      notesTreeProvider.getChildren(element).flatMap((child) => {
+        const item = notesTreeProvider.getTreeItem(child);
+        const icon =
+          item.iconPath instanceof vscode.ThemeIcon ? item.iconPath : undefined;
+        return [
+          {
+            id: item.id,
+            label:
+              typeof item.label === "string" ? item.label : item.label?.label,
+            description: item.description,
+            icon: icon?.id,
+            iconColor: icon?.color?.id,
+            command: item.command?.command,
+          },
+          ...collectNotesRows(child),
+        ];
+      });
     context.subscriptions.push(
       vscode.commands.registerCommand("deltaReview.__inspect", () => {
         const files = model?.files ?? [];
@@ -2210,6 +2887,7 @@ export const activate = async (
           files,
           threads: commentController.provenanceThreads(),
           agentLineThreads: commentController.agentLineThreads(),
+          noteThreads: commentController.noteThreadSnapshots(),
           // Row text as tree mode renders it (no directory text), by path
           rows: Object.fromEntries(
             files.map((file) => [
@@ -2228,7 +2906,19 @@ export const activate = async (
           notesBadge: notesTreeView.badge,
           clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
           treeRows: collectTreeRows(),
+          notesRows: collectNotesRows(),
           commentableDocuments: commentController.commentableDocuments(),
+          base: baseResolution,
+          baseStatus: {
+            text: baseStatusItem.text,
+            tooltip: baseStatusItem.tooltip,
+            visible: baseStatusVisible,
+            command: baseStatusItem.command,
+          },
+          treeMessage: treeView.message,
+          publishCount,
+          generalNotePanels: generalNotePanels.list(),
+          allNoteThreads: currentNoteThreads,
         };
       }),
     );
@@ -2250,13 +2940,21 @@ export const activate = async (
           : undefined;
       void setActiveRepo(active?.rootUri.fsPath);
     };
+    const lastHead = new Map<GitRepository, string>();
     const trackRepository = (repository: GitRepository): void => {
+      lastHead.set(repository, headFingerprint(repository.state.HEAD));
       repoListeners.set(repository, [
         repository.ui.onDidChange(syncActiveRepo),
-        // HEAD/index/ref changes (branch switch, commit, fetch) live outside
-        // the worktree in linked worktrees, so the file watcher misses them
+        // HEAD changes (branch switch, commit) live outside the worktree in
+        // linked worktrees, so the file watcher misses them. Other state
+        // events are skipped: our own review-ref writes fire them too.
         repository.state.onDidChange(() => {
-          if (repository.rootUri.fsPath === git?.repoRoot) {
+          if (repository.rootUri.fsPath !== git?.repoRoot) {
+            return;
+          }
+          const fingerprint = headFingerprint(repository.state.HEAD);
+          if (fingerprint !== lastHead.get(repository)) {
+            lastHead.set(repository, fingerprint);
             scheduleRefresh();
           }
         }),
@@ -2271,6 +2969,7 @@ export const activate = async (
           disposable.dispose();
         }
         repoListeners.delete(repository);
+        lastHead.delete(repository);
         syncActiveRepo();
       }),
       new vscode.Disposable(() => {

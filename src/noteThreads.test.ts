@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveThreadStatus,
+  isFileThread,
+  isGeneralThread,
+  isLineThread,
   mergeThreads,
   persistedStatus,
   workSet,
 } from "./noteThreads";
-import type { NoteThread, ThreadTurn } from "./noteThreads";
+import type { AnyNoteThread, NoteThread, ThreadTurn } from "./noteThreads";
 import type {
+  FileNote,
+  GeneralNote,
   Note,
   NotesFile,
   ResponseAnchor,
@@ -351,6 +356,77 @@ const pendingAgentTurn: ThreadTurn = {
   pending: true,
 };
 
+describe("mergeThreads scoped notes", () => {
+  const fileNote: FileNote = {
+    scope: "file",
+    id: "f1",
+    file: "src/a.ts",
+    contentBlob: "blob-a",
+    turns: [{ text: "split this file", at: "2026-07-01T10:00:00Z" }],
+    status: "open",
+    outdated: false,
+    createdAt: "2026-07-01T10:00:00Z",
+  };
+  const generalNote: GeneralNote = {
+    scope: "general",
+    id: "g1",
+    turns: [{ text: "add a changelog", at: "2026-07-01T10:00:00Z" }],
+    status: "open",
+    outdated: false,
+    createdAt: "2026-07-01T10:00:00Z",
+  };
+
+  it("merges responses by noteId and never sets effectiveAnchor", () => {
+    const threads = mergeThreads(
+      { version: 3, notes: [fileNote, generalNote, note()] },
+      responsesFile(
+        response({ noteId: "f1", anchor: anchor() }),
+        response({
+          noteId: "g1",
+          anchor: anchor(),
+          pending: true,
+          at: "2026-07-01T12:00:00Z",
+        }),
+        response({ noteId: "n1", anchor: anchor() }),
+      ),
+      alwaysResolves,
+    );
+
+    expect(threads.map((thread) => thread.status)).toEqual([
+      "addressed",
+      "pending",
+      "addressed",
+    ]);
+    expect(threads[0]?.turns.map((turn) => turn.author)).toEqual([
+      "reviewer",
+      "agent",
+    ]);
+    expect(threads[0]?.effectiveAnchor).toBeUndefined();
+    expect(threads[1]?.effectiveAnchor).toBeUndefined();
+    expect(threads[2]?.effectiveAnchor).toEqual(anchor());
+  });
+
+  it("keeps an explicit resolve on a scoped note", () => {
+    const threads = mergeThreads(
+      { version: 3, notes: [{ ...generalNote, status: "resolved" }] },
+      responsesFile(response({ noteId: "g1" })),
+      alwaysResolves,
+    );
+    expect(threads[0]?.status).toBe("resolved");
+  });
+
+  it("narrows threads by note kind", () => {
+    const threads = mergeThreads(
+      { version: 3, notes: [fileNote, generalNote, note()] },
+      undefined,
+      alwaysResolves,
+    );
+    expect(threads.map(isFileThread)).toEqual([true, false, false]);
+    expect(threads.map(isGeneralThread)).toEqual([false, true, false]);
+    expect(threads.map(isLineThread)).toEqual([false, false, true]);
+  });
+});
+
 describe("deriveThreadStatus", () => {
   it("lets an explicit resolve win over a pending last turn", () => {
     expect(
@@ -395,7 +471,7 @@ describe("workSet", () => {
     const open = note({ id: "n1", outdated: true });
     const addressed = note({ id: "n2" });
     const resolved = note({ id: "n3", status: "resolved" });
-    const merged: NoteThread[] = mergeThreads(
+    const merged: AnyNoteThread[] = mergeThreads(
       notesFile(open, addressed, resolved),
       responsesFile(response({ noteId: "n2" })),
       alwaysResolves,

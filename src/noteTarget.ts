@@ -1,6 +1,6 @@
 import { baseBlobForNote } from "./baseDocument";
 import type { ReviewFile, ReviewModel } from "./model";
-import type { Note, NoteDocument } from "./notes";
+import type { FileNote, Note, NoteDocument } from "./notes";
 
 // Where a note's document lives, and how its anchor maps into that document.
 // Both the rendered comment thread and the REVIEW NOTES click resolve through
@@ -113,6 +113,31 @@ export const noteTargetFor = (
     };
   }
   return { kind: "working", path: note.file, lines: "current" };
+};
+
+export type FileNoteTarget =
+  | { kind: "working"; path: string }
+  | { kind: "base"; path: string; sha: string };
+
+// The document a file note's whole-file thread belongs to: the working-side
+// rules of noteTargetFor without line coordinates.
+export const fileNoteTargetFor = (
+  model: ReviewModel | undefined,
+  note: FileNote,
+  onDisk: boolean,
+): FileNoteTarget => {
+  const file = model?.files.find((entry) => entry.path === note.file);
+  if (file?.deleted === true) {
+    return {
+      kind: "base",
+      path: file.diffBasePath,
+      sha: file.diffBaseSha ?? note.contentBlob,
+    };
+  }
+  if (file !== undefined || onDisk) {
+    return { kind: "working", path: note.file };
+  }
+  return { kind: "base", path: note.file, sha: note.contentBlob };
 };
 
 // Whether this file's review diff is the empty document on both sides: a

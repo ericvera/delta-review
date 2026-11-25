@@ -32,15 +32,52 @@
     },
     "viewsWelcome": [
       {
+        "view": "deltaReview",
+        "contents": "[Choose a base](command:deltaReview.setBranchBase) or [use automatic detection](command:deltaReview.useAutomaticBase).",
+        "when": "deltaReview.baseMissing"
+      },
+      {
+        "view": "deltaReview",
+        "contents": "[Choose a base](command:deltaReview.setBranchBase)",
+        "when": "deltaReview.mergeBaseFailed"
+      },
+      {
         "view": "deltaReviewNotes",
-        "contents": "No review notes on this branch.\nHover a line in a review diff and click + to add one."
+        "contents": "No review notes on this branch.\nClick + above to add a file or general note, or hover a line in a review diff and click + to add a line note."
       }
     ],
     "commands": [
       {
+        "command": "deltaReview.openGeneralNote",
+        "title": "Open General Note",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.newGeneralNote",
+        "title": "New General Note",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.newNote",
+        "title": "New Review Note",
+        "icon": "$(add)",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.refresh",
         "title": "Refresh",
         "icon": "$(refresh)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.setBranchBase",
+        "title": "Set Diff Base for Branch",
+        "icon": "$(git-compare)",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.useAutomaticBase",
+        "title": "Use Automatic Diff Base Detection",
         "category": "Delta Review"
       },
       {
@@ -190,6 +227,11 @@
         "category": "Delta Review"
       },
       {
+        "command": "deltaReview.cancelNoteDraft",
+        "title": "Cancel",
+        "category": "Delta Review"
+      },
+      {
         "command": "deltaReview.deleteNoteThread",
         "title": "Delete Thread",
         "icon": "$(trash)",
@@ -287,6 +329,16 @@
           "command": "deltaReview.refresh",
           "when": "view == deltaReview",
           "group": "navigation@2"
+        },
+        {
+          "command": "deltaReview.setBranchBase",
+          "when": "view == deltaReview",
+          "group": "base@0"
+        },
+        {
+          "command": "deltaReview.newNote",
+          "when": "view == deltaReviewNotes",
+          "group": "navigation@-1"
         },
         {
           "command": "deltaReview.clearResolvedNotes",
@@ -499,6 +551,11 @@
       ],
       "comments/commentThread/context": [
         {
+          "command": "deltaReview.cancelNoteDraft",
+          "when": "commentController == deltaReview.notes && commentThread == fileNoteDraft",
+          "group": "inline@0"
+        },
+        {
           "command": "deltaReview.addNote",
           "when": "commentController == deltaReview.notes && commentThreadIsEmpty",
           "group": "inline"
@@ -515,6 +572,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "deltaReview.openGeneralNote",
+          "when": "false"
+        },
         {
           "command": "deltaReview.openDiff",
           "when": "false"
@@ -588,6 +649,10 @@
           "when": "false"
         },
         {
+          "command": "deltaReview.cancelNoteDraft",
+          "when": "false"
+        },
+        {
           "command": "deltaReview.deleteNoteTurn",
           "when": "false"
         },
@@ -642,7 +707,7 @@
         "deltaReview.baseBranch": {
           "type": "string",
           "default": "main",
-          "description": "Branch the review set is computed against (merge-base with HEAD)."
+          "description": "Fallback diff base for a branch with no explicit or auto-detected base (merge-base with HEAD)."
         },
         "deltaReview.autoReview.globs": {
           "type": "array",

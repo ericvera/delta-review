@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  FileNote,
+  GeneralNote,
   Note,
   ResponseEntry,
   archiveFileName,
@@ -181,7 +183,112 @@ describe("parseNotesFile document notes", () => {
   });
 });
 
+const fileNote: FileNote = {
+  scope: "file",
+  id: "f1",
+  file: "src/api.ts",
+  contentBlob: "4567cdef",
+  turns: [{ text: "split this module", at: "2026-07-18T10:00:00Z" }],
+  status: "open",
+  outdated: false,
+  createdAt: "2026-07-18T10:00:00Z",
+};
+
+const generalNote: GeneralNote = {
+  scope: "general",
+  id: "g1",
+  turns: [{ text: "add a changelog entry", at: "2026-07-18T10:00:00Z" }],
+  status: "addressed",
+  outdated: false,
+  createdAt: "2026-07-18T10:00:00Z",
+};
+
+describe("parseNotesFile scoped notes", () => {
+  const documentNote: Note = {
+    ...validNote,
+    id: "d1",
+    file: "auth-flow.md",
+    document: "clusterNotes",
+    side: "working",
+  };
+  const v3Text = (...notes: unknown[]): string =>
+    JSON.stringify({ version: 3, notes });
+
+  it("parses a version 3 file holding every note kind", () => {
+    expect(
+      parseNotesFile(v3Text(fileNote, generalNote, validNote, documentNote)),
+    ).toEqual({
+      ok: true,
+      file: {
+        version: 3,
+        notes: [fileNote, generalNote, validNote, documentNote],
+      },
+    });
+  });
+
+  it("ignores scope below version 3", () => {
+    expect(
+      parseNotesFile(JSON.stringify({ version: 2, notes: [generalNote] })),
+    ).toEqual({
+      ok: false,
+      error: 'note 1 ("g1"): "file" must be a non-empty string',
+    });
+  });
+
+  it("rejects an unknown scope", () => {
+    expect(parseNotesFile(v3Text({ ...generalNote, scope: "line" }))).toEqual({
+      ok: false,
+      error: 'note 1 ("g1"): "scope" must be "file" or "general"',
+    });
+  });
+
+  it.each([
+    ["file", 'note 1 ("f1"): "file" must be a non-empty string'],
+    ["contentBlob", 'note 1 ("f1"): "contentBlob" must be a non-empty string'],
+  ])("rejects a file note without %s", (key, error) => {
+    expect(parseNotesFile(v3Text({ ...fileNote, [key]: undefined }))).toEqual({
+      ok: false,
+      error,
+    });
+  });
+
+  it("validates shared fields on scoped notes", () => {
+    expect(parseNotesFile(v3Text({ ...generalNote, turns: [] }))).toEqual({
+      ok: false,
+      error: 'note 1 ("g1"): "turns" must have at least one entry',
+    });
+    expect(parseNotesFile(v3Text({ ...fileNote, outdated: "no" }))).toEqual({
+      ok: false,
+      error: 'note 1 ("f1"): "outdated" must be a boolean',
+    });
+  });
+
+  it("drops line-note keys from scoped notes", () => {
+    const result = parseNotesFile(
+      v3Text(
+        { ...generalNote, startLine: 3, file: "x.ts", stray: true },
+        { ...fileNote, side: "working", snapshot: [], document: "branch" },
+      ),
+    );
+    expect(result).toEqual({
+      ok: true,
+      file: { version: 3, notes: [generalNote, fileNote] },
+    });
+  });
+});
+
 describe("notesFileVersion", () => {
+  it("is 3 when any note is scoped", () => {
+    expect(notesFileVersion([validNote, fileNote])).toBe(3);
+    expect(notesFileVersion([generalNote])).toBe(3);
+    expect(
+      notesFileVersion([
+        { ...validNote, file: "a.md", side: "working", document: "branch" },
+        generalNote,
+      ]),
+    ).toBe(3);
+  });
+
   it("is 1 without document notes", () => {
     expect(notesFileVersion([])).toBe(1);
     expect(notesFileVersion([validNote])).toBe(1);
@@ -299,14 +406,14 @@ describe("parseNotesFile", () => {
   it("rejects a missing version", () => {
     expect(parseNotesFile(JSON.stringify({ notes: [] }))).toEqual({
       ok: false,
-      error: 'missing "version" (extension supports 1 and 2)',
+      error: 'missing "version" (extension supports 1, 2 and 3)',
     });
   });
 
   it.each([
-    [0, "unsupported version 0 (extension supports 1 and 2)"],
-    [3, "unsupported version 3 (extension supports 1 and 2)"],
-    ["1", 'unsupported version "1" (extension supports 1 and 2)'],
+    [0, "unsupported version 0 (extension supports 1, 2 and 3)"],
+    [4, "unsupported version 4 (extension supports 1, 2 and 3)"],
+    ["1", 'unsupported version "1" (extension supports 1, 2 and 3)'],
   ])("rejects version %j", (version, error) => {
     expect(parseNotesFile(JSON.stringify({ version, notes: [] }))).toEqual({
       ok: false,

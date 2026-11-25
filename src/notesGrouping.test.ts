@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Note } from "./notes";
-import type { NoteThread } from "./noteThreads";
+import type { FileNote, GeneralNote, Note } from "./notes";
+import type { AnyNoteThread, NoteThread } from "./noteThreads";
 import {
   documentNoteGroupDescription,
   documentNoteGroupLabel,
@@ -32,12 +32,55 @@ const thread = (overrides: Partial<Note>): NoteThread => {
   };
 };
 
+const fileThread = (overrides: Partial<FileNote>): AnyNoteThread => {
+  const note: FileNote = {
+    scope: "file",
+    id: "f1",
+    file: "src/a.ts",
+    contentBlob: "blob",
+    turns: [{ text: "whole file", at: "2026-07-01T10:00:00Z" }],
+    status: "open",
+    outdated: false,
+    createdAt: "2026-07-01T10:00:00Z",
+    ...overrides,
+  };
+  return {
+    note,
+    turns: [{ author: "reviewer", text: "whole file", at: note.createdAt }],
+    status: "open",
+  };
+};
+
+const generalThread = (overrides: Partial<GeneralNote>): AnyNoteThread => {
+  const note: GeneralNote = {
+    scope: "general",
+    id: "g1",
+    turns: [{ text: "overall", at: "2026-07-01T10:00:00Z" }],
+    status: "open",
+    outdated: false,
+    createdAt: "2026-07-01T10:00:00Z",
+    ...overrides,
+  };
+  return {
+    note,
+    turns: [{ author: "reviewer", text: "overall", at: note.createdAt }],
+    status: "open",
+  };
+};
+
 const summary = (groups: ReturnType<typeof groupNoteThreads>) =>
-  groups.map((group) => ({
-    document: group.document,
-    file: group.file,
-    ids: group.threads.map((entry) => entry.note.id),
-  }));
+  groups.map((group) =>
+    group.kind === "general"
+      ? {
+          general: true,
+          ids: group.threads.map((entry) => entry.note.id),
+        }
+      : {
+          document: group.document,
+          file: group.file,
+          ids: group.threads.map((entry) => entry.note.id),
+        },
+  );
 
 describe("groupNoteThreads", () => {
   it("puts document groups before code groups regardless of file name", () => {
@@ -96,6 +139,41 @@ describe("groupNoteThreads", () => {
     ]);
     expect(summary(groups)).toEqual([
       { document: undefined, file: "src/a.ts", ids: ["early", "mid", "late"] },
+    ]);
+  });
+
+  it("puts the general group first, ordered by creation", () => {
+    const groups = groupNoteThreads([
+      thread({ id: "code", file: "aaa.ts" }),
+      thread({ id: "branch", file: "zzz.md", document: "branch" }),
+      generalThread({ id: "g2", createdAt: "2026-07-02T10:00:00Z" }),
+      generalThread({ id: "g1", createdAt: "2026-07-01T10:00:00Z" }),
+    ]);
+    expect(summary(groups)).toEqual([
+      { general: true, ids: ["g1", "g2"] },
+      { document: "branch", file: "zzz.md", ids: ["branch"] },
+      { document: undefined, file: "aaa.ts", ids: ["code"] },
+    ]);
+  });
+
+  it("omits the general group when there are no general notes", () => {
+    const groups = groupNoteThreads([thread({ id: "code" })]);
+    expect(groups.map((group) => group.kind)).toEqual(["file"]);
+    expect(groupNoteThreads([])).toEqual([]);
+  });
+
+  it("puts file notes before line notes, ordered by creation", () => {
+    const groups = groupNoteThreads([
+      thread({ id: "line", currentStartLine: 1 }),
+      fileThread({ id: "late", createdAt: "2026-07-03T10:00:00Z" }),
+      fileThread({ id: "early", createdAt: "2026-07-02T10:00:00Z" }),
+    ]);
+    expect(summary(groups)).toEqual([
+      {
+        document: undefined,
+        file: "src/a.ts",
+        ids: ["early", "late", "line"],
+      },
     ]);
   });
 });
@@ -157,19 +235,33 @@ describe("documentNoteGroupDescription", () => {
 });
 
 describe("notesGroupCollapseKey", () => {
+  it("gives the general group a key outside the notes: namespace", () => {
+    expect(notesGroupCollapseKey({ kind: "general" })).toBe("notesGeneral");
+  });
+
   it("keeps the code group key unchanged", () => {
-    expect(notesGroupCollapseKey({ file: "src/a.ts" })).toBe("notes:src/a.ts");
+    expect(notesGroupCollapseKey({ kind: "file", file: "src/a.ts" })).toBe(
+      "notes:src/a.ts",
+    );
   });
 
   it("namespaces document group keys", () => {
     expect(
-      notesGroupCollapseKey({ document: "clusterNotes", file: "api.md" }),
+      notesGroupCollapseKey({
+        kind: "file",
+        document: "clusterNotes",
+        file: "api.md",
+      }),
     ).toBe("notes:clusterNotes:api.md");
   });
 
   it("namespaces branch group keys", () => {
     expect(
-      notesGroupCollapseKey({ document: "branch", file: "branch.md" }),
+      notesGroupCollapseKey({
+        kind: "file",
+        document: "branch",
+        file: "branch.md",
+      }),
     ).toBe("notes:branch:branch.md");
   });
 });

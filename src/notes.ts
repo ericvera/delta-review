@@ -2,13 +2,13 @@ import { sanitizeBranchForFilename } from "./clusters";
 import { isDocumentNoteFileName } from "./documents";
 
 // The notes contract: three versioned JSON files per branch under
-// <git common dir>/delta-review/. The notes file is extension-owned (review
-// notes written from the diff editor); the responses file is agent-owned (a
-// Claude Code agent writes its replies there); the archive file is
-// extension-written history of the notes Clear Resolved removed, which the
-// extension never reads back for behavior of its own. This module is the
-// pure contract layer — types, parsing, validation — with no fs and no
-// vscode.
+// <git common dir>/delta-review/. The notes file is extension-owned (line and
+// document notes written from the editor, plus whole-file and general notes
+// from version 3); the responses file is agent-owned (a Claude Code agent
+// writes its replies there); the archive file is extension-written history
+// of the notes Clear Resolved removed, which the extension never reads back
+// for behavior of its own. This module is the pure contract layer — types,
+// parsing, validation — with no fs and no vscode.
 
 export type NoteSide = "base" | "working";
 
@@ -54,10 +54,46 @@ export interface Note {
   appliedAnchorAt?: string;
 }
 
-export interface NotesFile {
-  version: 1 | 2;
-  notes: Note[];
+// A whole-file note: no line range, anchored to the file's content at
+// creation time (version 3 only)
+export interface FileNote {
+  scope: "file";
+  id: string;
+  // Repo-relative path
+  file: string;
+  contentBlob: string;
+  turns: ReviewerTurn[];
+  status: NoteStatus;
+  // Derived: the file is no longer in the review set
+  outdated: boolean;
+  createdAt: string;
 }
+
+// A note on the branch as a whole, with no file (version 3 only)
+export interface GeneralNote {
+  scope: "general";
+  id: string;
+  turns: ReviewerTurn[];
+  status: NoteStatus;
+  // Always false
+  outdated: boolean;
+  createdAt: string;
+}
+
+export type AnyNote = Note | FileNote | GeneralNote;
+
+export interface NotesFile {
+  version: 1 | 2 | 3;
+  notes: AnyNote[];
+}
+
+export const isFileNote = (note: AnyNote): note is FileNote =>
+  "scope" in note && note.scope === "file";
+
+export const isGeneralNote = (note: AnyNote): note is GeneralNote =>
+  "scope" in note && note.scope === "general";
+
+export const isLineNote = (note: AnyNote): note is Note => !("scope" in note);
 
 // Where the agent's fix landed; always working-tree coordinates
 export interface ResponseAnchor {
@@ -133,81 +169,36 @@ const isLineNumber = (value: unknown): value is number =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-// Validates one raw note entry; returns the normalized note or a user-facing
-// error string.
-const parseNote = (
-  value: unknown,
-  index: number,
-  version: 1 | 2,
-): { note: Note } | { error: string } => {
-  const where = `note ${index + 1}`;
-  if (!isRecord(value)) {
-    return { error: `${where} must be an object` };
-  }
-  if (!isNonEmptyString(value.id)) {
-    return { error: `${where}: "id" must be a non-empty string` };
-  }
-  const where2 = `${where} ("${value.id}")`;
-  if (!isNonEmptyString(value.file)) {
-    return { error: `${where2}: "file" must be a non-empty string` };
-  }
-  if (value.side !== "base" && value.side !== "working") {
-    return { error: `${where2}: "side" must be "base" or "working"` };
-  }
-  const document = version === 2 ? value.document : undefined;
-  if (document !== undefined) {
-    if (document !== "clusterNotes" && document !== "branch") {
-      return {
-        error: `${where2}: "document" must be "clusterNotes" or "branch"`,
-      };
-    }
-    if (!isDocumentNoteFileName(document, value.file)) {
-      return {
-        error:
-          document === "clusterNotes"
-            ? `${where2}: a document note's "file" must be a cluster notes file name`
-            : `${where2}: a branch document note's "file" must be a branch document file name`,
-      };
-    }
-    if (value.side !== "working") {
-      return { error: `${where2}: a document note's "side" must be "working"` };
-    }
-  }
-  if (!isLineNumber(value.startLine)) {
-    return { error: `${where2}: "startLine" must be an integer >= 1` };
-  }
-  if (!isLineNumber(value.endLine)) {
-    return { error: `${where2}: "endLine" must be an integer >= 1` };
-  }
-  if (value.endLine < value.startLine) {
-    return { error: `${where2}: "endLine" must be >= "startLine"` };
-  }
-  if (!isStringArray(value.snapshot)) {
-    return { error: `${where2}: "snapshot" must be an array of strings` };
-  }
-  if (!isNonEmptyString(value.contentBlob)) {
-    return { error: `${where2}: "contentBlob" must be a non-empty string` };
-  }
+type SharedNoteFields = Pick<
+  GeneralNote,
+  "turns" | "status" | "outdated" | "createdAt"
+>;
+
+// Validates the fields every note kind carries besides "id".
+const parseSharedFields = (
+  value: Record<string, unknown>,
+  where: string,
+): { shared: SharedNoteFields } | { error: string } => {
   if (!Array.isArray(value.turns)) {
-    return { error: `${where2}: "turns" must be an array` };
+    return { error: `${where}: "turns" must be an array` };
   }
   if (value.turns.length === 0) {
-    return { error: `${where2}: "turns" must have at least one entry` };
+    return { error: `${where}: "turns" must have at least one entry` };
   }
   const turns: ReviewerTurn[] = [];
   for (let turnIndex = 0; turnIndex < value.turns.length; turnIndex++) {
     const turn: unknown = value.turns[turnIndex];
     if (!isRecord(turn)) {
-      return { error: `${where2}: turn ${turnIndex + 1} must be an object` };
+      return { error: `${where}: turn ${turnIndex + 1} must be an object` };
     }
     if (typeof turn.text !== "string") {
       return {
-        error: `${where2}: turn ${turnIndex + 1}: "text" must be a string`,
+        error: `${where}: turn ${turnIndex + 1}: "text" must be a string`,
       };
     }
     if (typeof turn.at !== "string") {
       return {
-        error: `${where2}: turn ${turnIndex + 1}: "at" must be a string`,
+        error: `${where}: turn ${turnIndex + 1}: "at" must be a string`,
       };
     }
     turns.push({ text: turn.text, at: turn.at });
@@ -218,32 +209,92 @@ const parseNote = (
     value.status !== "resolved"
   ) {
     return {
-      error: `${where2}: "status" must be "open", "addressed", or "resolved"`,
+      error: `${where}: "status" must be "open", "addressed", or "resolved"`,
     };
   }
   if (typeof value.outdated !== "boolean") {
-    return { error: `${where2}: "outdated" must be a boolean` };
+    return { error: `${where}: "outdated" must be a boolean` };
+  }
+  if (!isNonEmptyString(value.createdAt)) {
+    return { error: `${where}: "createdAt" must be a non-empty string` };
+  }
+  return {
+    shared: {
+      turns,
+      status: value.status,
+      outdated: value.outdated,
+      createdAt: value.createdAt,
+    },
+  };
+};
+
+const parseLineNote = (
+  value: Record<string, unknown> & { id: string },
+  where: string,
+  version: 1 | 2 | 3,
+): { note: Note } | { error: string } => {
+  if (!isNonEmptyString(value.file)) {
+    return { error: `${where}: "file" must be a non-empty string` };
+  }
+  if (value.side !== "base" && value.side !== "working") {
+    return { error: `${where}: "side" must be "base" or "working"` };
+  }
+  const document = version >= 2 ? value.document : undefined;
+  if (document !== undefined) {
+    if (document !== "clusterNotes" && document !== "branch") {
+      return {
+        error: `${where}: "document" must be "clusterNotes" or "branch"`,
+      };
+    }
+    if (!isDocumentNoteFileName(document, value.file)) {
+      return {
+        error:
+          document === "clusterNotes"
+            ? `${where}: a document note's "file" must be a cluster notes file name`
+            : `${where}: a branch document note's "file" must be a branch document file name`,
+      };
+    }
+    if (value.side !== "working") {
+      return { error: `${where}: a document note's "side" must be "working"` };
+    }
+  }
+  if (!isLineNumber(value.startLine)) {
+    return { error: `${where}: "startLine" must be an integer >= 1` };
+  }
+  if (!isLineNumber(value.endLine)) {
+    return { error: `${where}: "endLine" must be an integer >= 1` };
+  }
+  if (value.endLine < value.startLine) {
+    return { error: `${where}: "endLine" must be >= "startLine"` };
+  }
+  if (!isStringArray(value.snapshot)) {
+    return { error: `${where}: "snapshot" must be an array of strings` };
+  }
+  if (!isNonEmptyString(value.contentBlob)) {
+    return { error: `${where}: "contentBlob" must be a non-empty string` };
+  }
+  const shared = parseSharedFields(value, where);
+  if ("error" in shared) {
+    return shared;
   }
   if (!isLineNumber(value.currentStartLine)) {
-    return { error: `${where2}: "currentStartLine" must be an integer >= 1` };
+    return { error: `${where}: "currentStartLine" must be an integer >= 1` };
   }
   if (!isLineNumber(value.currentEndLine)) {
-    return { error: `${where2}: "currentEndLine" must be an integer >= 1` };
+    return { error: `${where}: "currentEndLine" must be an integer >= 1` };
   }
   if (value.currentEndLine < value.currentStartLine) {
     return {
-      error: `${where2}: "currentEndLine" must be >= "currentStartLine"`,
+      error: `${where}: "currentEndLine" must be >= "currentStartLine"`,
     };
-  }
-  if (!isNonEmptyString(value.createdAt)) {
-    return { error: `${where2}: "createdAt" must be a non-empty string` };
   }
   if (
     value.appliedAnchorAt !== undefined &&
     typeof value.appliedAnchorAt !== "string"
   ) {
-    return { error: `${where2}: "appliedAnchorAt" must be a string` };
+    return { error: `${where}: "appliedAnchorAt" must be a string` };
   }
+  const { turns, status, outdated, createdAt } = shared.shared;
   const note: Note = {
     id: value.id,
     file: value.file,
@@ -254,16 +305,59 @@ const parseNote = (
     snapshot: value.snapshot,
     contentBlob: value.contentBlob,
     turns,
-    status: value.status,
-    outdated: value.outdated,
+    status,
+    outdated,
     currentStartLine: value.currentStartLine,
     currentEndLine: value.currentEndLine,
-    createdAt: value.createdAt,
+    createdAt,
   };
   if (value.appliedAnchorAt !== undefined) {
     note.appliedAnchorAt = value.appliedAnchorAt;
   }
   return { note };
+};
+
+// Validates one raw note entry; returns the normalized note or a user-facing
+// error string. Only version 3 reads "scope"; scoped notes are rebuilt from
+// their own keys so line-note fields never ride along.
+const parseNote = (
+  value: unknown,
+  index: number,
+  version: 1 | 2 | 3,
+): { note: AnyNote } | { error: string } => {
+  const where = `note ${index + 1}`;
+  if (!isRecord(value)) {
+    return { error: `${where} must be an object` };
+  }
+  if (!isNonEmptyString(value.id)) {
+    return { error: `${where}: "id" must be a non-empty string` };
+  }
+  const id = value.id;
+  const where2 = `${where} ("${id}")`;
+  const scope = version === 3 ? value.scope : undefined;
+  if (scope === undefined) {
+    return parseLineNote({ ...value, id }, where2, version);
+  }
+  if (scope !== "file" && scope !== "general") {
+    return { error: `${where2}: "scope" must be "file" or "general"` };
+  }
+  if (scope === "general") {
+    const shared = parseSharedFields(value, where2);
+    return "error" in shared
+      ? shared
+      : { note: { scope, id, ...shared.shared } };
+  }
+  const { file, contentBlob } = value;
+  if (!isNonEmptyString(file)) {
+    return { error: `${where2}: "file" must be a non-empty string` };
+  }
+  if (!isNonEmptyString(contentBlob)) {
+    return { error: `${where2}: "contentBlob" must be a non-empty string` };
+  }
+  const shared = parseSharedFields(value, where2);
+  return "error" in shared
+    ? shared
+    : { note: { scope, id, file, contentBlob, ...shared.shared } };
 };
 
 // Validates one raw response entry; returns the normalized entry or a
@@ -337,7 +431,11 @@ const parseVersionedFile = (
       record: Record<string, unknown>;
     }
   | { ok: false; error: string } => {
-  const supported = `(extension supports ${versions.join(" and ")})`;
+  const listed =
+    versions.length > 1
+      ? `${versions.slice(0, -1).join(", ")} and ${versions[versions.length - 1]}`
+      : versions.join("");
+  const supported = `(extension supports ${listed})`;
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -370,20 +468,26 @@ const parseVersionedFile = (
   };
 };
 
-// The version a notes file is written at: 2 only when a note needs it, so
-// files without document notes stay readable by version-1 extensions.
-export const notesFileVersion = (notes: readonly Note[]): 1 | 2 =>
-  notes.some((note) => note.document !== undefined) ? 2 : 1;
+// The version a notes file is written at: the lowest that holds every note,
+// so files without newer note kinds stay readable by older extensions.
+export const notesFileVersion = (notes: readonly AnyNote[]): 1 | 2 | 3 => {
+  if (notes.some((note) => !isLineNote(note))) {
+    return 3;
+  }
+  return notes.some((note) => isLineNote(note) && note.document !== undefined)
+    ? 2
+    : 1;
+};
 
 // Parses and validates notes-file text. Unknown extra keys are ignored
 // (forward-friendly within a version).
 export const parseNotesFile = (text: string): ParseNotesResult => {
-  const top = parseVersionedFile(text, "notes", [1, 2]);
+  const top = parseVersionedFile(text, "notes", [1, 2, 3]);
   if (!top.ok) {
     return top;
   }
-  const version = top.version === 2 ? 2 : 1;
-  const notes: Note[] = [];
+  const version = top.version === 3 ? 3 : top.version === 2 ? 2 : 1;
+  const notes: AnyNote[] = [];
   for (let index = 0; index < top.entries.length; index++) {
     const result = parseNote(top.entries[index], index, version);
     if ("error" in result) {

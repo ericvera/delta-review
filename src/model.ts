@@ -567,6 +567,14 @@ const hashWorkingTree = async (
 export const resolveBranch = async (git: Git): Promise<string> =>
   (await git.run(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
 
+export class MergeBaseError extends Error {
+  override name = "MergeBaseError";
+
+  constructor(readonly base: string) {
+    super(`Cannot compute merge-base with "${base}".`);
+  }
+}
+
 // Computes the review set: every file that differs between the merge base and
 // the working tree (plus untracked files), with its review status derived by
 // comparing working-tree content against the reviewed snapshot. Content that
@@ -604,9 +612,7 @@ export const computeReviewModel = async (
   try {
     mergeBase = (await git.run(["merge-base", baseBranch, "HEAD"])).trim();
   } catch {
-    throw new Error(
-      `Cannot compute merge-base with "${baseBranch}". Check the deltaReview.baseBranch setting.`,
-    );
+    throw new MergeBaseError(baseBranch);
   }
 
   const trackedOutput = await git.run([

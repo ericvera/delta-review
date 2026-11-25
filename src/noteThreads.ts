@@ -1,4 +1,8 @@
+import { isFileNote, isGeneralNote, isLineNote } from "./notes";
 import type {
+  AnyNote,
+  FileNote,
+  GeneralNote,
   Note,
   NoteStatus,
   NotesFile,
@@ -24,16 +28,29 @@ export type ThreadTurn = {
 
 export type ThreadStatus = NoteStatus | "pending";
 
-export interface NoteThread {
-  note: Note;
+export interface NoteThread<N extends AnyNote = Note> {
+  note: N;
   turns: ThreadTurn[];
   // Derived: explicit resolve wins, else last speaker (pending agent →
   // pending, agent → addressed, reviewer → open)
   status: ThreadStatus;
   // Newest applied (non-dangling) anchor; consumers use it for relocation
-  // and the base→working side flip
+  // and the base→working side flip. Line notes only.
   effectiveAnchor?: ResponseAnchor;
 }
+
+export type AnyNoteThread = NoteThread<AnyNote>;
+
+export const isLineThread = (thread: AnyNoteThread): thread is NoteThread =>
+  isLineNote(thread.note);
+
+export const isFileThread = (
+  thread: AnyNoteThread,
+): thread is NoteThread<FileNote> => isFileNote(thread.note);
+
+export const isGeneralThread = (
+  thread: AnyNoteThread,
+): thread is NoteThread<GeneralNote> => isGeneralNote(thread.note);
 
 // Ascending by timestamp; returns 0 on ties or unparsable timestamps so the
 // stable sort preserves each source array's order (file-order fallback).
@@ -67,12 +84,13 @@ export const persistedStatus = (status: ThreadStatus): NoteStatus =>
 
 // Merges notes and responses into display threads. Responses referencing
 // unknown note ids are dropped; a missing/invalid responses file (undefined)
-// behaves as empty. Input notes are never mutated.
+// behaves as empty. Input notes are never mutated. Response anchors on
+// scoped notes are ignored.
 export const mergeThreads = (
   notes: NotesFile,
   responses: ResponsesFile | undefined,
   anchorResolves: (anchor: ResponseAnchor) => boolean,
-): NoteThread[] => {
+): AnyNoteThread[] => {
   const agentTurnsByNoteId = new Map<string, ThreadTurn[]>();
   for (const entry of responses?.responses ?? []) {
     const turn: ThreadTurn = {
@@ -106,8 +124,9 @@ export const mergeThreads = (
     const status = deriveThreadStatus(note.status, turns);
 
     let effectiveAnchor: ResponseAnchor | undefined;
-    for (let index = turns.length - 1; index >= 0; index--) {
-      const turn = turns[index];
+    const anchorTurns = isLineNote(note) ? turns : [];
+    for (let index = anchorTurns.length - 1; index >= 0; index--) {
+      const turn = anchorTurns[index];
       if (
         turn !== undefined &&
         turn.author === "agent" &&
@@ -119,7 +138,7 @@ export const mergeThreads = (
       }
     }
 
-    const thread: NoteThread = { note, turns, status };
+    const thread: AnyNoteThread = { note, turns, status };
     if (effectiveAnchor !== undefined) {
       thread.effectiveAnchor = effectiveAnchor;
     }
@@ -130,7 +149,7 @@ export const mergeThreads = (
 // Threads still needing work, mirroring the contract's actionable rule:
 // derived status open or pending. Outdated is a flag, not a status — it never
 // removes a thread from the work set.
-export const workSet = (threads: NoteThread[]): NoteThread[] =>
+export const workSet = (threads: AnyNoteThread[]): AnyNoteThread[] =>
   threads.filter(
     (thread) => thread.status === "open" || thread.status === "pending",
   );

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { FileReviewStatus, ReviewFile, ReviewModel } from "./model";
-import type { Note } from "./notes";
+import type { FileNote, Note } from "./notes";
 import {
   clampNoteRange,
+  fileNoteTargetFor,
   noteAnchorLines,
   noteTargetFor,
   reviewDiffIsEmpty,
@@ -326,5 +327,71 @@ describe("clampNoteRange", () => {
 
   it("never returns a negative line", () => {
     expect(clampNoteRange(0, 0, 5)).toEqual({ start: 0, end: 0 });
+  });
+});
+
+const fileNote = (overrides: Partial<FileNote> = {}): FileNote => ({
+  scope: "file",
+  id: "f1",
+  file: "src/app.ts",
+  contentBlob: "blob-at-creation",
+  turns: [{ text: "Split this file", at: "2026-08-01T10:00:00Z" }],
+  status: "open",
+  outdated: false,
+  createdAt: "2026-08-01T10:00:00Z",
+  ...overrides,
+});
+
+describe("fileNoteTargetFor", () => {
+  it("targets the working file for a file in the model", () => {
+    expect(
+      fileNoteTargetFor(
+        model([file({ path: "src/app.ts", diffBaseSha: "aaa" })]),
+        fileNote(),
+        false,
+      ),
+    ).toEqual({ kind: "working", path: "src/app.ts" });
+  });
+
+  it("targets the diff base for a file deleted in the model", () => {
+    expect(
+      fileNoteTargetFor(
+        model([
+          file({
+            path: "src/app.ts",
+            deleted: true,
+            diffBasePath: "src/old.ts",
+            diffBaseSha: "base-sha",
+          }),
+        ]),
+        fileNote(),
+        false,
+      ),
+    ).toEqual({ kind: "base", path: "src/old.ts", sha: "base-sha" });
+  });
+
+  it("falls back to the creation blob for a deleted file with no base sha", () => {
+    expect(
+      fileNoteTargetFor(
+        model([file({ path: "src/app.ts", deleted: true })]),
+        fileNote(),
+        false,
+      ),
+    ).toEqual({ kind: "base", path: "src/app.ts", sha: "blob-at-creation" });
+  });
+
+  it("targets the working file for a file gone from the model but on disk", () => {
+    expect(fileNoteTargetFor(model([]), fileNote(), true)).toEqual({
+      kind: "working",
+      path: "src/app.ts",
+    });
+  });
+
+  it("targets the creation blob for a file gone from model and disk", () => {
+    expect(fileNoteTargetFor(model([]), fileNote(), false)).toEqual({
+      kind: "base",
+      path: "src/app.ts",
+      sha: "blob-at-creation",
+    });
   });
 });

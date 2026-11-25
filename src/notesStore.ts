@@ -7,6 +7,8 @@ import { mapRangeThroughHunks, parseUnifiedDiffHunks } from "./noteAnchor";
 import { mergeThreads, persistedStatus } from "./noteThreads";
 import {
   archiveFileName,
+  isFileNote,
+  isLineNote,
   notesFileName,
   notesFileVersion,
   parseArchiveFile,
@@ -15,7 +17,10 @@ import {
   responsesFileName,
 } from "./notes";
 import type {
+  AnyNote,
   ArchiveShell,
+  FileNote,
+  GeneralNote,
   LoadNotesResult,
   LoadResponsesResult,
   Note,
@@ -272,7 +277,7 @@ export const archiveWarning = (
 export const archiveNotes = async (
   git: Git,
   branch: string,
-  notes: readonly Note[],
+  notes: readonly AnyNote[],
   deletedAt: string,
 ): Promise<ArchiveOutcome> => {
   let asidePath: string | undefined;
@@ -327,19 +332,22 @@ export const writeContentBlob = async (
 ): Promise<string> =>
   (await git.run(["hash-object", "-w", "--stdin"], { stdin: content })).trim();
 
-// Anchors every note's contentBlob as a commit tree on
+// Anchors every contentBlob (line and file notes) as a commit tree on
 // refs/review-notes/<branch> (path = note id, sha = contentBlob), so gc
-// keeps the blobs alive. With no notes left the ref is deleted. A commit is
+// keeps the blobs alive. With no blob-bearing notes left the ref is deleted. A commit is
 // only created when the anchored tree actually changed — mutation helpers
 // anchor after every save, and text-only edits would otherwise pile up
 // empty commits.
 export const anchorBlobs = async (
   git: Git,
   branch: string,
-  notes: Note[],
+  notes: readonly AnyNote[],
 ): Promise<void> => {
   const ref = reviewNotesRefForBranch(branch);
-  if (notes.length === 0) {
+  const blobs = notes.flatMap((note) =>
+    "contentBlob" in note ? [{ id: note.id, blob: note.contentBlob }] : [],
+  );
+  if (blobs.length === 0) {
     try {
       await git.run(["update-ref", "-d", ref]);
     } catch {
@@ -355,8 +363,8 @@ export const anchorBlobs = async (
   const env = { GIT_INDEX_FILE: indexFile };
   try {
     await git.run(["read-tree", "--empty"], { env });
-    const indexInfo = notes
-      .map((note) => `100644 ${note.contentBlob} 0\t${note.id}\0`)
+    const indexInfo = blobs
+      .map(({ id, blob }) => `100644 ${blob} 0\t${id}\0`)
       .join("");
     await git.run(["update-index", "-z", "--index-info"], {
       env,
@@ -414,7 +422,7 @@ const loadNotesForMutation = async (
   return result.state === "ok" ? result.file : { version: 1, notes: [] };
 };
 
-const findNote = (file: NotesFile, noteId: string): Note => {
+const findNote = (file: NotesFile, noteId: string): AnyNote => {
   const note = file.notes.find((entry) => entry.id === noteId);
   if (note === undefined) {
     throw new Error(`note "${noteId}" not found`);
@@ -437,20 +445,55 @@ export interface NoteDraft {
   content: string;
   // The reviewer's note text — becomes the first turn
   text: string;
+  // Pre-allocated id; generated when absent
+  id?: string;
 }
 
-// Creates a note: snapshots the side document as a blob, appends the note
-// with creation-value derived fields, saves, and anchors.
-export const createNote = async (
+export interface FileNoteDraft {
+  scope: "file";
+  // Repo-relative path
+  file: string;
+  // Full working-tree text at creation time (hashed into contentBlob)
+  content: string;
+  text: string;
+  id?: string;
+}
+
+export interface GeneralNoteDraft {
+  scope: "general";
+  text: string;
+  id?: string;
+}
+
+const buildNote = async (
   git: Git,
-  branch: string,
-  draft: NoteDraft,
-): Promise<Note> => {
-  const file = await loadNotesForMutation(git, branch);
+  draft: NoteDraft | FileNoteDraft | GeneralNoteDraft,
+  id: string,
+  now: string,
+): Promise<AnyNote> => {
+  const shared = {
+    id,
+    turns: [{ text: draft.text, at: now }],
+    status: "open" as const,
+    outdated: false,
+    createdAt: now,
+  };
+  if ("scope" in draft) {
+    if (draft.scope === "general") {
+      const note: GeneralNote = { scope: "general", ...shared };
+      return note;
+    }
+    const note: FileNote = {
+      scope: "file",
+      ...shared,
+      file: draft.file,
+      contentBlob: await writeContentBlob(git, draft.content),
+    };
+    return note;
+  }
   const contentBlob = await writeContentBlob(git, draft.content);
-  const now = new Date().toISOString();
   const note: Note = {
-    id: randomUUID(),
+    id,
     file: draft.file,
     ...(draft.document === undefined ? {} : { document: draft.document }),
     side: draft.side,
@@ -458,25 +501,51 @@ export const createNote = async (
     endLine: draft.endLine,
     snapshot: [...draft.snapshot],
     contentBlob,
-    turns: [{ text: draft.text, at: now }],
-    status: "open",
-    outdated: false,
+    turns: shared.turns,
+    status: shared.status,
+    outdated: shared.outdated,
     currentStartLine: draft.startLine,
     currentEndLine: draft.endLine,
     createdAt: now,
   };
+  return note;
+};
+
+// Creates a note: snapshots its document (if any) as a blob, appends the
+// note with creation-value derived fields, saves, and anchors.
+export async function createNote(
+  git: Git,
+  branch: string,
+  draft: NoteDraft,
+): Promise<Note>;
+export async function createNote(
+  git: Git,
+  branch: string,
+  draft: NoteDraft | FileNoteDraft | GeneralNoteDraft,
+): Promise<AnyNote>;
+export async function createNote(
+  git: Git,
+  branch: string,
+  draft: NoteDraft | FileNoteDraft | GeneralNoteDraft,
+): Promise<AnyNote> {
+  const file = await loadNotesForMutation(git, branch);
+  const id = draft.id ?? randomUUID();
+  if (file.notes.some((note) => note.id === id)) {
+    throw new Error(`note "${id}" already exists`);
+  }
+  const note = await buildNote(git, draft, id, new Date().toISOString());
   file.notes.push(note);
   await saveNotes(git, branch, file);
   await anchorBlobs(git, branch, file.notes);
   return note;
-};
+}
 
 export const appendReviewerTurn = async (
   git: Git,
   branch: string,
   noteId: string,
   text: string,
-): Promise<Note> => {
+): Promise<AnyNote> => {
   const file = await loadNotesForMutation(git, branch);
   const note = findNote(file, noteId);
   note.turns.push({ text, at: new Date().toISOString() });
@@ -494,7 +563,7 @@ export const appendReviewerTurn = async (
 const recomputeStatus = async (
   git: Git,
   branch: string,
-  note: Note,
+  note: AnyNote,
 ): Promise<void> => {
   note.status = "open";
   const responsesResult = await loadResponses(git, branch);
@@ -520,7 +589,7 @@ export const editReviewerTurn = async (
   noteId: string,
   turnAt: string,
   text: string,
-): Promise<Note> => {
+): Promise<AnyNote> => {
   const file = await loadNotesForMutation(git, branch);
   const note = findNote(file, noteId);
   const turn = note.turns.find((entry) => entry.at === turnAt);
@@ -543,13 +612,13 @@ export const deleteReviewerTurn = async (
   branch: string,
   noteId: string,
   turnIndex: number,
-): Promise<Note | undefined> => {
+): Promise<AnyNote | undefined> => {
   const file = await loadNotesForMutation(git, branch);
   const note = findNote(file, noteId);
   if (note.turns[turnIndex] === undefined) {
     throw new Error(`note "${noteId}" has no turn at index ${turnIndex}`);
   }
-  let remaining: Note | undefined;
+  let remaining: AnyNote | undefined;
   if (note.turns.length === 1) {
     file.notes = file.notes.filter((entry) => entry.id !== noteId);
   } else {
@@ -618,7 +687,7 @@ export const setResolved = async (
   branch: string,
   noteId: string,
   resolved: boolean,
-): Promise<Note> => {
+): Promise<AnyNote> => {
   const file = await loadNotesForMutation(git, branch);
   const note = findNote(file, noteId);
   if (resolved) {
@@ -651,6 +720,10 @@ export interface RefreshOptions {
   // (mergeThreads passthrough). Defaults to the real working-tree resolver
   // (buildAnchorResolver over readWorkingContent); injectable for tests.
   anchorResolves?: (anchor: ResponseAnchor) => boolean;
+  // Whether a repo-relative path is in the review set; a file note outside
+  // it is outdated. Absent → falls back to the file existing in the working
+  // tree.
+  isInReviewSet?: (file: string) => boolean;
 }
 
 // The derived-field refresh pass: applies any newly anchored agent response
@@ -669,7 +742,11 @@ export const refreshDerived = async (
   options: RefreshOptions,
 ): Promise<NotesFile> => {
   const file = structuredClone(notesFile);
-  const blobsBefore = file.notes.map((note) => note.contentBlob).join("\n");
+  const blobsOf = (notes: readonly AnyNote[]): string =>
+    notes
+      .map((note) => ("contentBlob" in note ? note.contentBlob : ""))
+      .join("\n");
+  const blobsBefore = blobsOf(file.notes);
   const anchorResolves =
     options.anchorResolves ??
     (await buildAnchorResolver(responses, options.readWorkingContent));
@@ -704,7 +781,7 @@ export const refreshDerived = async (
       }
     }
     const note = thread.note;
-    if (note.document !== undefined) {
+    if (!isLineNote(note) || note.document !== undefined) {
       continue;
     }
     if (appliedAt === undefined || note.appliedAnchorAt === appliedAt) {
@@ -734,6 +811,17 @@ export const refreshDerived = async (
     const thread = threads[index];
     if (thread !== undefined) {
       note.status = persistedStatus(thread.status);
+    }
+    if (!isLineNote(note)) {
+      if (isFileNote(note)) {
+        note.outdated = !(
+          options.isInReviewSet?.(note.file) ??
+          (await options.readWorkingContent(note.file)) !== undefined
+        );
+      } else {
+        note.outdated = false;
+      }
+      continue;
     }
     let currentBlob: string | undefined;
     if (note.side === "working") {
@@ -779,8 +867,7 @@ export const refreshDerived = async (
     note.outdated = mapped.outdated;
   }
   await saveNotes(git, branch, file);
-  const blobsAfter = file.notes.map((note) => note.contentBlob).join("\n");
-  if (blobsAfter !== blobsBefore) {
+  if (blobsOf(file.notes) !== blobsBefore) {
     await anchorBlobs(git, branch, file.notes);
   }
   return file;

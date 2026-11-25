@@ -20,26 +20,102 @@ export const reviewRefForBranch = (branch: string): string =>
 export const preDeletionRefForBranch = (branch: string): string =>
   `refs/review-predeletion/${branch}`;
 
-// Reads a path -> blob sha map from a snapshot ref; a missing ref reads empty
-const readSnapshotTree = async (
-  git: Git,
-  ref: string,
-): Promise<Map<string, string>> => {
-  try {
-    const output = await git.run(["ls-tree", "-r", "-z", ref]);
-    return parseLsTreeOutput(output);
-  } catch {
-    return new Map();
+export class ReviewStateConflictError extends Error {
+  override readonly name = "ReviewStateConflictError";
+
+  constructor(
+    readonly ref: string,
+    readonly kind: "moved" | "locked",
+    readonly lockPath?: string,
+  ) {
+    super(
+      kind === "moved"
+        ? `${ref} changed while it was being written`
+        : `${ref} is locked (${lockPath})`,
+    );
+  }
+}
+
+type Sleep = (ms: number) => Promise<void>;
+
+export interface ConflictRetryOptions {
+  sleep?: Sleep;
+}
+
+const defaultSleep: Sleep = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+// Runs the whole read-modify-write again on a conflict, so each attempt
+// re-reads the refs it is about to compare-and-set
+const withConflictRetry = async <T>(
+  fn: () => Promise<T>,
+  {
+    attempts = 3,
+    delays = [50, 200],
+    sleep = defaultSleep,
+  }: { attempts?: number; delays?: number[]; sleep?: Sleep } = {},
+): Promise<T> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!(error instanceof ReviewStateConflictError) || attempt >= attempts) {
+        throw error;
+      }
+      await sleep(delays[attempt - 1] ?? delays[delays.length - 1] ?? 0);
+    }
   }
 };
 
+// A missing ref resolves to undefined
+const readRefCommit = async (
+  git: Git,
+  ref: string,
+): Promise<string | undefined> => {
+  try {
+    const commit = (
+      await git.run(["rev-parse", "--verify", "--quiet", ref])
+    ).trim();
+    return commit === "" ? undefined : commit;
+  } catch {
+    return undefined;
+  }
+};
+
+// Reads a path -> blob sha map from a snapshot ref; a missing ref reads empty.
+// The tree is read from the resolved commit rather than the ref, so the map
+// and the commit a later compare-and-set expects always agree.
+const readSnapshotWithCommit = async (
+  git: Git,
+  ref: string,
+): Promise<{ state: Map<string, string>; commit: string | undefined }> => {
+  const commit = await readRefCommit(git, ref);
+  if (commit === undefined) {
+    return { state: new Map(), commit };
+  }
+  const output = await git.run(["ls-tree", "-r", "-z", commit]);
+  return { state: parseLsTreeOutput(output), commit };
+};
+
+const readSnapshotTree = async (
+  git: Git,
+  ref: string,
+): Promise<Map<string, string>> =>
+  (await readSnapshotWithCommit(git, ref)).state;
+
+const LOCKED_PATTERN =
+  /cannot lock ref .*Unable to create '([^']+\.lock)'.*File exists/s;
+
 // Persists a path -> blob sha map as a commit on the ref. The commit tree
 // anchors the snapshot blobs so `git gc` never collects them, and the parent
-// chain keeps a browsable history of review sessions.
+// chain keeps a browsable history of review sessions. The ref only moves if
+// it still points at `expectedOld`, the commit the caller read its state from,
+// so a concurrent writer in another window or worktree is never overwritten.
 const writeSnapshotTree = async (
   git: Git,
   ref: string,
   state: Map<string, string>,
+  expectedOld: string | undefined,
 ): Promise<void> => {
   // A temporary index keeps this fully isolated from the user's real index
   const indexFile = join(
@@ -59,18 +135,7 @@ const writeSnapshotTree = async (
       });
     }
     const tree = (await git.run(["write-tree"], { env })).trim();
-
-    let parentArgs: string[] = [];
-    try {
-      const parent = (
-        await git.run(["rev-parse", "--verify", "--quiet", ref])
-      ).trim();
-      if (parent !== "") {
-        parentArgs = ["-p", parent];
-      }
-    } catch {
-      // No previous state on this ref
-    }
+    const parentArgs = expectedOld === undefined ? [] : ["-p", expectedOld];
     const commit = (
       await git.run([
         "commit-tree",
@@ -80,7 +145,23 @@ const writeSnapshotTree = async (
         "delta-review state",
       ])
     ).trim();
-    await git.run(["update-ref", ref, commit]);
+    // An empty old value makes git require that the ref does not exist yet
+    try {
+      await git.run(["update-ref", ref, commit, expectedOld ?? ""]);
+    } catch (error) {
+      // A lock held by another git process (or left stale by a crashed one)
+      // is checked first: the ref may still equal expectedOld behind it
+      const locked = LOCKED_PATTERN.exec(
+        error instanceof Error ? error.message : String(error),
+      );
+      if (locked) {
+        throw new ReviewStateConflictError(ref, "locked", locked[1]);
+      }
+      if ((await readRefCommit(git, ref)) !== expectedOld) {
+        throw new ReviewStateConflictError(ref, "moved");
+      }
+      throw error;
+    }
   } finally {
     await unlink(indexFile).catch(() => undefined);
   }
@@ -94,11 +175,16 @@ export const readReviewState = (
 ): Promise<Map<string, string>> =>
   readSnapshotTree(git, reviewRefForBranch(branch));
 
-export const writeReviewState = (
+// A lone write has no earlier read to protect, so it compares against the
+// ref's current commit
+export const writeReviewState = async (
   git: Git,
   branch: string,
   state: Map<string, string>,
-): Promise<void> => writeSnapshotTree(git, reviewRefForBranch(branch), state);
+): Promise<void> => {
+  const ref = reviewRefForBranch(branch);
+  await writeSnapshotTree(git, ref, state, await readRefCommit(git, ref));
+};
 
 export const readPreDeletionState = (
   git: Git,
@@ -118,93 +204,134 @@ export const deletePreDeletionRef = async (
 };
 
 // Snapshots the current working-tree content of the given paths as reviewed
-export const markReviewed = async (
+export const markReviewed = (
   git: Git,
   branch: string,
   paths: string[],
-): Promise<void> => {
-  const state = await readReviewState(git, branch);
-  const preDeletion = await readPreDeletionState(git, branch);
-  let preDeletionChanged = false;
-  const existingPaths = paths.filter((path) =>
-    existsSync(join(git.repoRoot, path)),
-  );
-  const deletedPaths = paths.filter(
-    (path) => !existsSync(join(git.repoRoot, path)),
-  );
+  options?: ConflictRetryOptions,
+): Promise<void> =>
+  withConflictRetry(async () => {
+    const reviewRef = reviewRefForBranch(branch);
+    const preDeletionRef = preDeletionRefForBranch(branch);
+    const { state, commit: reviewCommit } = await readSnapshotWithCommit(
+      git,
+      reviewRef,
+    );
+    const { state: preDeletion, commit: preDeletionCommit } =
+      await readSnapshotWithCommit(git, preDeletionRef);
+    let preDeletionChanged = false;
+    const existingPaths = paths.filter((path) =>
+      existsSync(join(git.repoRoot, path)),
+    );
+    const deletedPaths = paths.filter(
+      (path) => !existsSync(join(git.repoRoot, path)),
+    );
 
-  for (const path of existingPaths) {
-    preDeletionChanged = preDeletion.delete(path) || preDeletionChanged;
-  }
-  if (existingPaths.length > 0) {
-    const output = await git.run(["hash-object", "-w", "--stdin-paths"], {
-      stdin: existingPaths.join("\n") + "\n",
-    });
-    const shas = output.trim().split("\n");
-    existingPaths.forEach((path, index) => state.set(path, shas[index]));
-  }
-  if (deletedPaths.length > 0) {
-    const sentinelSha = (
-      await git.run(["hash-object", "-w", "--stdin"], {
-        stdin: DELETED_SENTINEL_CONTENT,
-      })
-    ).trim();
-    for (const path of deletedPaths) {
-      const prior = state.get(path);
-      if (prior === undefined) {
-        preDeletionChanged = preDeletion.delete(path) || preDeletionChanged;
-      } else if (prior !== sentinelSha && preDeletion.get(path) !== prior) {
-        preDeletion.set(path, prior);
-        preDeletionChanged = true;
-      }
-      state.set(path, sentinelSha);
+    for (const path of existingPaths) {
+      preDeletionChanged = preDeletion.delete(path) || preDeletionChanged;
     }
-  }
+    if (existingPaths.length > 0) {
+      const output = await git.run(["hash-object", "-w", "--stdin-paths"], {
+        stdin: existingPaths.join("\n") + "\n",
+      });
+      const shas = output.trim().split("\n");
+      existingPaths.forEach((path, index) => state.set(path, shas[index]));
+    }
+    if (deletedPaths.length > 0) {
+      const sentinelSha = (
+        await git.run(["hash-object", "-w", "--stdin"], {
+          stdin: DELETED_SENTINEL_CONTENT,
+        })
+      ).trim();
+      for (const path of deletedPaths) {
+        const prior = state.get(path);
+        if (prior === undefined) {
+          preDeletionChanged = preDeletion.delete(path) || preDeletionChanged;
+        } else if (prior !== sentinelSha && preDeletion.get(path) !== prior) {
+          preDeletion.set(path, prior);
+          preDeletionChanged = true;
+        }
+        state.set(path, sentinelSha);
+      }
+    }
 
-  // Pre-deletion first: a failed review write then leaves only a harmless
-  // extra entry, never a sentinel with the inherited snapshot lost behind it
-  if (preDeletionChanged) {
-    await writeSnapshotTree(git, preDeletionRefForBranch(branch), preDeletion);
-  }
-  await writeReviewState(git, branch, state);
-};
+    // Pre-deletion first: a failed review write then leaves only a harmless
+    // extra entry, never a sentinel with the inherited snapshot lost behind
+    // it. A conflict on the review write after this one landed is safe to
+    // retry: the retry re-reads pre-deletion and finds its entry in place.
+    if (preDeletionChanged) {
+      await writeSnapshotTree(
+        git,
+        preDeletionRef,
+        preDeletion,
+        preDeletionCommit,
+      );
+    }
+    await writeSnapshotTree(git, reviewRef, state, reviewCommit);
+  }, options);
 
-export const unmarkReviewed = async (
+export const unmarkReviewed = (
   git: Git,
   branch: string,
   paths: string[],
-): Promise<void> => {
-  const state = await readReviewState(git, branch);
-  for (const path of paths) {
-    state.delete(path);
-  }
-  await writeReviewState(git, branch, state);
+  options?: ConflictRetryOptions,
+): Promise<void> =>
+  withConflictRetry(async () => {
+    const reviewRef = reviewRefForBranch(branch);
+    const preDeletionRef = preDeletionRefForBranch(branch);
+    const { state, commit: reviewCommit } = await readSnapshotWithCommit(
+      git,
+      reviewRef,
+    );
+    for (const path of paths) {
+      state.delete(path);
+    }
+    await writeSnapshotTree(git, reviewRef, state, reviewCommit);
 
-  const preDeletion = await readPreDeletionState(git, branch);
-  let preDeletionChanged = false;
-  for (const path of paths) {
-    preDeletionChanged = preDeletion.delete(path) || preDeletionChanged;
-  }
-  if (preDeletionChanged) {
-    await writeSnapshotTree(git, preDeletionRefForBranch(branch), preDeletion);
-  }
-};
+    const { state: preDeletion, commit: preDeletionCommit } =
+      await readSnapshotWithCommit(git, preDeletionRef);
+    let preDeletionChanged = false;
+    for (const path of paths) {
+      preDeletionChanged = preDeletion.delete(path) || preDeletionChanged;
+    }
+    if (preDeletionChanged) {
+      await writeSnapshotTree(
+        git,
+        preDeletionRef,
+        preDeletion,
+        preDeletionCommit,
+      );
+    }
+  }, options);
 
 // Drops every snapshot on the branch, including snapshots for paths that are
 // no longer in the review set — leaving those behind is what makes a diff open
 // against a stale base. Committing an empty tree rather than deleting the ref
 // keeps the history browsable and keeps the superseded blobs anchored against
 // `git gc`; deleting the ref outright is the palette command's job.
-export const clearAllReviewSnapshots = async (
+export const clearAllReviewSnapshots = (
   git: Git,
   branch: string,
-): Promise<void> => {
-  const state = await readReviewState(git, branch);
-  const preDeletion = await readPreDeletionState(git, branch);
-  if (state.size > 0) {
-    await writeReviewState(git, branch, new Map());
-  }
-  if (preDeletion.size > 0) {
-    await writeSnapshotTree(git, preDeletionRefForBranch(branch), new Map());
-  }
-};
+  options?: ConflictRetryOptions,
+): Promise<void> =>
+  withConflictRetry(async () => {
+    const reviewRef = reviewRefForBranch(branch);
+    const preDeletionRef = preDeletionRefForBranch(branch);
+    const { state, commit: reviewCommit } = await readSnapshotWithCommit(
+      git,
+      reviewRef,
+    );
+    const { state: preDeletion, commit: preDeletionCommit } =
+      await readSnapshotWithCommit(git, preDeletionRef);
+    if (state.size > 0) {
+      await writeSnapshotTree(git, reviewRef, new Map(), reviewCommit);
+    }
+    if (preDeletion.size > 0) {
+      await writeSnapshotTree(
+        git,
+        preDeletionRef,
+        new Map(),
+        preDeletionCommit,
+      );
+    }
+  }, options);
