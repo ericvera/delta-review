@@ -1,7 +1,11 @@
 import { basename, dirname } from "node:path";
 import * as vscode from "vscode";
 import type { NoteDocument } from "./notes";
-import { groupNoteThreads, notesGroupCollapseKey } from "./notesGrouping";
+import {
+  documentNoteGroupDescription,
+  groupNoteThreads,
+  notesGroupCollapseKey,
+} from "./notesGrouping";
 import type { NoteThread, ThreadStatus } from "./noteThreads";
 
 // REVIEW NOTES tree: notes grouped by file, rendered as a sibling SCM section
@@ -79,7 +83,10 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
   constructor(
     private readonly isCollapsed: (key: string) => boolean,
     private readonly isUnread: (thread: NoteThread) => boolean,
-    private readonly documentLabel: (file: string) => string,
+    private readonly documentLabel: (
+      document: NoteDocument,
+      file: string,
+    ) => string,
   ) {}
 
   setThreads(threads: NoteThread[]): void {
@@ -111,12 +118,15 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
   getTreeItem(element: NotesTreeElement): vscode.TreeItem {
     if (element.kind === "fileGroup" && element.document !== undefined) {
       const item = new vscode.TreeItem(
-        this.documentLabel(element.file),
+        this.documentLabel(element.document, element.file),
         this.isCollapsed(notesCollapseKeyFor(element))
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.Expanded,
       );
-      item.description = `cluster notes · ${element.threads.length}`;
+      item.description = documentNoteGroupDescription(
+        element.document,
+        element.threads.length,
+      );
       const tooltip = new vscode.MarkdownString();
       tooltip.appendCodeblock(element.file, "text");
       item.tooltip = tooltip;

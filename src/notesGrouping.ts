@@ -10,8 +10,12 @@ export interface NoteGroup {
   threads: NoteThread[];
 }
 
+const groupRank = (group: NoteGroup): number =>
+  group.document === "branch" ? 0 : group.document === "clusterNotes" ? 1 : 2;
+
 // Keyed by (document, file) so a repo file sharing a document's name never
-// merges with it; document groups first, then code groups, each by file.
+// merges with it; Branch overview groups first, then cluster notes groups,
+// then code groups, each by file.
 export const groupNoteThreads = (threads: NoteThread[]): NoteGroup[] => {
   const groups = new Map<string, NoteGroup>();
   for (const thread of threads) {
@@ -30,10 +34,9 @@ export const groupNoteThreads = (threads: NoteThread[]): NoteGroup[] => {
   }
   return [...groups.values()]
     .sort((a, b) => {
-      const aDocument = a.document === undefined ? 1 : 0;
-      const bDocument = b.document === undefined ? 1 : 0;
-      if (aDocument !== bDocument) {
-        return aDocument - bDocument;
+      const rankDifference = groupRank(a) - groupRank(b);
+      if (rankDifference !== 0) {
+        return rankDifference;
       }
       return a.file < b.file ? -1 : a.file > b.file ? 1 : 0;
     })
@@ -45,16 +48,28 @@ export const groupNoteThreads = (threads: NoteThread[]): NoteGroup[] => {
     }));
 };
 
-export const clusterNotesDocumentLabel = (
+export const documentNoteGroupLabel = (
+  document: NoteDocument,
   file: string,
   clusterLabels: readonly string[],
 ): string => {
+  if (document === "branch") {
+    return "Branch overview";
+  }
   const label = clusterLabels.find((candidate) => {
     const slug = clusterSlug(candidate);
     return slug !== "" && `${slug}.md` === file;
   });
   return label === undefined ? file : `${label} — notes`;
 };
+
+export const documentNoteGroupDescription = (
+  document: NoteDocument,
+  count: number,
+): string =>
+  document === "branch"
+    ? `branch overview · ${count}`
+    : `cluster notes · ${count}`;
 
 // Collapse keys share the main view's persisted set; the `notes:` namespace
 // can never collide with its status/cluster/folder keys.

@@ -1391,14 +1391,45 @@ describe("document notes", () => {
         readWorkingContent: async () => {
           throw new Error("document notes must not read the working tree");
         },
-        readDocumentContent: async (fileName) => {
-          reads.push(fileName);
+        readDocumentContent: async (document, fileName) => {
+          reads.push(`${document}:${fileName}`);
           return "intro\n" + docContent;
         },
       }),
     );
-    expect(reads).toEqual(["auth.md"]);
+    expect(reads).toEqual(["clusterNotes:auth.md"]);
     expect(refreshed.notes[0]).toMatchObject({
+      currentStartLine: 4,
+      currentEndLine: 5,
+      outdated: false,
+    });
+  });
+
+  it("refreshDerived shifts a branch document note through readDocumentContent", async () => {
+    await createNote(git, "main", {
+      ...docDraft(),
+      file: "branch-main.md",
+      document: "branch",
+    });
+    const reads: string[] = [];
+    const refreshed = await refreshDerived(
+      git,
+      "main",
+      await loadedNotes(),
+      undefined,
+      refreshOptions({
+        readWorkingContent: async () => {
+          throw new Error("document notes must not read the working tree");
+        },
+        readDocumentContent: async (document, fileName) => {
+          reads.push(`${document}:${fileName}`);
+          return "intro\n" + docContent;
+        },
+      }),
+    );
+    expect(reads).toEqual(["branch:branch-main.md"]);
+    expect(refreshed.notes[0]).toMatchObject({
+      document: "branch",
       currentStartLine: 4,
       currentEndLine: 5,
       outdated: false,

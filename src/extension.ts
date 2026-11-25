@@ -32,8 +32,9 @@ import {
 } from "./contentProvider";
 import { createReviewDecorationProvider } from "./decorations";
 import {
-  CLUSTER_NOTES_FILE_PATTERN,
   deltaReviewDirFor,
+  documentNotePath,
+  isDocumentNoteFileName,
   loadReviewDocuments,
   ReviewDocuments,
 } from "./documents";
@@ -50,8 +51,8 @@ import {
   ReviewModel,
 } from "./model";
 import { buildDiffTitle, buildRowDescription } from "./moveDisplay";
-import type { ResponsesFile } from "./notes";
-import { clusterNotesDocumentLabel } from "./notesGrouping";
+import type { NoteDocument, ResponsesFile } from "./notes";
+import { documentNoteGroupLabel } from "./notesGrouping";
 import {
   noteAnchorLines,
   NoteTarget,
@@ -212,8 +213,9 @@ export const activate = async (
   const notesTreeProvider = new NotesTreeProvider(
     (key) => collapsed.has(key),
     isUnread,
-    (file) =>
-      clusterNotesDocumentLabel(
+    (document, file) =>
+      documentNoteGroupLabel(
+        document,
         file,
         clusterModel?.clusters.map((cluster) => cluster.label) ?? [],
       ),
@@ -330,7 +332,7 @@ export const activate = async (
     () => model,
     () => void refresh(),
     { isUnread, markRead: (thread) => markRead(thread) },
-    () => reviewDocuments?.clusterNotesDir,
+    () => reviewDocuments,
   );
   context.subscriptions.push(commentController);
 
@@ -610,17 +612,18 @@ export const activate = async (
           }
         };
         const readDocumentContent = async (
+          document: NoteDocument,
           fileName: string,
         ): Promise<string | undefined> => {
           if (
             reviewDocuments === undefined ||
-            !CLUSTER_NOTES_FILE_PATTERN.test(fileName)
+            !isDocumentNoteFileName(document, fileName)
           ) {
             return undefined;
           }
           try {
             return await readFile(
-              join(reviewDocuments.clusterNotesDir, fileName),
+              documentNotePath(reviewDocuments, document, fileName),
               "utf8",
             );
           } catch {
@@ -1298,7 +1301,9 @@ export const activate = async (
         return createReviewBaseUri(target.path, target.sha);
       case "document":
         return vscode.Uri.file(
-          join(reviewDocuments?.clusterNotesDir ?? "", target.file),
+          reviewDocuments === undefined
+            ? target.file
+            : documentNotePath(reviewDocuments, target.document, target.file),
         );
     }
   };
@@ -1309,11 +1314,13 @@ export const activate = async (
     if (git === undefined) {
       return;
     }
-    const dir = reviewDocuments?.clusterNotesDir;
+    const document = thread.note.document;
     let exists = false;
-    if (dir !== undefined) {
+    if (reviewDocuments !== undefined && document !== undefined) {
       try {
-        await access(join(dir, thread.note.file));
+        await access(
+          documentNotePath(reviewDocuments, document, thread.note.file),
+        );
         exists = true;
       } catch {
         exists = false;
@@ -2188,6 +2195,10 @@ export const activate = async (
             icon: icon?.id,
             iconColor: icon?.color?.id,
             query: item.resourceUri?.query,
+            commandUri:
+              item.command?.arguments?.[0] instanceof vscode.Uri
+                ? item.command.arguments[0].toString()
+                : undefined,
           },
           ...collectTreeRows(child),
         ];
@@ -2217,6 +2228,7 @@ export const activate = async (
           notesBadge: notesTreeView.badge,
           clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
           treeRows: collectTreeRows(),
+          commentableDocuments: commentController.commentableDocuments(),
         };
       }),
     );

@@ -429,7 +429,9 @@ describe("documentPathFor", () => {
   const documents = (
     overrides: Partial<ReviewDocuments> = {},
   ): ReviewDocuments => ({
+    deltaReviewDir: "/d",
     clusterNotesDir: "/d/cluster-notes-x",
+    branchDocumentFileName: "branch-x.md",
     branchDocument: "/d/branch-x.md",
     clusterNotes: new Map([
       [

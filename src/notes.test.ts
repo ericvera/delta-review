@@ -113,7 +113,7 @@ describe("parseNotesFile document notes", () => {
   it("rejects an invalid document value", () => {
     expect(parseNotesFile(v2Text({ ...documentNote, document: "x" }))).toEqual({
       ok: false,
-      error: 'note 1 ("a1b2"): "document" must be "clusterNotes"',
+      error: 'note 1 ("a1b2"): "document" must be "clusterNotes" or "branch"',
     });
   });
 
@@ -133,6 +133,42 @@ describe("parseNotesFile document notes", () => {
       ok: false,
       error: 'note 1 ("a1b2"): a document note\'s "side" must be "working"',
     });
+  });
+
+  const branchNote: Note = {
+    ...validNote,
+    file: "branch-feat-x.md",
+    document: "branch",
+    side: "working",
+  };
+
+  it("parses a version 2 branch document note", () => {
+    expect(parseNotesFile(v2Text({ ...branchNote }))).toEqual({
+      ok: true,
+      file: { version: 2, notes: [branchNote] },
+    });
+  });
+
+  it.each(["notes.md", "../branch-x.md", "branch-a/b.md"])(
+    "rejects branch document file name %j",
+    (file) => {
+      expect(parseNotesFile(v2Text({ ...branchNote, file }))).toEqual({
+        ok: false,
+        error:
+          'note 1 ("a1b2"): a branch document note\'s "file" must be a branch document file name',
+      });
+    },
+  );
+
+  it("rejects a base-side branch document note", () => {
+    expect(parseNotesFile(v2Text({ ...branchNote, side: "base" }))).toEqual({
+      ok: false,
+      error: 'note 1 ("a1b2"): a document note\'s "side" must be "working"',
+    });
+  });
+
+  it("writes a file holding only a branch note at version 2", () => {
+    expect(notesFileVersion([branchNote])).toBe(2);
   });
 
   it("ignores a document key in a version 1 file", () => {
