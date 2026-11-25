@@ -988,11 +988,26 @@ describe("computeReviewModel", () => {
     const diffOutput = full.changes
       .map((record) => record.join("\0") + "\0")
       .join("");
+    const snapshotsFor = (ref: string): Record<string, string> =>
+      ref === `refs/review/${full.branch}`
+        ? full.reviewState
+        : ref === `refs/review-predeletion/${full.branch}`
+          ? full.preDeletionState
+          : {};
     return {
       repoRoot,
       run: async (args, options) => {
         gitCalls.push([...args]);
         if (args[0] === "rev-parse") {
+          const ref = args[args.length - 1];
+          // A snapshot ref resolves to itself, so `ls-tree` on the resolved
+          // commit still tells the refs apart; an empty one does not exist
+          if (ref.startsWith("refs/review")) {
+            if (Object.keys(snapshotsFor(ref)).length === 0) {
+              throw new Error("Command failed: git rev-parse");
+            }
+            return `${ref}\n`;
+          }
           return `${full.branch}\n`;
         }
         if (args[0] === "merge-base") {
@@ -1028,12 +1043,7 @@ describe("computeReviewModel", () => {
               ),
             );
           }
-          const snapshots =
-            args[3] === `refs/review/${full.branch}`
-              ? full.reviewState
-              : args[3] === `refs/review-predeletion/${full.branch}`
-                ? full.preDeletionState
-                : {};
+          const snapshots = snapshotsFor(args[3]);
           if (Object.keys(snapshots).length === 0) {
             throw new Error("fatal: not a valid object name");
           }
@@ -1129,12 +1139,12 @@ describe("computeReviewModel", () => {
       branch: "feat/supplied",
     });
     expect(supplied.branch).toBe("feat/supplied");
-    expect(gitCalls.some((args) => args[0] === "rev-parse")).toBe(false);
+    expect(gitCalls).not.toContainEqual(["rev-parse", "--abbrev-ref", "HEAD"]);
     // The supplied branch is what the rest of the computation runs against
     expect(gitCalls).toContainEqual([
-      "ls-tree",
-      "-r",
-      "-z",
+      "rev-parse",
+      "--verify",
+      "--quiet",
       "refs/review/feat/supplied",
     ]);
   });

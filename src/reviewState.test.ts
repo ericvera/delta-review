@@ -2,10 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Git } from "./git";
+import { createGit, type Git } from "./git";
 import {
   clearAllReviewSnapshots,
   markReviewed,
+  readReviewState,
+  ReviewStateConflictError,
   unmarkReviewed,
 } from "./reviewState";
 
@@ -14,7 +16,8 @@ const REVIEW_REF = `refs/review/${BRANCH}`;
 const PRE_DELETION_REF = `refs/review-predeletion/${BRANCH}`;
 const SNAPSHOT_SHA = "1".repeat(40);
 const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const PARENT_SHA = "2".repeat(40);
+const REVIEW_COMMIT = "2".repeat(40);
+const PRE_DELETION_COMMIT = "8".repeat(40);
 const COMMIT_SHA = "3".repeat(40);
 const SENTINEL_SHA = "5".repeat(40);
 const WORKING_SHA = "6".repeat(40);
@@ -24,7 +27,7 @@ type Snapshots = Record<string, string> | undefined;
 
 // A Git stub recording every call and its stdin. `entries` is what the review
 // ref holds and `preDeletion` what the pre-deletion ref holds; undefined means
-// the ref does not exist, which `ls-tree` reports by failing.
+// the ref does not exist, which `rev-parse --verify --quiet` reports by failing.
 const setUp = (
   entries: Snapshots,
   preDeletion?: Snapshots,
@@ -32,23 +35,26 @@ const setUp = (
 ): { git: Git; calls: string[][]; stdins: (string | undefined)[] } => {
   const calls: string[][] = [];
   const stdins: (string | undefined)[] = [];
-  const lsTree = (snapshots: Snapshots): string => {
-    if (snapshots === undefined) {
-      throw new Error("fatal: not a valid object name");
-    }
-    return Object.entries(snapshots)
+  const lsTree = (snapshots: Snapshots): string =>
+    Object.entries(snapshots ?? {})
       .map(([path, sha]) => `100644 blob ${sha}\t${path}\0`)
       .join("");
-  };
   const git: Git = {
     repoRoot,
     run: async (args, options) => {
       calls.push([...args]);
       stdins.push(options?.stdin);
-      if (args[0] === "ls-tree" && args[3] === REVIEW_REF) {
+      if (args[0] === "rev-parse") {
+        const snapshots = args[3] === REVIEW_REF ? entries : preDeletion;
+        if (snapshots === undefined) {
+          throw new Error("Command failed: git rev-parse");
+        }
+        return `${args[3] === REVIEW_REF ? REVIEW_COMMIT : PRE_DELETION_COMMIT}\n`;
+      }
+      if (args[0] === "ls-tree" && args[3] === REVIEW_COMMIT) {
         return lsTree(entries);
       }
-      if (args[0] === "ls-tree" && args[3] === PRE_DELETION_REF) {
+      if (args[0] === "ls-tree" && args[3] === PRE_DELETION_COMMIT) {
         return lsTree(preDeletion);
       }
       if (args[0] === "read-tree" || args[0] === "update-index") {
@@ -56,9 +62,6 @@ const setUp = (
       }
       if (args[0] === "write-tree") {
         return `${EMPTY_TREE_SHA}\n`;
-      }
-      if (args[0] === "rev-parse") {
-        return `${PARENT_SHA}\n`;
       }
       if (args[0] === "commit-tree") {
         return `${COMMIT_SHA}\n`;
@@ -127,8 +130,8 @@ describe("clearAllReviewSnapshots", () => {
     const { git, calls } = setUp(undefined);
     await clearAllReviewSnapshots(git, BRANCH);
     expect(calls).toEqual([
-      ["ls-tree", "-r", "-z", REVIEW_REF],
-      ["ls-tree", "-r", "-z", PRE_DELETION_REF],
+      ["rev-parse", "--verify", "--quiet", REVIEW_REF],
+      ["rev-parse", "--verify", "--quiet", PRE_DELETION_REF],
     ]);
     expect(wrote(calls)).toBe(false);
   });
@@ -152,11 +155,16 @@ describe("clearAllReviewSnapshots", () => {
       "commit-tree",
       EMPTY_TREE_SHA,
       "-p",
-      PARENT_SHA,
+      REVIEW_COMMIT,
       "-m",
       "delta-review state",
     ]);
-    expect(calls).toContainEqual(["update-ref", REVIEW_REF, COMMIT_SHA]);
+    expect(calls).toContainEqual([
+      "update-ref",
+      REVIEW_REF,
+      COMMIT_SHA,
+      REVIEW_COMMIT,
+    ]);
   });
 
   it("drops a snapshot for a path that is no longer in the review set", async () => {
@@ -164,7 +172,12 @@ describe("clearAllReviewSnapshots", () => {
     await clearAllReviewSnapshots(git, BRANCH);
     // The clear takes no path list at all, so a stale entry cannot survive it
     expect(calls.some((args) => args.includes("src/gone.ts"))).toBe(false);
-    expect(calls).toContainEqual(["update-ref", REVIEW_REF, COMMIT_SHA]);
+    expect(calls).toContainEqual([
+      "update-ref",
+      REVIEW_REF,
+      COMMIT_SHA,
+      REVIEW_COMMIT,
+    ]);
   });
 });
 
@@ -277,6 +290,184 @@ describe("unmarkReviewed", () => {
   it("writes no pre-deletion commit when the path has no entry", async () => {
     const { git, calls } = setUp({ "old.ts": SNAPSHOT_SHA }, undefined);
     await unmarkReviewed(git, BRANCH, ["old.ts"]);
+    expect(updatedRefs(calls)).toEqual([REVIEW_REF]);
+  });
+});
+
+describe("concurrent review-state writers", () => {
+  const branch = "main";
+  const reviewRef = `refs/review/${branch}`;
+  let repoRoot: string;
+  let git: Git;
+
+  beforeEach(async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "delta-review-cas-"));
+    git = createGit(repoRoot);
+    await git.run(["init", "-b", "main"]);
+    await git.run(["config", "user.email", "test@example.com"]);
+    await git.run(["config", "user.name", "Test"]);
+    await git.run(["config", "commit.gpgsign", "false"]);
+    await writeFile(join(repoRoot, "a.txt"), "a\n");
+    await writeFile(join(repoRoot, "b.txt"), "b\n");
+    await git.run(["add", "."]);
+    await git.run(["commit", "-m", "init"]);
+  });
+
+  afterEach(async () => {
+    await rm(repoRoot, { recursive: true, force: true });
+  });
+
+  const reviewedPaths = async (): Promise<string[]> =>
+    [...(await readReviewState(git, branch)).keys()].sort();
+
+  const refHistory = async (ref: string): Promise<string[]> =>
+    (await git.run(["log", "--format=%H", ref])).trim().split("\n");
+
+  // Runs `inject` once, just before the first git call matching `trigger`
+  const injectBefore = (
+    trigger: string,
+    inject: () => Promise<unknown>,
+  ): Git => {
+    let injected = false;
+    return {
+      repoRoot,
+      run: async (args, options) => {
+        if (!injected && args[0] === trigger) {
+          injected = true;
+          await inject();
+        }
+        return git.run(args, options);
+      },
+    };
+  };
+
+  it("keeps a mark another writer lands mid-markReviewed", async () => {
+    const racing = injectBefore("hash-object", () =>
+      markReviewed(git, branch, ["b.txt"]),
+    );
+    await markReviewed(racing, branch, ["a.txt"], { sleep: async () => {} });
+    expect(await reviewedPaths()).toEqual(["a.txt", "b.txt"]);
+    // The concurrent mark's commit, then the retried mark on top of it
+    expect(await refHistory(reviewRef)).toHaveLength(2);
+  });
+
+  it("keeps a mark another writer lands mid-unmarkReviewed", async () => {
+    await markReviewed(git, branch, ["a.txt"]);
+    const racing = injectBefore("write-tree", () =>
+      markReviewed(git, branch, ["b.txt"]),
+    );
+    await unmarkReviewed(racing, branch, ["a.txt"], { sleep: async () => {} });
+    expect(await reviewedPaths()).toEqual(["b.txt"]);
+  });
+
+  it("rejects with a moved conflict after every attempt loses the race", async () => {
+    let moves = 0;
+    const racing: Git = {
+      repoRoot,
+      run: async (args, options) => {
+        if (args[0] === "update-ref") {
+          moves += 1;
+          const tree = (await git.run(["write-tree"])).trim();
+          const commit = (
+            await git.run(["commit-tree", tree, "-m", `move ${moves}`])
+          ).trim();
+          await git.run(["update-ref", reviewRef, commit]);
+        }
+        return git.run(args, options);
+      },
+    };
+    const result = markReviewed(racing, branch, ["a.txt"], {
+      sleep: async () => {},
+    });
+    await expect(result).rejects.toBeInstanceOf(ReviewStateConflictError);
+    await expect(result).rejects.toMatchObject({
+      kind: "moved",
+      ref: reviewRef,
+    });
+    expect(moves).toBe(3);
+  });
+
+  it("rejects with a locked conflict while a stale lock file stays", async () => {
+    await markReviewed(git, branch, ["a.txt"]);
+    const before = await git.run(["rev-parse", reviewRef]);
+    await writeFile(join(repoRoot, ".git", "refs", "review", "main.lock"), "");
+    let updateRefs = 0;
+    const counting: Git = {
+      repoRoot,
+      run: (args, options) => {
+        if (args[0] === "update-ref") {
+          updateRefs += 1;
+        }
+        return git.run(args, options);
+      },
+    };
+    const result = markReviewed(counting, branch, ["b.txt"], {
+      sleep: async () => {},
+    });
+    await expect(result).rejects.toBeInstanceOf(ReviewStateConflictError);
+    const error = (await result.catch((e: unknown) => e)) as {
+      kind: string;
+      lockPath: string;
+      message: string;
+    };
+    expect(error.kind).toBe("locked");
+    expect(error.lockPath).toMatch(/main\.lock$/);
+    expect(error.message).toBe(`${reviewRef} is locked (${error.lockPath})`);
+    expect(updateRefs).toBe(3);
+    expect(await git.run(["rev-parse", reviewRef])).toBe(before);
+  });
+});
+
+describe("compare-and-set review-state writes", () => {
+  // Rejects the first `update-ref` with `failure`, passing later calls through
+  const failFirstUpdateRef = (git: Git, failure: Error): Git => {
+    let failed = false;
+    return {
+      ...git,
+      run: async (args, options) => {
+        const result = await git.run(args, options);
+        if (args[0] === "update-ref" && !failed) {
+          failed = true;
+          throw failure;
+        }
+        return result;
+      },
+    };
+  };
+
+  it("creates a missing ref only if it still does not exist", async () => {
+    const { git, calls } = setUp(undefined);
+    await unmarkReviewed(git, BRANCH, ["old.ts"]);
+    expect(calls).toContainEqual(["update-ref", REVIEW_REF, COMMIT_SHA, ""]);
+    expect(calls).toContainEqual([
+      "commit-tree",
+      EMPTY_TREE_SHA,
+      "-m",
+      "delta-review state",
+    ]);
+  });
+
+  it("retries after another git process briefly held the ref lock", async () => {
+    const { git, calls } = setUp({ "old.ts": SNAPSHOT_SHA, "b.ts": OTHER_SHA });
+    const flaky = failFirstUpdateRef(
+      git,
+      new Error(
+        "Command failed: git update-ref\nfatal: update_ref failed for ref 'refs/review/x': cannot lock ref 'refs/review/x': Unable to create '/r/.git/refs/review/x.lock': File exists.\n",
+      ),
+    );
+    await unmarkReviewed(flaky, BRANCH, ["old.ts"], { sleep: async () => {} });
+    expect(updatedRefs(calls)).toEqual([REVIEW_REF, REVIEW_REF]);
+  });
+
+  it("rethrows a non-conflict update-ref failure unchanged", async () => {
+    const { git, calls } = setUp({ "old.ts": SNAPSHOT_SHA });
+    const failure = new Error(
+      "Command failed: git update-ref\nfatal: disk full",
+    );
+    const broken = failFirstUpdateRef(git, failure);
+    await expect(
+      unmarkReviewed(broken, BRANCH, ["old.ts"], { sleep: async () => {} }),
+    ).rejects.toBe(failure);
     expect(updatedRefs(calls)).toEqual([REVIEW_REF]);
   });
 });
