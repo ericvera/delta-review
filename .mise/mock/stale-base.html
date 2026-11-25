@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Stale base prompt</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
+<p><a href="index.html">&larr; index</a></p>
+<h1>Stale base prompt</h1>
+<p class="note">The parent branch <code>feat/notes-v2</code> was merged into <code>main</code>. On the next refresh, the stored or detected base turns out to be fully merged into the fallback, so a notification asks before anything changes. The diff keeps using <code>feat/notes-v2</code> until the user picks an option.</p>
+
+<h2>Prompt</h2>
+<div class="vs" style="min-height:300px"><div class="body"><div class="sidebar"><div class="hdr">DELTA REVIEW <span class="badge">3</span><span style="margin-left:auto;color:var(--dim)">&#9638; &#8635; &middot;&middot;&middot;</span></div>
+<div class="row">&#9662; <span>src</span></div>
+<div class="row l1"><span class="ico" style="color:var(--yellow)">M</span>extension.ts <span class="desc">src</span></div>
+<div class="row l1"><span class="ico" style="color:var(--green)">A</span>diffBase.ts <span class="desc">src</span></div>
+<div class="row l1"><span class="ico" style="color:var(--green)">A</span>diffBase.test.ts <span class="desc">src</span></div>
+<div class="row l1"><span class="ico" style="color:var(--dim)">&#10003;</span><span style="color:var(--dim)">model.ts</span> <span class="desc">src</span></div>
+</div>
+<div class="editor"><div class="tabs">extension.ts (Base &harr; Working)</div></div>
+<div class="toast"><div class="m"><span class="i-warn">&#9888;</span><span>Base <code>feat/notes-v2</code> is fully merged into <code>main</code>. Switch the diff base for <code>feat/per-branch-diff-base</code> to <code>main</code>?</span><span class="x">&#9881; &times;</span></div>
+<div class="src">Source: Delta Review</div>
+<div class="btns"><span class="btn">Switch to main</span><span class="btn sec">Keep feat/notes-v2</span><span class="btn sec">Choose&hellip;</span></div></div>
+</div>
+<div class="sbar"><span class="it">&#5833; feat/per-branch-diff-base</span><span class="it">&#8635;</span><span class="it">&#9745; Review 1/4</span><span class="it warn">&#9888; &larr; feat/notes-v2</span><span class="sp"></span><span class="it">&#128276;</span></div></div>
+<p class="note">While the prompt is unanswered, the base item gets the warning tint and a <code>$(warning)</code> icon. Its tooltip adds "Merged into main. Click to choose a base." Clicking it opens the <a href="base-picker.html">picker</a> with <code>main</code> listed first.</p>
+
+<h2>Outcomes</h2>
+<table>
+<tr><th>Action</th><th>Effect</th><th>Status bar after</th></tr>
+<tr><td>Switch to main</td><td>Stores <code>main</code> as the explicit base for the branch, and the view refreshes. Base-side notes anchored to the old merge-base show as outdated, with no warning.</td><td><code>&#8644; &larr; main</code> (normal tint)</td></tr>
+<tr><td>Keep feat/notes-v2</td><td>Stores <code>feat/notes-v2</code> as the explicit base and suppresses the prompt for this branch/base pair.</td><td><code>&#8644; &larr; feat/notes-v2</code> (normal tint)</td></tr>
+<tr><td>Choose&hellip;</td><td>Opens the <a href="base-picker.html">base picker</a>.</td><td>Depends on the choice.</td></tr>
+<tr><td>Close (&times;) or dismiss</td><td>Suppresses the prompt for this branch/base pair until the base changes, and keeps the current base.</td><td><code>&#8644; &larr; feat/notes-v2</code> (normal tint)</td></tr>
+</table>
+</div></body></html>
