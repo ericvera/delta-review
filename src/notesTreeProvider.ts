@@ -6,12 +6,23 @@ import {
   groupNoteThreads,
   notesGroupCollapseKey,
 } from "./notesGrouping";
-import type { NoteThread, ThreadStatus } from "./noteThreads";
+import {
+  type AnyNoteThread,
+  isFileThread,
+  isGeneralThread,
+  isLineThread,
+  type ThreadStatus,
+} from "./noteThreads";
 
 // REVIEW NOTES tree: notes grouped by file, rendered as a sibling SCM section
 // of the DELTA REVIEW view. Deliberately decoupled from ReviewTreeProvider —
 // its own element union and provider class, so the main view's rendering is
 // never touched by notes work.
+
+export interface NotesGeneralGroupElement {
+  kind: "generalGroup";
+  threads: AnyNoteThread[];
+}
 
 export interface NotesFileGroupElement {
   kind: "fileGroup";
@@ -19,25 +30,30 @@ export interface NotesFileGroupElement {
   // Repo-relative path, '/'-separated (git style); for a document group, the
   // file name inside the cluster notes dir
   file: string;
-  // This file's threads, sorted by current position
-  threads: NoteThread[];
+  // File notes first, then line notes by current position
+  threads: AnyNoteThread[];
 }
 
 export interface NoteRowElement {
   kind: "note";
-  thread: NoteThread;
+  thread: AnyNoteThread;
 }
 
-export type NotesTreeElement = NotesFileGroupElement | NoteRowElement;
+export type NotesTreeElement =
+  NotesGeneralGroupElement | NotesFileGroupElement | NoteRowElement;
 
-export const notesCollapseKeyFor = (element: NotesFileGroupElement): string =>
-  notesGroupCollapseKey(element);
+export const notesCollapseKeyFor = (
+  element: NotesGeneralGroupElement | NotesFileGroupElement,
+): string =>
+  element.kind === "generalGroup"
+    ? notesGroupCollapseKey({ kind: "general" })
+    : notesGroupCollapseKey({ ...element, kind: "file" });
 
 const MAX_LABEL_LENGTH = 60;
 
 // Row label: first line of the original note text, truncated to keep rows
 // compact (the tooltip carries the full text)
-const noteLabel = (thread: NoteThread): string => {
+const noteLabel = (thread: AnyNoteThread): string => {
   const firstLine = (thread.turns[0]?.text ?? "").split("\n", 1)[0] ?? "";
   return firstLine.length > MAX_LABEL_LENGTH
     ? `${firstLine.slice(0, MAX_LABEL_LENGTH - 1).trimEnd()}…`
@@ -74,7 +90,7 @@ const noteIcon = (status: ThreadStatus, unread: boolean): vscode.ThemeIcon => {
 };
 
 export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeElement> {
-  private threads: NoteThread[] = [];
+  private threads: AnyNoteThread[] = [];
   private readonly changeEmitter = new vscode.EventEmitter<
     NotesTreeElement | undefined
   >();
@@ -82,14 +98,14 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
 
   constructor(
     private readonly isCollapsed: (key: string) => boolean,
-    private readonly isUnread: (thread: NoteThread) => boolean,
+    private readonly isUnread: (thread: AnyNoteThread) => boolean,
     private readonly documentLabel: (
       document: NoteDocument,
       file: string,
     ) => string,
   ) {}
 
-  setThreads(threads: NoteThread[]): void {
+  setThreads(threads: AnyNoteThread[]): void {
     this.threads = threads;
     this.changeEmitter.fire(undefined);
   }
@@ -103,10 +119,13 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
       // With no notes this returns [] — never a message row — so the
       // viewsWelcome empty state renders
       return groupNoteThreads(this.threads).map(
-        (group): NotesFileGroupElement => ({ kind: "fileGroup", ...group }),
+        (group): NotesGeneralGroupElement | NotesFileGroupElement =>
+          group.kind === "general"
+            ? { kind: "generalGroup", threads: group.threads }
+            : { ...group, kind: "fileGroup" },
       );
     }
-    if (element.kind === "fileGroup") {
+    if (element.kind === "generalGroup" || element.kind === "fileGroup") {
       return element.threads.map((thread): NoteRowElement => ({
         kind: "note",
         thread,
@@ -116,6 +135,18 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
   }
 
   getTreeItem(element: NotesTreeElement): vscode.TreeItem {
+    if (element.kind === "generalGroup") {
+      const item = new vscode.TreeItem(
+        "General notes",
+        this.isCollapsed(notesCollapseKeyFor(element))
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.iconPath = new vscode.ThemeIcon("comment-discussion");
+      item.description = String(element.threads.length);
+      item.id = "notesGeneral";
+      return item;
+    }
     if (element.kind === "fileGroup" && element.document !== undefined) {
       const item = new vscode.TreeItem(
         this.documentLabel(element.document, element.file),
@@ -161,33 +192,50 @@ export class NotesTreeProvider implements vscode.TreeDataProvider<NotesTreeEleme
     );
     item.id = `note:${thread.note.id}`;
     item.iconPath = noteIcon(thread.status, unread);
-    const descriptionParts = [`:${thread.note.currentStartLine}`];
-    if (thread.note.side === "base") {
-      descriptionParts.push("base");
-    }
-    if (thread.note.outdated) {
-      descriptionParts.push("⚠");
-    }
-    item.description = descriptionParts.join(" ");
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(thread.turns[0]?.text ?? "");
     tooltip.appendMarkdown(
       `\n\nStatus: ${thread.status}${unread ? " (unread)" : ""}`,
     );
-    if (thread.note.outdated) {
+    if (isGeneralThread(thread)) {
       tooltip.appendMarkdown(
-        "\n\n⚠ Outdated — the noted lines changed since the note was written",
+        "\n\nGeneral note · click to open its conversation",
       );
+    } else if (isFileThread(thread)) {
+      item.description = thread.note.outdated ? "file ⚠" : "file";
+      if (thread.note.outdated) {
+        tooltip.appendMarkdown("\n\n⚠ Outdated — the file left the diff");
+      }
+    } else if (isLineThread(thread)) {
+      const descriptionParts = [`:${thread.note.currentStartLine}`];
+      if (thread.note.side === "base") {
+        descriptionParts.push("base");
+      }
+      if (thread.note.outdated) {
+        descriptionParts.push("⚠");
+      }
+      item.description = descriptionParts.join(" ");
+      if (thread.note.outdated) {
+        tooltip.appendMarkdown(
+          "\n\n⚠ Outdated — the noted lines changed since the note was written",
+        );
+      }
     }
     item.tooltip = tooltip;
     item.contextValue = unread
       ? "noteRow-pendingUnread"
       : `noteRow-${thread.status}`;
-    item.command = {
-      command: "deltaReview.openNoteInDiff",
-      title: "Open Note in Diff",
-      arguments: [thread],
-    };
+    item.command = isGeneralThread(thread)
+      ? {
+          command: "deltaReview.openGeneralNote",
+          title: "Open General Note",
+          arguments: [thread],
+        }
+      : {
+          command: "deltaReview.openNoteInDiff",
+          title: "Open Note in Diff",
+          arguments: [thread],
+        };
     return item;
   }
 }

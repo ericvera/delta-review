@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import * as vscode from "vscode";
@@ -80,9 +81,11 @@ import {
   ReviewModel,
 } from "./model";
 import { buildDiffTitle, buildRowDescription } from "./moveDisplay";
-import type { NoteDocument, ResponsesFile } from "./notes";
+import type { FileNote, NoteDocument, ResponsesFile } from "./notes";
 import { documentNoteGroupLabel } from "./notesGrouping";
+import { fileNoteAvailability } from "./newNoteChoice";
 import {
+  fileNoteTargetFor,
   noteAnchorLines,
   NoteTarget,
   noteTargetFor,
@@ -352,13 +355,19 @@ export const activate = async (
       persistCollapsed();
     }),
     notesTreeView.onDidCollapseElement((event) => {
-      if (event.element.kind === "fileGroup") {
+      if (
+        event.element.kind === "fileGroup" ||
+        event.element.kind === "generalGroup"
+      ) {
         collapsed.add(notesCollapseKeyFor(event.element));
         persistCollapsed();
       }
     }),
     notesTreeView.onDidExpandElement((event) => {
-      if (event.element.kind === "fileGroup") {
+      if (
+        event.element.kind === "fileGroup" ||
+        event.element.kind === "generalGroup"
+      ) {
         collapsed.delete(notesCollapseKeyFor(event.element));
         persistCollapsed();
       }
@@ -489,7 +498,7 @@ export const activate = async (
     marks = next;
     void context.workspaceState.update(pendingReadMarksKey, marks);
     commentController.restyleThreads();
-    notesTreeProvider.setThreads(currentNoteThreads.filter(isLineThread));
+    notesTreeProvider.setThreads(currentNoteThreads);
   };
 
   // Renders the merged threads into both notes surfaces: the inline comment
@@ -501,7 +510,7 @@ export const activate = async (
     commentController.renderThreads(
       threads.filter((thread) => isLineThread(thread) || isFileThread(thread)),
     );
-    notesTreeProvider.setThreads(threads.filter(isLineThread));
+    notesTreeProvider.setThreads(threads);
     if (notesKey !== undefined) {
       generalNotePanels.update(threads, notesKey);
     }
@@ -1656,6 +1665,40 @@ export const activate = async (
     commentController.expandThread(thread.note.id);
   };
 
+  // A file note's thread sits at the top of the diff, so no selection; with
+  // no usable diff it opens on the note's own target document
+  const openFileNote = async (
+    activeGit: Git,
+    thread: NoteThread<FileNote>,
+  ): Promise<void> => {
+    const file = model?.files.find(
+      (candidate) => candidate.path === thread.note.file,
+    );
+    if (file !== undefined && !reviewDiffIsEmpty(file)) {
+      await openDiff(file);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      commentController.expandThread(thread.note.id);
+      await revealFileRow(file);
+      return;
+    }
+    let onDisk = true;
+    try {
+      await access(join(activeGit.repoRoot, thread.note.file));
+    } catch {
+      onDisk = false;
+    }
+    const target = fileNoteTargetFor(model, thread.note, onDisk);
+    await vscode.window.showTextDocument(
+      target.kind === "working"
+        ? vscode.Uri.file(join(activeGit.repoRoot, target.path))
+        : createReviewBaseUri(target.path, target.sha),
+    );
+    commentController.expandThread(thread.note.id);
+    if (file !== undefined) {
+      await revealFileRow(file);
+    }
+  };
+
   // Selection sync from REVIEW NOTES: put the noted file's row in DELTA
   // REVIEW, expanding whatever ancestors are collapsed. Best effort — reveal
   // rejects on a view that cannot be shown, and that must never fail the
@@ -2083,8 +2126,22 @@ export const activate = async (
     // no usable diff falls back to the note's own target document
     vscode.commands.registerCommand(
       "deltaReview.openNoteInDiff",
-      async (thread: NoteThread) => {
+      async (thread: AnyNoteThread) => {
         if (git === undefined) {
+          return;
+        }
+        if (isGeneralThread(thread)) {
+          await vscode.commands.executeCommand(
+            "deltaReview.openGeneralNote",
+            thread,
+          );
+          return;
+        }
+        if (isFileThread(thread)) {
+          await openFileNote(git, thread);
+          return;
+        }
+        if (!isLineThread(thread)) {
           return;
         }
         if (thread.note.document !== undefined) {
@@ -2172,6 +2229,74 @@ export const activate = async (
         generalNotePanels.open(thread, ctx);
       },
     ),
+
+    vscode.commands.registerCommand("deltaReview.newNote", () => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const uri =
+        input instanceof vscode.TabInputTextDiff
+          ? input.modified
+          : input instanceof vscode.TabInputText
+            ? input.uri
+            : undefined;
+      const repoRoot = git?.repoRoot;
+      const availability =
+        repoRoot === undefined
+          ? { reason: "Open a file from the Delta Review diff" }
+          : fileNoteAvailability(
+              uri,
+              repoRoot,
+              model?.files ?? [],
+              REVIEW_BASE_SCHEME,
+            );
+      const fileItem: vscode.QuickPickItem = {
+        label: "$(file) File note",
+        description:
+          "path" in availability ? availability.path : availability.reason,
+        detail: "whole-file thread at the top of the diff",
+      };
+      const generalItem: vscode.QuickPickItem = {
+        label: "$(comment-discussion) General note",
+        description: "not tied to a file",
+      };
+      const picker = vscode.window.createQuickPick();
+      picker.title = "New Review Note";
+      picker.placeholder = "Choose the kind of note";
+      picker.items = [fileItem, generalItem];
+      picker.activeItems = [generalItem];
+      picker.onDidAccept(() => {
+        const choice = picker.activeItems[0];
+        if (choice === fileItem) {
+          // Enter fires even on the unavailable item; keep the picker open
+          if (!("path" in availability)) {
+            return;
+          }
+          picker.hide();
+          const { path } = availability;
+          const file = model?.files.find((entry) => entry.path === path);
+          const activeGit = git;
+          if (file === undefined || activeGit === undefined) {
+            return;
+          }
+          void (async () => {
+            await openDiff(file);
+            // The draft must attach after the diff editor exists
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            commentController.startFileNoteDraft(
+              vscode.Uri.file(join(activeGit.repoRoot, path)),
+              path,
+              randomUUID(),
+            );
+          })();
+          return;
+        }
+        if (choice === generalItem) {
+          picker.hide();
+          void vscode.commands.executeCommand("deltaReview.newGeneralNote");
+        }
+      });
+      picker.onDidHide(() => picker.dispose());
+      picker.show();
+    }),
 
     vscode.commands.registerCommand("deltaReview.newGeneralNote", () => {
       const ctx = generalNoteContext();
@@ -2737,6 +2862,24 @@ export const activate = async (
           ...collectTreeRows(child),
         ];
       });
+    const collectNotesRows = (element?: NotesTreeElement): unknown[] =>
+      notesTreeProvider.getChildren(element).flatMap((child) => {
+        const item = notesTreeProvider.getTreeItem(child);
+        const icon =
+          item.iconPath instanceof vscode.ThemeIcon ? item.iconPath : undefined;
+        return [
+          {
+            id: item.id,
+            label:
+              typeof item.label === "string" ? item.label : item.label?.label,
+            description: item.description,
+            icon: icon?.id,
+            iconColor: icon?.color?.id,
+            command: item.command?.command,
+          },
+          ...collectNotesRows(child),
+        ];
+      });
     context.subscriptions.push(
       vscode.commands.registerCommand("deltaReview.__inspect", () => {
         const files = model?.files ?? [];
@@ -2763,6 +2906,7 @@ export const activate = async (
           notesBadge: notesTreeView.badge,
           clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
           treeRows: collectTreeRows(),
+          notesRows: collectNotesRows(),
           commentableDocuments: commentController.commentableDocuments(),
           base: baseResolution,
           baseStatus: {

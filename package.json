@@ -43,7 +43,7 @@
       },
       {
         "view": "deltaReviewNotes",
-        "contents": "No review notes on this branch.\nHover a line in a review diff and click + to add one."
+        "contents": "No review notes on this branch.\nClick + above to add a file or general note, or hover a line in a review diff and click + to add a line note."
       }
     ],
     "commands": [
@@ -55,6 +55,12 @@
       {
         "command": "deltaReview.newGeneralNote",
         "title": "New General Note",
+        "category": "Delta Review"
+      },
+      {
+        "command": "deltaReview.newNote",
+        "title": "New Review Note",
+        "icon": "$(add)",
         "category": "Delta Review"
       },
       {
@@ -330,6 +336,11 @@
           "group": "base@0"
         },
         {
+          "command": "deltaReview.newNote",
+          "when": "view == deltaReviewNotes",
+          "group": "navigation@-1"
+        },
+        {
           "command": "deltaReview.clearResolvedNotes",
           "when": "view == deltaReviewNotes",
           "group": "navigation@0"
@@ -563,10 +574,6 @@
       "commandPalette": [
         {
           "command": "deltaReview.openGeneralNote",
-          "when": "false"
-        },
-        {
-          "command": "deltaReview.newGeneralNote",
           "when": "false"
         },
         {
