@@ -17,6 +17,7 @@ currently it seems like the base commit/branch on a diff is always main or set p
 
 ## Decisions
 
+- All three pieces of work (per-branch base, notes created from the pane, mark-reviewed responsiveness) ship on this branch.
 - Base is per branch, shared by every worktree on that branch. Resolution order: an explicit per-branch base (set by the user or an agent), else auto-detected base (closest local branch HEAD forked from, or the upstream), else `deltaReview.baseBranch`.
 - User sets/overrides a branch's base with a status-bar picker.
 - Agents can set a branch's base too, through a documented contract (owned by a plugin skill doc), so an agent creating or driving a branch can declare its base without the UI.
