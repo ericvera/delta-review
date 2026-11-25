@@ -1,0 +1,1 @@
+currently it seems like the base commit/branch on a diff is always main or set per config. Different worktrees may need different base branches and also the branch may change over the like of a branch if another branch gets merged into main (for example).
