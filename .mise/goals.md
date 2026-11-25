@@ -86,3 +86,12 @@ Als, currently... updates like marking a file reviewed often takes a few seconds
 - Silent no-op when `model === undefined` or element not a file (extension.ts:1556-1561).
 - refs/review/<branch> and refs/review-predeletion/<branch> are persistent shared state (reviewState.ts:13, :20); refresh-pipeline changes are in-memory only.
 - Tests: refresh coalescing/scheduling in a new vscode-free module with colocated test (beside serialQueue.test.ts); cross-process compare-and-set case in src/reviewState.test.ts; scripted host check for wiring/latency (DEVELOPMENT.md:238-251).
+- Mock: General notes group sits above file groups in the pane; File note rows show "file" in place of a line and sort first in their file group; File notes never go outdated from line moves.
+- Mock: General note tab header has Resolve and Delete, supports a draft state, and closes when its note is deleted; Clear Resolved also clears resolved General notes; empty-pane welcome text reworded for the title-bar `+`.
+- Mock: mark-reviewed rollback shows an error with Retry and Show Log.
+
+## Proposal
+
+- Issue: the diff base is one global setting; there is no way to add a note from the Review Notes pane, or one with no lines/file; marking a file reviewed lags seconds and looks like it failed.
+- Approach: per-branch base (explicit via picker or agent contract, else detected, else setting) with a stale-base prompt; pane `+` creating whole-file File notes or General notes in their own conversation tab (notes v3, skill docs updated); instant row updates with rollback, self-write events no longer restarting the refresh debounce, compare-and-set review-state writes.
+- Skips: none.

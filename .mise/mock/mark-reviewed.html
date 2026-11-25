@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mark reviewed: immediate update</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
+<p><a href="index.html">&larr; index</a></p>
+<h1>Mark reviewed: immediate row update and rollback</h1>
+<p class="note">Clicking the inline <code>$(check)</code> on a needs-review row moves it to Reviewed in the same frame, before the git write and refresh finish. No progress spinner blocks the view. If the write fails, the row moves back and an error notification explains why.</p>
+
+<div class="cmp">
+<div><div class="cap">1. Before: hover on notesStore.ts, click &#10003;</div>
+<div class="vs" style="min-height:220px"><div class="body"><div class="sidebar" style="width:100%">
+<div class="hdr">DELTA REVIEW <span class="badge">3</span></div>
+<div class="row">&#9662; Needs review <span class="desc">3</span></div>
+<div class="row l1"><span class="ico" style="color:var(--yellow)">M</span>extension.ts <span class="desc">src</span></div>
+<div class="row l1 sel"><span class="ico" style="color:var(--yellow)">M</span>notesStore.ts <span class="desc">src</span><span class="acts">&#128462; <span style="color:#fff">&#10003;</span></span></div>
+<div class="row l1"><span class="ico" style="color:var(--green)">A</span>diffBase.ts <span class="desc">src</span></div>
+<div class="row">&#9662; Reviewed <span class="desc">1</span></div>
+<div class="row l1"><span class="ico" style="color:var(--dim)">&#10003;</span><span style="color:var(--dim)">model.ts</span> <span class="desc">src</span></div>
+</div></div>
+<div class="sbar"><span class="it">&#9745; Review 1/4</span></div></div></div>
+
+<div><div class="cap">2. Immediately after the click (write still in flight)</div>
+<div class="vs" style="min-height:220px"><div class="body"><div class="sidebar" style="width:100%">
+<div class="hdr">DELTA REVIEW <span class="badge">2</span></div>
+<div class="row">&#9662; Needs review <span class="desc">2</span></div>
+<div class="row l1"><span class="ico" style="color:var(--yellow)">M</span>extension.ts <span class="desc">src</span></div>
+<div class="row l1"><span class="ico" style="color:var(--green)">A</span>diffBase.ts <span class="desc">src</span></div>
+<div class="row">&#9662; Reviewed <span class="desc">2</span></div>
+<div class="row l1"><span class="ico" style="color:var(--dim)">&#10003;</span><span style="color:var(--dim)">model.ts</span> <span class="desc">src</span></div>
+<div class="row l1 flash"><span class="ico" style="color:var(--dim)">&#10003;</span><span style="color:var(--dim)">notesStore.ts</span> <span class="desc">src</span></div>
+</div></div>
+<div class="sbar"><span class="it">&#9745; Review 2/4</span></div></div></div>
+</div>
+<p class="note">Badge and status-bar counter update with the row. When the write and refresh complete, nothing visibly changes. The moved row now shows the unmark action, so there is nothing to click twice.</p>
+
+<h2>3. Write failed: rolled back with an error</h2>
+<div class="vs" style="min-height:260px"><div class="body"><div class="sidebar">
+<div class="hdr">DELTA REVIEW <span class="badge">3</span></div>
+<div class="row">&#9662; Needs review <span class="desc">3</span></div>
+<div class="row l1"><span class="ico" style="color:var(--yellow)">M</span>extension.ts <span class="desc">src</span></div>
+<div class="row l1"><span class="ico" style="color:var(--yellow)">M</span>notesStore.ts <span class="desc">src</span></div>
+<div class="row l1"><span class="ico" style="color:var(--green)">A</span>diffBase.ts <span class="desc">src</span></div>
+<div class="row">&#9662; Reviewed <span class="desc">1</span></div>
+<div class="row l1"><span class="ico" style="color:var(--dim)">&#10003;</span><span style="color:var(--dim)">model.ts</span> <span class="desc">src</span></div>
+</div>
+<div class="editor"><div class="tabs">Welcome</div>
+<div class="toast"><div class="m"><span class="i-err">&#9940;</span><span>Could not mark <code>src/notesStore.ts</code> reviewed: the review state changed in another window and the retry also failed. Your mark was undone.</span><span class="x">&#10005;</span></div><div class="src">Source: Delta Review</div><div class="btns"><span class="btn">Retry</span><span class="btn sec">Show Log</span></div></div>
+</div></div>
+<div class="sbar"><span class="it">&#9745; Review 1/4</span><span class="sp"></span></div></div>
+<p class="note">The message carries git's reason when it is not a compare-and-set conflict, e.g. "Could not mark src/notesStore.ts reviewed: cannot lock ref 'refs/review/feat/per-branch-diff-base'. Your mark was undone." The same applies to unmark, mark-all and unmark-all.</p>
+
+</div></body></html>

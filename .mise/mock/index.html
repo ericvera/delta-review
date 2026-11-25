@@ -1,10 +1,21 @@
-<!doctype html><html><head><meta charset="utf-8"><title>Delta Review mock: per-branch diff base</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
-<h1>Delta Review mock: per-branch diff base</h1>
+<!doctype html><html><head><meta charset="utf-8"><title>Delta Review mock: per-branch base, pane notes, responsiveness</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
+<h1>Delta Review mock: per-branch base, pane notes, responsiveness</h1>
 <p class="note">Static mock of the per-branch base UI. The dark theme approximates VS Code, and codicons are shown as text glyphs. Example: the branch <code>feat/per-branch-diff-base</code> was forked from <code>feat/notes-v2</code>, and the fallback <code>deltaReview.baseBranch</code> is <code>main</code>.</p>
 <ul>
 <li><a href="status-bar.html">Status bar: base item</a> shows the new base item next to the review counter in each source state (explicit, auto-detected, fallback), with hover tooltips.</li>
 <li><a href="base-picker.html">Base picker</a> is the quick pick the base item opens. It has detected candidates, local branches, a custom ref, and "Use automatic detection", which clears an explicit base. It also shows the free-text ref input step.</li>
 <li><a href="stale-base.html">Stale base prompt</a> covers a stored or detected base that is fully merged into <code>main</code>. It shows the notification, the status bar warning tint while the prompt is unanswered, and the state after each choice.</li>
 <li><a href="base-error.html">Base ref missing</a> covers an explicit base that no longer resolves (for example, the branch was deleted). It shows the tree message and the status bar error state, and both point to the picker instead of the setting.</li>
+</ul>
+<h2>Review Notes from the pane</h2>
+<ul>
+<li><a href="notes-create.html">Pane <code>+</code> and note kind choice</a> shows the title-bar <code>+</code> and the File note / General note quick pick, with File note enabled when the active file is in the diff and disabled with a reason when it is not.</li>
+<li><a href="file-note.html">File note thread</a> is the whole-file comment thread at the top of a file's diff, shown as a new draft and with replies.</li>
+<li><a href="notes-pane.html">Review Notes pane</a> adds the General notes group (and File note rows) to the tree, plus the updated empty-pane text.</li>
+<li><a href="general-note-tab.html">General note tab</a> is the conversation tab a General note opens: the note, replies, agent responses, and the reply box, plus the draft state.</li>
+</ul>
+<h2>Responsiveness</h2>
+<ul>
+<li><a href="mark-reviewed.html">Mark reviewed</a> shows the row moving to Reviewed immediately on click, and the rollback with an error when the write fails.</li>
 </ul>
 </div></body></html>

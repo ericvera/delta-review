@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><title>General note tab</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
+<p><a href="index.html">&larr; index</a></p>
+<h1>General note: conversation tab</h1>
+<p class="note">Clicking a General note in the pane opens an editor tab whose only content is that note's conversation: the note, the reviewer's replies, the agent's responses, and a reply box. One tab per note; clicking the row again focuses the existing tab. Tab title is the note's first line, truncated, with a <code>$(comment-discussion)</code> icon.</p>
+
+<h2>1. Existing note with replies and agent responses</h2>
+<div class="vs" style="min-height:520px"><div class="body"><div class="sidebar" style="width:260px">
+<div class="vhdr">&#9662; REVIEW NOTES <span class="tacts"><span>+</span><span>&#10003;&#10003;</span></span></div>
+<div class="row">&#9662; &#128172; General notes <span class="desc">2</span></div>
+<div class="row l1 sel"><span class="ico i-pend">&#9673;</span><span class="lbltxt">Should the base picker live in...</span></div>
+<div class="row l1"><span class="ico i-open">&#9675;</span><span class="lbltxt">Update README screenshots...</span></div>
+</div>
+<div class="editor"><div class="tabs multi"><span class="t">extension.ts (Base &harr; Working)</span><span class="t act">&#128172; Should the base picker live in... &#10005;</span></div>
+<div class="ctab">
+<h3>Should the base picker live in the view title too? <span class="pill pend">Pending</span><span style="margin-left:auto;color:var(--dim);font-weight:400;font-size:13px">&#10003; Resolve &nbsp; &#128465; Delete</span></h3>
+<div class="sub">General note &middot; branch feat/per-branch-diff-base &middot; created 25 Nov 11:02</div>
+<div class="thread pend" style="margin:0;max-width:none">
+<div class="cmt"><div class="av">E</div><div class="who">You <span class="t">40 min ago</span></div><div class="body"><p>Should the base picker live in the view title too? The status bar is easy to miss.</p></div></div>
+<div class="cmt"><div class="av" style="background:#6b4e8a">C</div><div class="who">Agent <span class="t">32 min ago</span></div><div class="body"><p>Possible, but the view title already has three actions. I'd keep it in the status bar and add it to the <code>&middot;&middot;&middot;</code> menu.</p></div></div>
+<div class="cmt"><div class="av">E</div><div class="who">You <span class="t">20 min ago</span></div><div class="body"><p>OK, add it to the overflow menu.</p></div></div>
+<div class="cmt"><div class="av" style="background:#6b4e8a">C</div><div class="who">Agent <span class="t">3 min ago</span></div><div class="body"><p>Added <code>deltaReview.setBranchBase</code> to <code>view/title</code> under <code>&middot;&middot;&middot;</code>.</p></div></div>
+<div class="reply"><textarea placeholder="Reply..."></textarea><div class="btns"><span class="btn sec">Mark Read</span><span class="btn">Reply</span></div></div>
+</div></div></div></div></div>
+
+<h2>2. Draft (just chosen from the pane <code>+</code>)</h2>
+<div class="vs" style="min-height:240px"><div class="body"><div class="editor"><div class="tabs multi"><span class="t act">&#128172; New General note &#10005;</span></div>
+<div class="ctab"><h3>New General note</h3><div class="sub">Not tied to a file &middot; branch feat/per-branch-diff-base</div>
+<div class="thread" style="margin:0;max-width:none"><div class="reply"><textarea placeholder="What should the agent look at?"></textarea><div class="btns"><span class="btn sec">Cancel</span><span class="btn">Add Note</span></div></div></div>
+</div></div></div></div>
+<p class="note">After Add Note, the tab retitles to the note's first line and the note appears under General notes. If the note is deleted (from the pane or another window), the open tab closes. Status colors and the unread highlight match line-note threads.</p>
+</div></body></html>

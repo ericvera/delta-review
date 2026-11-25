@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Review Notes pane: General notes</title><link rel="stylesheet" href="mock.css"></head><body><div class="page">
+<p><a href="index.html">&larr; index</a></p>
+<h1>Review Notes pane: General notes group</h1>
+<p class="note">General notes (no file) appear under a "General notes" group above the per-file groups. Rows keep today's status icons, unread highlight and inline hover actions (mark read, resolve/unresolve, delete). File notes sit in their file's group with description <code>file</code> and sort before line notes.</p>
+
+<h2>1. Populated (hover on a General note row)</h2>
+<div class="vs" style="min-height:300px"><div class="body"><div class="sidebar" style="width:380px">
+<div class="vhdr">&#9662; REVIEW NOTES <span class="tacts"><span>+</span><span>&#10003;&#10003;</span></span></div>
+<div class="row">&#9662; &#128172; General notes <span class="desc">2</span></div>
+<div class="row l1 sel unread"><span class="ico i-pend-unread">&#9679;</span><span class="lbltxt">Should the base picker live in the view title too?</span><span class="acts">&#128065; &#10003; &#128465;</span></div>
+<div class="row l1"><span class="ico i-open">&#9675;</span><span class="lbltxt">Update README screenshots before merge</span></div>
+<div class="row">&#9662; notesStore.ts <span class="desc">src &middot; 2</span></div>
+<div class="row l1"><span class="ico i-addr">&#9673;</span><span class="lbltxt">This file is getting long. Can the anchori...</span> <span class="desc">file</span></div>
+<div class="row l1"><span class="ico i-open">&#9675;</span><span class="lbltxt">Compare-and-set needs a retry cap</span> <span class="desc">:83</span></div>
+<div class="row">&#9662; extension.ts <span class="desc">src &middot; 1</span></div>
+<div class="row l1 read"><span class="ico i-res">&#10003;</span><span class="lbltxt">Why not reuse scheduleRefresh here?</span> <span class="desc">:812</span></div>
+</div>
+<div class="editor"><div class="tabs">Welcome</div>
+<div class="tip" style="left:10px;top:60px"><p>Should the base picker live in the view title too?</p><p>Status: pending (unread)</p><p style="color:var(--dim)">General note &middot; click to open its conversation</p></div></div></div></div>
+<p class="note">Clicking a General note row opens its <a href="general-note-tab.html">conversation tab</a> (reused if already open). Clear Resolved also removes resolved General notes.</p>
+
+<h2>2. Empty pane</h2>
+<div class="vs" style="min-height:140px"><div class="body"><div class="sidebar" style="width:380px">
+<div class="vhdr">&#9662; REVIEW NOTES <span class="tacts"><span>+</span><span>&#10003;&#10003;</span></span></div>
+<div class="msg" style="border:0">No review notes on this branch.<br>Click + above to add a file or general note, or hover a line in a review diff and click + to add a line note.</div>
+</div><div class="editor"></div></div></div>
+</div></body></html>
