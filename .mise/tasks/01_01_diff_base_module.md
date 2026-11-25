@@ -25,8 +25,10 @@ Add a vscode-free module that reads, writes and clears a branch's explicit diff 
     - The smallest distance wins. A tie goes to the candidate named exactly the fallback, otherwise the earlier one keeps it.
     - With no candidate, use the upstream: `rev-parse --abbrev-ref @{upstream}`, used only if it does not end with `/<current branch>` and `merge-base <upstream> HEAD` succeeds.
   - The detection result is cached by a key of HEAD sha + for-each-ref output + upstream (or empty) + fallback. The caller owns the cache object, like `hashCache` in `computeReviewModel`.
+  - When `branch === fallback`, skip detection: source is `fallback` (unless an explicit file exists). On `main`, a forked or merged feature branch must never be picked as base.
   - `stale` is true iff all of these hold:
-    - source !== "fallback"
+    - source is `explicit`, or `detected` with `detectedVia === "forkPoint"` (an upstream-detected base, e.g. `origin/main` while local `main` was skipped, is never stale)
+    - branch !== fallback
     - base !== fallback
     - base is a branch (`git show-ref --verify --quiet refs/heads/<base>` or `refs/remotes/<base>` succeeds)
     - `git merge-base --is-ancestor <base> <fallback>` exits 0
@@ -52,6 +54,7 @@ Add a vscode-free module that reads, writes and clears a branch's explicit diff 
 - `DetectionCache` is `{ key?: string; result?: … }`, a mutable object the caller holds.
 - Run the merge-base/rev-list calls sequentially or with modest parallelism (`Promise.all` over candidates is fine). Keep output order for tie-breaking regardless of completion order.
 - Detached HEAD (`branch === "HEAD"`): skip the contract file and detection, and return source fallback.
+- `branch === fallback`: read the contract file as usual (an explicit base is honored, never stale), but skip `detectBase` entirely and return source fallback with `base = fallback`.
 - Header comment: one short paragraph on why the base is per-branch and stored under the common dir. No `REQ-*` ids.
 
 ## Gotchas
@@ -77,5 +80,8 @@ Add a vscode-free module that reads, writes and clears a branch's explicit diff 
     - an upstream named `origin/<same branch>` is not eligible
     - no candidate and no upstream gives source fallback
     - a descendant branch is skipped
+    - on the fallback branch (`main`) with a forked `feat/a` and a merged `feat/b`, source is `fallback`, `base === "main"`, `stale: false`
+    - on the fallback branch with an explicit base merged into it, `stale: false`
+    - upstream detection where the upstream (`origin/main`) is an ancestor of local `main` gives `detectedVia: "upstream"` and `stale: false`
     - a second call with an unchanged repo reuses the cache (assert by counting `git.run` calls through a wrapping Git)
 - Run `yarn test`, `yarn lint`, `yarn build`.

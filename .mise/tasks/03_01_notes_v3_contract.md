@@ -24,13 +24,14 @@ They are written at notes-file version 3. Existing line and document notes behav
   - Older extensions reject unknown versions. They also rebuild notes from known keys, so they would strip new ones.
 - `src/notes.ts`:
   - `Note` interface (`:25-55`), `NotesFile { version: 1 | 2; notes: Note[] }` (`:57-60`).
-  - `parseNote(value, index, version)` (`:143-200+`) requires `file`, `side`, line numbers, `snapshot` and `contentBlob`. `document` is read only at version 2.
+  - `parseNote(value, index, version)` (`:138+`) requires `file`, `side`, line numbers, `snapshot` and `contentBlob`. `document` is read only at version 2.
   - `notesFileVersion` (`:375-376`). `parseNotesFile` accepts `[1, 2]` (`:380-396`).
 - `src/noteThreads.ts`: `NoteThread { note: Note; turns; status; effectiveAnchor? }` (`:27-36`). `mergeThreads(notes, responses, anchorResolves): NoteThread[]` (`:70-129`).
 - `src/notesStore.ts`:
   - `createNote(git, branch, draft: NoteDraft)` (`:444-472`, generates `randomUUID()` ids).
   - `anchorBlobs` (`:336-395`) anchors every note's `contentBlob`.
-  - `refreshDerived` (`:640-787`) does anchor application and the per-note position/outdated pass. Its `RefreshOptions` is at `:600-625`.
+  - `refreshDerived` (`:664+`) does anchor application and the per-note position/outdated pass. Its `RefreshOptions` is at `:634+`.
+  - `archiveNotes(git, branch, notes: readonly Note[], deletedAt)` (`:272`), called by `deleteNotes` (`:589-611`, Clear Resolved), appends removed notes verbatim plus `deletedAt` to `archive-<branch>.json`, whose shell stays `{ version: 1, notes: unknown[] }` (`ArchiveShell`, `src/notes.ts:88`).
   - Mutations (`appendReviewerTurn`, `editReviewerTurn`, `deleteReviewerTurn`, `deleteNote`, `deleteNotes`, `setResolved`) only touch `id`, `turns` and `status`, so they work on any kind.
 - `src/pendingRead.ts` takes `NoteThread` values and uses only the note id and turns.
 - `src/extension.ts`: the notes block in `refresh()` (around `:716-747` before earlier tasks) calls `refreshDerived(...)` with `readWorkingContent`, `readDocumentContent`, `baseBlobFor` and `anchorResolves`, then `mergeThreads(...)`, `pruneReadMarks(threads)` and `renderNoteThreads(threads)`.
@@ -80,6 +81,7 @@ They are written at notes-file version 3. Existing line and document notes behav
     - The per-note pass: a general note keeps `outdated: false`. A file note sets `outdated = !(options.isInReviewSet?.(file) ?? (await readWorkingContent(file)) !== undefined)`, with no position fields.
     - Line notes are unchanged.
   - `findNote` and the other mutations work on `AnyNote`. Adjust types only.
+  - `archiveNotes` takes `readonly AnyNote[]`; `deleteNotes` passes removed notes of any kind. Scoped notes are archived exactly as they stand (no `snapshot`), and the archive stays `version: 1` (spec decision: entries follow the notes-file schema; 03_05 documents it). Update the `deleteNotes`/`archiveNotes` comments only where they imply every entry is a line note.
 - `pendingRead.ts`: widen parameter types from `NoteThread` to `AnyNoteThread` (it only reads `note.id` and turns).
 - `extension.ts`:
   - Pass `isInReviewSet: (path) => computed.files.some((f) => f.path === path)` to `refreshDerived`.
@@ -111,4 +113,5 @@ They are written at notes-file version 3. Existing line and document notes behav
   - duplicate id is rejected
   - `refreshDerived` sets a file note outdated when `isInReviewSet` is false and not outdated when true, keeps a general note not outdated, and ignores an agent anchor on both
   - `deleteNotes` / `setResolved` / `appendReviewerTurn` work on scoped notes
+  - `deleteNotes` on a resolved file note and a resolved general note appends both to the archive verbatim (with `scope`, no `snapshot`, plus `deletedAt`), and the archive file stays `version: 1`
 - Run `yarn test`, `yarn lint`, `yarn build`.

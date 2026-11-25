@@ -16,6 +16,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
 - `applyReviewStateChange(action, mutate)` (`src/extension.ts:801-817`) wraps `reviewStateQueue.run(mutate)` + `refresh()` in `vscode.window.withProgress({ location: { viewId: "deltaReview" } })` and shows `Delta Review: failed to <action> (<msg>)` on error.
   - Callers: `markClusterPaths` (`:819-826`), `markFileReviewed` (`:1554-1572`), `unmarkFileReviewed` (`:1574-1593`), `unmarkAllReviewed` (`:1596-1611`), `markFolderReviewed` / `unmarkFolderReviewed` (`:1814-1865`), cluster (`:1981-2030`), auto (`:2033-2086`), `markAllReviewed` (`:2088-2103`).
 - The tree updates only at `treeProvider.setModel(model)` inside `refresh()`. The badge and counter text are computed right after it (`:571-593`), so factor that block into a `publishModel(model)` helper that the optimistic path reuses.
+- Task 02_02 added `publishCount` to `__inspect`, incremented in `refresh()` beside `treeProvider.setModel(model)`. Keep the increment in `refresh()` right after its `publishModel(model)` call, not inside `publishModel`: it counts refresh publishes only, so the optimistic publish adds nothing and a mark still adds exactly one.
 - `ReviewFile.status` (`FileReviewStatus.NeedsReview | Reviewed`) and `hasReviewSnapshot` (`src/model.ts:34-60`) drive row placement and the inline `+`/`−` actions.
 - Task 02_01: `ReviewStateConflictError` (exported from `src/reviewState.ts`) is thrown after compare-and-set retries fail.
 - Task 02_02: the refresh scheduler. Own ref writes no longer trigger a second refresh.
@@ -40,7 +41,7 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
 - `src/extension.ts`:
   - Create `const log = vscode.window.createOutputChannel("Delta Review")` (subscriptions).
   - Replace `applyReviewStateChange` with `applyReviewStateChange({ action, subject, mutate, optimistic?: { paths, reviewed } })`. No `withProgress`.
-    1. If `optimistic` is set and `model` is defined, run `withReviewStatus` and then `publishModel`.
+    1. If `optimistic` is set and `model` is defined: bump `refreshGeneration`, run `withReviewStatus`, assign the result to `model`, then `publishModel`.
     2. `await reviewStateQueue.run(mutate)`, then `await refresh()`.
     3. On error, log the full error (stack) to `log`. If a model is current, revert it and `publishModel`. Then `void refresh()`.
     4. Show `Could not ${action} ${subject}: ${reason}. Your mark was undone.` The reason is the conflict text for `ReviewStateConflictError`, otherwise the error message's first line. Buttons are `Retry` (call the same `applyReviewStateChange` args again) and `Show Log` (`log.show()`).
@@ -58,13 +59,12 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
     - optimistic publish and rollback
     - compare-and-set with 3 attempts (from 02_01)
     - the scheduler's max wait and the self-write filter (from 02_02), including the cross-window trade-off
-  - Add a manual-script step: mark a file and see the row move instantly; make the ref unwritable (`chmod` the refs dir) and see the rollback error with Retry and Show Log.
+  - Add a manual-script step: mark a file and see the row move instantly; run `chmod -R a-w .git/refs/review` (in the main worktree's git dir), mark another file and see the rollback error with Retry and Show Log; restore with `chmod -R u+w .git/refs/review`.
   - Terse, per CLAUDE.md.
 
 ## Gotchas
 
-- The optimistic publish must not bump `refreshGeneration`. It is not a refresh, and a refresh in flight should still publish its result over it.
-- A refresh in flight that started before the write may publish the pre-write state, flickering the row back for a moment. Mitigate: in `applyReviewStateChange`, bump `refreshGeneration` (invalidating older in-flight refreshes) right before publishing the optimistic model. The command's own `refresh()` publishes next.
+- Generation rule (the only one): an in-flight refresh that read pre-write state must not flip the row back. So `applyReviewStateChange` bumps `refreshGeneration` right before the optimistic publish; older in-flight refreshes then bail at their generation checks, and the command's own `refresh()` (started after the write) publishes next.
 - Revert against the current model, not the captured one: another refresh may have landed in between.
 - Keep the command handlers' "read `git`/`model` into locals before enqueueing" pattern.
 
@@ -79,5 +79,6 @@ Clicking mark or unmark (file, folder, cluster, auto, all) moves the rows, badge
 - Scripted extension-host check (batch with 02_02's):
   - Call `executeCommand("deltaReview.markFileReviewed", { kind: "file", file })` without awaiting. Read `__inspect().treeRows` on the next tick: the file's row is already under Reviewed.
   - After awaiting, `git ls-tree refs/review/<branch>` lists it.
-  - Make `.git/refs/review` unwritable (`chmod 500` on the directory after a first mark), mark another file, then await. The row is back under Needs review and the ref is unchanged. Restore the permissions.
+  - After a first mark, make `.git/refs/review` unwritable with `chmod -R a-w <repo>/.git/refs/review` (recursive: a branch with `/` puts its lock file in a subdirectory), mark another file, then await. The row is back under Needs review and the ref is unchanged. Restore with `chmod -R u+w <repo>/.git/refs/review` in a `finally`, so a failed assertion never leaves the temp repo unwritable.
+- `__inspect().publishCount` rises by exactly one per mark (the optimistic publish does not count).
 - Manual (eyeball): the error toast shows Retry and Show Log, and Show Log opens "Delta Review" output with the stack.

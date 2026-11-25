@@ -19,6 +19,8 @@ Make writes to `refs/review/<branch>` and `refs/review-predeletion/<branch>` com
   - `git update-ref <ref> <new> <old>` fails with `cannot lock ref '<ref>': is at X but expected Y` when the ref moved.
   - `git update-ref <ref> <new> ""` fails with `reference already exists` when the ref exists.
   - Both exit 128.
+  - A concurrent writer holding `<ref>.lock` makes update-ref fail with `cannot lock ref '<ref>': Unable to create '<path>.lock': File exists.` (exit 128) while the ref may still equal `expectedOld`. That is contention, not a hard failure.
+  - `git.run` rejections carry git's stderr in the error message (`src/git.ts:11-14`).
 - Existing tests in `src/reviewState.test.ts` use a recording Git stub (`setUp`, `:27+`) that asserts exact call sequences. Those expectations will need the extra `update-ref` argument. Temp-repo pattern for the cross-process test: `src/model.test.ts:959`.
 
 ## Guides
@@ -31,7 +33,7 @@ Make writes to `refs/review/<branch>` and `refs/review-predeletion/<branch>` com
 - `writeSnapshotTree(git, ref, state, expectedOld: string | undefined)`:
   - Use `expectedOld` as the `commit-tree` parent instead of re-reading it.
   - Run `update-ref ref commit (expectedOld ?? "")`.
-  - On failure, re-read the ref. If it differs from `expectedOld`, throw `new ReviewStateConflictError(ref)` (exported class, `name = "ReviewStateConflictError"`). Otherwise rethrow the original error.
+  - On failure, re-read the ref. If it differs from `expectedOld`, or the error message matches `/cannot lock ref .*File exists/s`, throw `new ReviewStateConflictError(ref)` (exported class, `name = "ReviewStateConflictError"`). Otherwise rethrow the original error.
 - `withConflictRetry<T>(fn, attempts = 3)` runs the whole mutation again on a `ReviewStateConflictError` and rethrows after the last attempt. Each public mutation body runs inside it: it re-reads both refs on each attempt.
 - `writeReviewState(git, branch, state)` keeps its signature for any external caller. Read the current commit inside it and CAS against it (a lone write has no earlier read to protect).
 - Keep the existing comments' rationale (pre-deletion written first, and so on) and update them only where the mechanism changed.
@@ -48,5 +50,6 @@ Make writes to `refs/review/<branch>` and `refs/review-predeletion/<branch>` com
 - Update the stub-based tests in `src/reviewState.test.ts` for the new `update-ref` arity and the commit-first read.
 - Add a temp-repo test with a real `createGit`: start `markReviewed(a)`, and inject a concurrent write between its read and its update-ref by wrapping `git.run` so the first `update-ref` call first runs a separate `markReviewed(b)` on the real repo. Expect both `a` and `b` present in `refs/review/<branch>` afterwards, and the ref history to show the retry.
 - A test where every attempt conflicts (a wrapper always moves the ref before `update-ref`) rejects with `ReviewStateConflictError` after 3 attempts.
+- A stub test where the first `update-ref` rejects with `cannot lock ref 'refs/review/x': Unable to create '/r/.git/refs/review/x.lock': File exists.` while the ref is unchanged, and the second succeeds: the mutation retries and resolves.
 - A test where `update-ref` fails for a non-conflict reason (the stub rejects while the ref is unchanged) rethrows the original error unchanged.
 - Run `yarn test`, `yarn lint`, `yarn build`.

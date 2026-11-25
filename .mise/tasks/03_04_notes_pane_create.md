@@ -79,9 +79,9 @@ Clicking a file-note row opens the file's diff with the whole-file thread expand
     - line note: unchanged
   - `contextValue` is unchanged, so row actions keep working.
 - `newNoteChoice.ts` (pure, no vscode):
-  - `fileNoteAvailability(active: { scheme: string; fsPath: string; path: string } | undefined, repoRoot: string, files: readonly { path: string; deleted: boolean }[]): { path: string } | { reason: string }`.
-  - Pass in the active tab's modified/primary URI fields.
-  - `file` scheme: repo-relative `/` path. `delta-review-base` scheme (`REVIEW_BASE_SCHEME`): the path is `uri.path.slice(1)`.
+  - `fileNoteAvailability(active: { scheme: string; fsPath: string; path: string } | undefined, repoRoot: string, files: readonly { path: string; deleted: boolean }[], baseScheme: string): { path: string } | { reason: string }`. This is the one signature (spec matches).
+  - `extension.ts` passes the active tab's modified/primary URI fields, `model.files`, and `REVIEW_BASE_SCHEME` as `baseScheme`.
+  - `file` scheme: repo-relative `/` path. `baseScheme`: the path is `uri.path.slice(1)`.
   - Reasons:
     - undefined → `No file is open in the editor`
     - not file/base scheme, or outside the repo → `Open a file from the Delta Review diff`
@@ -92,7 +92,7 @@ Clicking a file-note row opens the file's diff with the whole-file thread expand
   - Collapse handlers also handle `generalGroup` (`notesCollapseKeyFor` accepts both group kinds).
   - Register `deltaReview.newNote`:
     - Read the active tab: `vscode.window.tabGroups.activeTabGroup.activeTab?.input`. Use `TabInputTextDiff.modified`, else `TabInputText.uri`.
-    - Compute availability and show a `createQuickPick` with the two items. Set `activeItems` to General note.
+    - Compute availability with `fileNoteAvailability(uri, repoRoot, model?.files ?? [], REVIEW_BASE_SCHEME)` and show a `createQuickPick` with the two items. Set `activeItems` to General note.
     - `onDidAccept`: ignore the File note item when it is unavailable (keep the picker open).
     - File note: `openDiff(file)`, then (after a tick) `commentController.startFileNoteDraft(Uri.file(join(repoRoot, path)), path, randomUUID())`.
     - General note: `executeCommand("deltaReview.newGeneralNote")`.
@@ -107,7 +107,7 @@ Clicking a file-note row opens the file's diff with the whole-file thread expand
 
 ## Gotchas
 
-- `src/contentProvider.ts` imports `vscode`, so `newNoteChoice.ts` must not import `REVIEW_BASE_SCHEME` from it. Take the base scheme as a parameter from `extension.ts`.
+- `src/contentProvider.ts` imports `vscode`, so `newNoteChoice.ts` must not import `REVIEW_BASE_SCHEME` from it; that is why `baseScheme` is the fourth parameter.
 - The welcome text renders only when `getChildren()` returns `[]`. Keep the general group absent when there are no general notes.
 - A row's `id` stays `note:<id>`. The general group id must not collide with `notesFile:` ids.
 - The QuickPick `onDidAccept` fires on Enter, even on the "disabled" item. Return early without hiding.

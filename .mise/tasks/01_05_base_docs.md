@@ -13,6 +13,7 @@ Document the per-branch diff base:
 - plugin/skills/cluster/SKILL.md
 - README.md
 - DEVELOPMENT.md
+- package.json
 
 ## Background
 
@@ -25,15 +26,17 @@ Document the per-branch diff base:
       - Skip a candidate when `merge-base == HEAD` and its tip `!= HEAD`.
       - Distance is `rev-list --count <merge-base>..HEAD`. The smallest wins. A tie goes to the fallback name, otherwise the earlier candidate.
       - With no candidate, use `@{upstream}` when it does not end with `/<branch>`.
-    - Stale means a non-fallback branch base that is an ancestor of the fallback.
+      - On the fallback branch itself, detection is skipped (source fallback).
+    - Stale means an explicit or fork-point-detected branch base that is an ancestor of the fallback, on a branch other than the fallback. Upstream-detected bases are never stale.
     - Missing means an explicit base that does not resolve.
   - UI: status-bar item `$(git-compare) ← <base>` (tooltip names explicit/auto-detected/default) opens the "Delta Review: Set Diff Base for Branch" picker. The stale prompt offers Switch / Keep / Choose…. A missing base shows a tree message with Choose a base / use automatic detection links.
 - Current text to replace:
   - `plugin/skills/cluster/SKILL.md:207-211`, workflow step 1, which reads the base only from `.vscode/settings.json`.
   - The `<base>` in step 2 (`:213-216`).
   - DEVELOPMENT.md:29 and :74 ("merge base with the base branch", "`merge-base(baseBranch, HEAD)`").
+  - `package.json:645`, the `deltaReview.baseBranch` setting description (`Branch the review set is computed against (merge-base with HEAD).`).
   - DEVELOPMENT.md:256-262, the manual script (merge base wording; add a base step).
-  - README.md:26 (Usage) and :105 (Settings: `deltaReview.baseBranch`, the branch the review set is computed against).
+  - README.md:25 (Usage, "Files changed vs the base branch") and :105 (Settings: `deltaReview.baseBranch`, the branch the review set is computed against).
 - CLAUDE.md rules for skill docs and DEVELOPMENT.md:
   - Binding **Contract** plus an overridable **Default workflow** that references it.
   - Terse, every line normative. State each rule once, in the Contract. Workflow steps reference Contract sections by name.
@@ -60,6 +63,7 @@ Document the per-branch diff base:
 - README:
   - Usage gets a bullet: the base is per branch (shared by worktrees), shown in the status bar, changed with the picker. A merged parent prompts to switch.
   - Settings: `deltaReview.baseBranch` becomes the fallback base when a branch has no explicit or detectable base (default `main`).
+- package.json: set the `deltaReview.baseBranch` description to `Fallback diff base for a branch with no explicit or auto-detected base (merge-base with HEAD).` Change nothing else in package.json.
 - DEVELOPMENT.md:
   - Fix lines 29 and 74 to say "the branch's diff base".
   - Add `### Diff base` under "How it works", after "Where the state lives":
@@ -87,5 +91,6 @@ Document the per-branch diff base:
   - After `git merge --no-ff feat/a` into main: expect `main`.
   - With an explicit file: expect the file's value.
   - With no local candidates but an upstream: expect the upstream.
+- `grep -n '"description"' package.json | grep -i fallback` shows the new `deltaReview.baseBranch` description.
 - Re-read the three docs for statements that still claim a single global base: `grep -n "baseBranch\|merge base" README.md DEVELOPMENT.md plugin/skills/cluster/SKILL.md`. Every remaining hit must describe the fallback or a per-branch base.
 - Run `yarn lint` and `yarn build` (unchanged code; confirms nothing else broke).
