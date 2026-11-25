@@ -37,7 +37,7 @@ const sourceLines = (
 export const baseStatusPresentation = (
   resolution: BaseResolution,
   mergeBase: string | undefined,
-  options?: { mergeBaseFailed?: boolean },
+  options?: { mergeBaseFailed?: boolean; promptOpen?: boolean },
 ): BaseStatusPresentation => {
   const { base } = resolution;
   const fileErrorLine =
@@ -57,14 +57,40 @@ export const baseStatusPresentation = (
   const { heading, origin, action } = sourceLines(resolution);
   const mergeBaseLine =
     mergeBase === undefined ? [] : [`Merge-base ${mergeBase.slice(0, 7)}`];
+  const staleOpen = resolution.stale && options?.promptOpen === true;
+  const staleLine = staleOpen
+    ? [`Merged into ${resolution.fallback}. Click to choose a base.`]
+    : [];
   return {
-    text: `$(git-compare) ← ${base}`,
-    tooltip: [heading, origin, ...mergeBaseLine, action, ...fileErrorLine].join(
-      "\n",
-    ),
-    tint: "none",
+    text: `${staleOpen ? "$(warning)" : "$(git-compare)"} ← ${base}`,
+    tooltip: [
+      heading,
+      origin,
+      ...mergeBaseLine,
+      action,
+      ...staleLine,
+      ...fileErrorLine,
+    ].join("\n"),
+    tint: staleOpen ? "warning" : "none",
   };
 };
+
+export const staleKey = (commonDir: string, branch: string): string =>
+  `${commonDir}\0${branch}`;
+
+export const shouldPromptStale = (
+  resolution: BaseResolution,
+  dismissed: Record<string, string>,
+  key: string,
+  prompting: ReadonlySet<string>,
+): boolean =>
+  resolution.stale && dismissed[key] !== resolution.base && !prompting.has(key);
+
+export const withStaleDismissed = (
+  dismissed: Record<string, string>,
+  key: string,
+  base: string,
+): Record<string, string> => ({ ...dismissed, [key]: base });
 
 export const mergeBaseErrorMessage = (resolution: BaseResolution): string => {
   const hint =

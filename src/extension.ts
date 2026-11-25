@@ -1,5 +1,5 @@
 import { access, readFile } from "node:fs/promises";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import * as vscode from "vscode";
 import { baseBlobForNote } from "./baseDocument";
 import {
@@ -45,11 +45,15 @@ import {
   createDetectionCache,
   resetDetectionCache,
   resolveDiffBase,
+  writeBranchBase,
 } from "./diffBase";
 import {
   BaseStatusPresentation,
   baseStatusPresentation,
   mergeBaseErrorMessage,
+  shouldPromptStale,
+  staleKey,
+  withStaleDismissed,
 } from "./diffBaseUi";
 import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
@@ -365,6 +369,18 @@ export const activate = async (
   };
   let baseResolution: BaseResolution | undefined;
   const baseDetectionCache = createDetectionCache();
+  const staleDismissedKey = "deltaReview.staleBaseDismissed";
+  let staleDismissed = context.workspaceState.get<Record<string, string>>(
+    staleDismissedKey,
+    {},
+  );
+  const stalePrompting = new Set<string>();
+  const staleKeyFor = async (activeGit: Git, branch: string): Promise<string> =>
+    staleKey(dirname(await deltaReviewDirFor(activeGit)), branch);
+  const dismissStale = (key: string, base: string): void => {
+    staleDismissed = withStaleDismissed(staleDismissed, key, base);
+    void context.workspaceState.update(staleDismissedKey, staleDismissed);
+  };
 
   context.subscriptions.push(
     treeView,
@@ -501,6 +517,9 @@ export const activate = async (
         configuration.get<string>("baseBranch") ?? "main",
         baseDetectionCache,
       );
+      const resolutionStaleKey = resolution.stale
+        ? await staleKeyFor(git, resolution.branch)
+        : undefined;
       if (generation !== refreshGeneration) {
         return;
       }
@@ -680,7 +699,27 @@ export const activate = async (
       statusBarItem.tooltip = `Delta Review: ${model.branch} vs ${baseBranch}`;
       statusBarItem.show();
       setBaseProblem(undefined);
-      renderBaseStatus(baseStatusPresentation(resolution, model.mergeBase));
+      const promptStale =
+        resolutionStaleKey !== undefined &&
+        shouldPromptStale(
+          resolution,
+          staleDismissed,
+          resolutionStaleKey,
+          stalePrompting,
+        );
+      if (promptStale) {
+        stalePrompting.add(resolutionStaleKey);
+      }
+      renderBaseStatus(
+        baseStatusPresentation(resolution, model.mergeBase, {
+          promptOpen:
+            resolutionStaleKey !== undefined &&
+            stalePrompting.has(resolutionStaleKey),
+        }),
+      );
+      if (promptStale) {
+        void promptStaleBase(git, resolution, resolutionStaleKey);
+      }
 
       // Review-note threads: load, refresh derived positions against the
       // current documents, and render. The store never creates a notes file
@@ -1598,6 +1637,52 @@ export const activate = async (
     await refresh();
   };
 
+  // Acts on the repo, branch and bases captured when the prompt opened, even
+  // if the active repo has changed since
+  const promptStaleBase = async (
+    activeGit: Git,
+    resolution: BaseResolution,
+    key: string,
+  ): Promise<void> => {
+    const { branch, base, fallback } = resolution;
+    const switchLabel = `Switch to ${fallback}`;
+    const keepLabel = `Keep ${base}`;
+    try {
+      const choice = await vscode.window.showWarningMessage(
+        `Base ${base} is fully merged into ${fallback}. Switch the diff base for ${branch} to ${fallback}?`,
+        switchLabel,
+        keepLabel,
+        "Choose…",
+      );
+      if (choice === switchLabel) {
+        await writeBranchBase(activeGit, branch, fallback);
+      } else if (choice === keepLabel) {
+        await writeBranchBase(activeGit, branch, base);
+        dismissStale(key, base);
+      } else if (choice === "Choose…") {
+        const picked = await showBasePicker({
+          git: activeGit,
+          resolution,
+          preferFirst: fallback,
+        });
+        if (picked.outcome === "cancelled") {
+          dismissStale(key, base);
+        } else if (picked.outcome === "picked") {
+          dismissStale(key, picked.ref);
+        }
+      } else {
+        dismissStale(key, base);
+      }
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Delta Review: failed to set the diff base (${error instanceof Error ? error.message : String(error)})`,
+      );
+    } finally {
+      stalePrompting.delete(key);
+    }
+    await refresh();
+  };
+
   const setBranchBase = async (): Promise<void> => {
     const activeGit = git;
     const resolution = baseResolution;
@@ -1614,9 +1699,20 @@ export const activate = async (
       return;
     }
     try {
-      const { outcome } = await showBasePicker({ git: activeGit, resolution });
-      if (outcome === "cancelled") {
+      const key = await staleKeyFor(activeGit, resolution.branch);
+      const picked = await showBasePicker({
+        git: activeGit,
+        resolution,
+        preferFirst:
+          resolution.stale && stalePrompting.has(key)
+            ? resolution.fallback
+            : undefined,
+      });
+      if (picked.outcome === "cancelled") {
         return;
+      }
+      if (picked.outcome === "picked") {
+        dismissStale(key, picked.ref);
       }
     } catch (error) {
       void vscode.window.showErrorMessage(
