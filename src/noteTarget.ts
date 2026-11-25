@@ -1,13 +1,13 @@
 import { baseBlobForNote } from "./baseDocument";
 import type { ReviewFile, ReviewModel } from "./model";
-import type { Note } from "./notes";
+import type { Note, NoteDocument } from "./notes";
 
 // Where a note's document lives, and how its anchor maps into that document.
 // Both the rendered comment thread and the REVIEW NOTES click resolve through
 // here, so the document the click opens is always the document the thread
 // attaches to. Pure — no vscode, no fs: whether the working file (or, for a
-// document note, the cluster notes document) exists is runtime knowledge
-// injected by the caller.
+// document note, the review document — Branch overview or cluster notes)
+// exists is runtime knowledge injected by the caller.
 
 // Which of a note's two line pairs the target document is expressed in:
 // `current` = the working-tree-drifted currentStartLine/currentEndLine,
@@ -34,7 +34,8 @@ export interface BaseNoteTarget {
 
 export interface DocumentNoteTarget {
   kind: "document";
-  // File name inside the cluster notes dir
+  document: NoteDocument;
+  // File name inside that document kind's directory
   file: string;
   lines: "current";
 }
@@ -44,8 +45,8 @@ export type NoteTarget =
 
 // The document a note belongs to.
 //
-// - document note, document exists → that cluster notes document (never
-//   resolved through `model.files`: a repo file can share its name);
+// - document note, document exists → that review document (never resolved
+//   through `model.files`: a repo file can share its name);
 // - document note, document missing (renamed or deleted) → the note's
 //   creation blob, so it is still readable and closable;
 // - working side, file in the review set and not deleted → the working file;
@@ -66,7 +67,12 @@ export const noteTargetFor = (
 ): NoteTarget => {
   if (note.document !== undefined) {
     return workingDocumentExists
-      ? { kind: "document", file: note.file, lines: "current" }
+      ? {
+          kind: "document",
+          document: note.document,
+          file: note.file,
+          lines: "current",
+        }
       : {
           kind: "base",
           path: note.file,

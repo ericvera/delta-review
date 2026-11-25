@@ -636,9 +636,12 @@ export interface RefreshOptions {
   // file is missing from the working tree. Injected so this module stays
   // vscode-free.
   readWorkingContent: (file: string) => Promise<string | undefined>;
-  // Current content of a cluster notes document by file name; undefined when
-  // it is missing. Absent → every document note reads as missing.
-  readDocumentContent?: (fileName: string) => Promise<string | undefined>;
+  // Current content of a review document by kind and file name; undefined
+  // when it is missing. Absent → every document note reads as missing.
+  readDocumentContent?: (
+    document: NoteDocument,
+    fileName: string,
+  ) => Promise<string | undefined>;
   // Current left-side blob for the base document a note belongs to
   // (ReviewModel's diffBaseSha). The note's creation blob disambiguates when
   // two review files present the same base path; undefined when the note has
@@ -736,7 +739,7 @@ export const refreshDerived = async (
     if (note.side === "working") {
       const content =
         note.document !== undefined
-          ? await options.readDocumentContent?.(note.file)
+          ? await options.readDocumentContent?.(note.document, note.file)
           : await options.readWorkingContent(note.file);
       // -w so the comparison blob is also anchor-able if a later pass
       // re-snapshots the note onto it

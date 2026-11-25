@@ -211,6 +211,7 @@ describe("noteTargetFor", () => {
     it("targets the cluster notes document when it exists", () => {
       expect(noteTargetFor(model([]), documentNote, true)).toEqual({
         kind: "document",
+        document: "clusterNotes",
         file: "api-layer.md",
         lines: "current",
       });
@@ -225,12 +226,38 @@ describe("noteTargetFor", () => {
       });
     });
 
+    describe("branch document", () => {
+      const branchNote = note({
+        file: "branch-feat-x.md",
+        document: "branch",
+      });
+
+      it("targets the branch document when it exists", () => {
+        expect(noteTargetFor(model([]), branchNote, true)).toEqual({
+          kind: "document",
+          document: "branch",
+          file: "branch-feat-x.md",
+          lines: "current",
+        });
+      });
+
+      it("falls back to the creation blob when it is missing", () => {
+        expect(noteTargetFor(model([]), branchNote, false)).toEqual({
+          kind: "base",
+          path: "branch-feat-x.md",
+          sha: "blob-at-creation",
+          lines: "creation",
+        });
+      });
+    });
+
     it("ignores a review file with the same name", () => {
       const sameName = model([
         file({ path: "api-layer.md", deleted: true, diffBaseSha: "aaa" }),
       ]);
       expect(noteTargetFor(sameName, documentNote, true)).toEqual({
         kind: "document",
+        document: "clusterNotes",
         file: "api-layer.md",
         lines: "current",
       });

@@ -1,11 +1,16 @@
 import { existsSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { createReviewBaseUri, REVIEW_BASE_SCHEME } from "./contentProvider";
-import { CLUSTER_NOTES_FILE_PATTERN } from "./documents";
+import {
+  canonicalDir,
+  documentNotePath,
+  documentNoteRefFor,
+  ReviewDocuments,
+} from "./documents";
 import { Git } from "./git";
 import { ReviewModel } from "./model";
-import { Note, NoteSide } from "./notes";
+import { Note, NoteDocument, NoteSide } from "./notes";
 import {
   clampNoteRange,
   NoteLineSource,
@@ -113,6 +118,9 @@ export interface NoteCommentController extends vscode.Disposable {
   renderAgentLineThreads: (entries: AgentLineNoteEntry[]) => void;
   // Inspection accessor for the scripted extension-host check
   agentLineThreads: () => AgentLineThreadSnapshot[];
+  // Inspection accessor for the scripted extension-host check: URIs of the
+  // open text documents that currently offer the note gutter
+  commentableDocuments: () => string[];
   // Expands a note's rendered thread — the reveal approximation for
   // click-to-navigate (VS Code 1.90 has no stable thread.reveal())
   expandThread: (noteId: string) => void;
@@ -169,7 +177,7 @@ export const createNoteCommentController = (
     isUnread: (thread: NoteThread) => boolean;
     markRead: (thread: NoteThread) => void;
   },
-  getClusterNotesDir: () => string | undefined,
+  getReviewDocuments: () => ReviewDocuments | undefined,
 ): NoteCommentController => {
   const controller = vscode.comments.createCommentController(
     "deltaReview.notes",
@@ -192,61 +200,73 @@ export const createNoteCommentController = (
   };
 
   // Checked before repoRelativePath: with the git common dir inside the repo,
-  // a cluster notes document would otherwise read as a `.git/...` repo path.
-  // Both sides go through Uri.file so a drive-letter case difference matches.
-  const clusterNotesFileName = (uri: vscode.Uri): string | undefined => {
-    const dir = getClusterNotesDir();
-    if (dir === undefined || uri.scheme !== "file") {
+  // a review document would otherwise read as a `.git/...` repo path.
+  // Directories compare by real path (symlinks, macOS /var vs /private/var)
+  // and through Uri.file so a drive-letter case difference matches.
+  const documentNoteRef = (
+    uri: vscode.Uri,
+  ): { document: NoteDocument; file: string } | undefined => {
+    const documents = getReviewDocuments();
+    if (documents === undefined || uri.scheme !== "file") {
       return undefined;
     }
-    const fileName = basename(uri.fsPath);
-    return dirname(uri.fsPath) === vscode.Uri.file(dir).fsPath &&
-      CLUSTER_NOTES_FILE_PATTERN.test(fileName)
-      ? fileName
-      : undefined;
+    return documentNoteRefFor(
+      uri.fsPath,
+      documents,
+      (path) => vscode.Uri.file(canonicalDir(path)).fsPath,
+    );
+  };
+
+  const commentingRangesFor = (
+    document: vscode.TextDocument,
+  ): vscode.Range[] => {
+    // Runs for every open document — return fast for foreign schemes
+    const scheme = document.uri.scheme;
+    if (scheme !== "file" && scheme !== REVIEW_BASE_SCHEME) {
+      return [];
+    }
+    const git = getGit();
+    const model = getModel();
+    if (git === undefined || model === undefined) {
+      return [];
+    }
+    // The provider offers the whole document; a multi-line selection then
+    // drives the range of a created note
+    const fullDocument = [
+      new vscode.Range(0, 0, Math.max(document.lineCount - 1, 0), 0),
+    ];
+    if (scheme === "file") {
+      if (documentNoteRef(document.uri) !== undefined) {
+        return fullDocument;
+      }
+      const path = repoRelativePath(git, document.uri);
+      return path !== undefined &&
+        model.files.some((file) => file.path === path && !file.deleted)
+        ? fullDocument
+        : [];
+    }
+    // Base documents are commentable only while they are the diff's
+    // current base — stale snapshot docs get no new commenting ranges
+    if (document.uri.query === "empty") {
+      return [];
+    }
+    const path = document.uri.path.slice(1);
+    return model.files.some(
+      (file) =>
+        file.diffBasePath === path && file.diffBaseSha === document.uri.query,
+    )
+      ? fullDocument
+      : [];
   };
 
   controller.commentingRangeProvider = {
-    provideCommentingRanges: (document) => {
-      // Runs for every open document — return fast for foreign schemes
-      const scheme = document.uri.scheme;
-      if (scheme !== "file" && scheme !== REVIEW_BASE_SCHEME) {
-        return [];
-      }
-      const git = getGit();
-      const model = getModel();
-      if (git === undefined || model === undefined) {
-        return [];
-      }
-      // The provider offers the whole document; a multi-line selection then
-      // drives the range of a created note
-      const fullDocument = [
-        new vscode.Range(0, 0, Math.max(document.lineCount - 1, 0), 0),
-      ];
-      if (scheme === "file") {
-        if (clusterNotesFileName(document.uri) !== undefined) {
-          return fullDocument;
-        }
-        const path = repoRelativePath(git, document.uri);
-        return path !== undefined &&
-          model.files.some((file) => file.path === path && !file.deleted)
-          ? fullDocument
-          : [];
-      }
-      // Base documents are commentable only while they are the diff's
-      // current base — stale snapshot docs get no new commenting ranges
-      if (document.uri.query === "empty") {
-        return [];
-      }
-      const path = document.uri.path.slice(1);
-      return model.files.some(
-        (file) =>
-          file.diffBasePath === path && file.diffBaseSha === document.uri.query,
-      )
-        ? fullDocument
-        : [];
-    },
+    provideCommentingRanges: commentingRangesFor,
   };
+
+  const commentableDocuments = (): string[] =>
+    vscode.workspace.textDocuments
+      .filter((document) => commentingRangesFor(document).length > 0)
+      .map((document) => document.uri.toString());
 
   const activeContext = (): { git: Git; model: ReviewModel } | undefined => {
     const git = getGit();
@@ -385,11 +405,12 @@ export const createNoteCommentController = (
     note: Note,
   ): NoteTarget => {
     if (note.document !== undefined) {
-      const dir = getClusterNotesDir();
+      const documents = getReviewDocuments();
       return noteTargetFor(
         model,
         note,
-        dir !== undefined && existsSync(join(dir, note.file)),
+        documents !== undefined &&
+          existsSync(documentNotePath(documents, note.document, note.file)),
       );
     }
     return noteTargetFor(
@@ -407,9 +428,15 @@ export const createNoteCommentController = (
         return vscode.Uri.file(join(git.repoRoot, target.path));
       case "base":
         return createReviewBaseUri(target.path, target.sha);
-      case "document":
-        // threadTargetFor yields a document target only with a known dir
-        return vscode.Uri.file(join(getClusterNotesDir() ?? "", target.file));
+      case "document": {
+        // threadTargetFor yields a document target only with documents loaded
+        const documents = getReviewDocuments();
+        return vscode.Uri.file(
+          documents === undefined
+            ? target.file
+            : documentNotePath(documents, target.document, target.file),
+        );
+      }
     }
   };
 
@@ -867,10 +894,10 @@ export const createNoteCommentController = (
     }
     let side: NoteSide;
     let path: string | undefined;
-    const documentFileName = clusterNotesFileName(uri);
-    if (documentFileName !== undefined) {
+    const ref = documentNoteRef(uri);
+    if (ref !== undefined) {
       side = "working";
-      path = documentFileName;
+      path = ref.file;
     } else if (uri.scheme === REVIEW_BASE_SCHEME) {
       side = "base";
       path = uri.path.slice(1);
@@ -896,9 +923,7 @@ export const createNoteCommentController = (
       const note = await createNote(context.git, context.model.branch, {
         file: path,
         side,
-        ...(documentFileName === undefined
-          ? {}
-          : { document: "clusterNotes" as const }),
+        ...(ref === undefined ? {} : { document: ref.document }),
         startLine: startLine + 1,
         endLine: endLine + 1,
         snapshot,
@@ -1168,6 +1193,7 @@ export const createNoteCommentController = (
     provenanceThreads,
     renderAgentLineThreads,
     agentLineThreads,
+    commentableDocuments,
     expandThread,
     reclampThreadsFor,
     restyleThreads,
