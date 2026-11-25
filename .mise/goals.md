@@ -25,8 +25,16 @@ currently it seems like the base commit/branch on a diff is always main or set p
 - Base change outdates some base-side review notes: accepted, they show as outdated as today when the merge-base moves; no warning.
 - `delta:cluster` must compute the same base the extension uses.
 
+- File note: a whole-file comment thread (no line range), shown at the top of the file's diff, replies like any note.
+- File-less note ("General note"): clicking it in the Review Notes pane opens a dedicated tab whose sole purpose is that note's conversation (the note, replies, agent responses, reply box).
+- Creation: a `+` in the Review Notes pane title bar only (no per-file-row `+`), opening a choice between "File note" (for the current file) and "General note".
+
 ## Assumptions
 
+- "General note" is the user-facing name for file-less notes (owner asked for a better name than "floating"); the code/contract term is left to the spec.
+- The conversation tab's implementation (webview vs. virtual document hosting a comment thread) is left to the spec; one tab per note, reused if already open.
+- "Current file" is the active editor's file when it is part of the branch diff; otherwise the File note option is shown disabled with the reason.
+- File-less and file notes share one notes-file version bump (v3).
 - Responsiveness: a mark updates its row immediately (optimistic), rolled back with an error if the write fails; the extension's own ref writes do not restart the debounce or supersede the command's refresh; the debounce gets a max wait; review-state ref writes use compare-and-set with retry so concurrent windows/worktrees cannot drop a mark; the silent no-ops report why.
 - The agent-facing mechanism (git config key vs. file under the git common dir, which skill doc owns it) is left to the spec; it must be readable by `delta:cluster` and settable without the extension running.
 - Dismissing the stale-base prompt suppresses it for that branch/base pair until the base changes.
@@ -58,12 +66,6 @@ we should also add in this branch the ability to add review notes directly in th
 - review-notes SKILL.md: `snapshot` authoritative locator (:71), side/document semantics (:72-77), work-set order by file/line (:154) — must document file-level/floating notes and ignored response `anchor` on them.
 - Docs: README.md:75-96, DEVELOPMENT.md:175, :204, :226, :315-318.
 - Tests: src/notes.test.ts, notesGrouping.test.ts, notesStore.test.ts, noteTarget.test.ts; scripted host check for create command and tree.
-
-## Open questions
-
-1. File-level note form.
-2. Where floating notes and their replies render.
-3. How notes are created from the pane.
 
 ## Added scope 2 (owner, during goals)
 
