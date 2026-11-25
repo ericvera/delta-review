@@ -38,12 +38,24 @@ import {
   loadReviewDocuments,
   ReviewDocuments,
 } from "./documents";
+import {
+  BaseResolution,
+  createDetectionCache,
+  resetDetectionCache,
+  resolveDiffBase,
+} from "./diffBase";
+import {
+  BaseStatusPresentation,
+  baseStatusPresentation,
+  mergeBaseErrorMessage,
+} from "./diffBaseUi";
 import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
 import type { HashCacheEntry } from "./hashCache";
 import {
   computeReviewModel,
   FileReviewStatus,
+  MergeBaseError,
   pathsWithReviewSnapshot,
   reviewSnapshotPaths,
   resolveBranch,
@@ -310,11 +322,36 @@ export const activate = async (
     50,
   );
   statusBarItem.command = "deltaReview.focus";
+  const baseStatusItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    49,
+  );
+  // StatusBarItem exposes no visibility, and the test hook reports it
+  let baseStatusVisible = false;
+  const renderBaseStatus = (presentation: BaseStatusPresentation): void => {
+    baseStatusItem.text = presentation.text;
+    baseStatusItem.tooltip = presentation.tooltip;
+    baseStatusItem.backgroundColor =
+      presentation.tint === "error"
+        ? new vscode.ThemeColor("statusBarItem.errorBackground")
+        : presentation.tint === "warning"
+          ? new vscode.ThemeColor("statusBarItem.warningBackground")
+          : undefined;
+    baseStatusItem.show();
+    baseStatusVisible = true;
+  };
+  const hideBaseStatus = (): void => {
+    baseStatusItem.hide();
+    baseStatusVisible = false;
+  };
+  let baseResolution: BaseResolution | undefined;
+  const baseDetectionCache = createDetectionCache();
 
   context.subscriptions.push(
     treeView,
     notesTreeView,
     statusBarItem,
+    baseStatusItem,
     vscode.workspace.registerTextDocumentContentProvider(
       REVIEW_BASE_SCHEME,
       createReviewBaseContentProvider(() => git),
@@ -414,6 +451,8 @@ export const activate = async (
       treeView.message =
         "Open a folder inside a git repository to start reviewing.";
       statusBarItem.hide();
+      baseResolution = undefined;
+      hideBaseStatus();
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
@@ -421,9 +460,11 @@ export const activate = async (
       return;
     }
     const configuration = vscode.workspace.getConfiguration("deltaReview");
-    const baseBranch = configuration.get<string>("baseBranch") ?? "main";
     const autoReviewGlobs =
       configuration.get<string[]>("autoReview.globs") ?? [];
+    // This refresh's own resolution, so the fatal catch never reads one a
+    // newer refresh left behind
+    let resolution: BaseResolution | undefined;
     try {
       // The branch, then the clusters contract, are resolved before anything
       // is computed: the contract's move declarations feed the review model,
@@ -434,6 +475,32 @@ export const activate = async (
       if (generation !== refreshGeneration) {
         return;
       }
+      resolution = await resolveDiffBase(
+        git,
+        branch,
+        configuration.get<string>("baseBranch") ?? "main",
+        baseDetectionCache,
+      );
+      if (generation !== refreshGeneration) {
+        return;
+      }
+      baseResolution = resolution;
+      if (resolution.missing) {
+        model = undefined;
+        clusterModel = undefined;
+        setClustersAvailable(false);
+        treeProvider.setModel(undefined);
+        treeView.badge = undefined;
+        treeView.message = `⚠ Base ${resolution.base} for branch ${resolution.branch} does not resolve.`;
+        statusBarItem.hide();
+        renderBaseStatus(baseStatusPresentation(resolution, undefined));
+        notesKey = undefined;
+        renderNoteThreads([]);
+        commentController.renderProvenanceThreads([]);
+        commentController.renderAgentLineThreads([]);
+        return;
+      }
+      const baseBranch = resolution.base;
       // Loaded once per refresh, so correctness never depends on watcher
       // delivery, and re-applied to every computation below — a contract
       // rewritten mid-refresh cannot yield a model whose moves and clusters
@@ -591,6 +658,7 @@ export const activate = async (
       statusBarItem.text = `$(checklist) Review ${reviewedCount}/${model.files.length}`;
       statusBarItem.tooltip = `Delta Review: ${model.branch} vs ${baseBranch}`;
       statusBarItem.show();
+      renderBaseStatus(baseStatusPresentation(resolution, model.mergeBase));
 
       // Review-note threads: load, refresh derived positions against the
       // current documents, and render. The store never creates a notes file
@@ -781,9 +849,20 @@ export const activate = async (
       setClustersAvailable(false);
       treeProvider.setModel(undefined);
       treeView.badge = undefined;
-      // Fatal model errors win over any contract warning
-      treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
       statusBarItem.hide();
+      // Fatal model errors win over any contract warning. A failed merge-base
+      // keeps the base item up: it is the way to a base that works.
+      if (error instanceof MergeBaseError && resolution !== undefined) {
+        treeView.message = mergeBaseErrorMessage(resolution);
+        renderBaseStatus(
+          baseStatusPresentation(resolution, undefined, {
+            mergeBaseFailed: true,
+          }),
+        );
+      } else {
+        treeView.message = `Delta Review: ${error instanceof Error ? error.message : String(error)}`;
+        hideBaseStatus();
+      }
       notesKey = undefined;
       renderNoteThreads([]);
       commentController.renderProvenanceThreads([]);
@@ -903,6 +982,7 @@ export const activate = async (
     // objects in this checkout's database, so neither means anything in another
     hashCache.clear();
     sliceCache.clear();
+    resetDetectionCache(baseDetectionCache);
     if (repoRoot === undefined) {
       git = undefined;
       disposeRepoWatcher();
@@ -2229,6 +2309,13 @@ export const activate = async (
           clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
           treeRows: collectTreeRows(),
           commentableDocuments: commentController.commentableDocuments(),
+          base: baseResolution,
+          baseStatus: {
+            text: baseStatusItem.text,
+            tooltip: baseStatusItem.tooltip,
+            visible: baseStatusVisible,
+          },
+          treeMessage: treeView.message,
         };
       }),
     );

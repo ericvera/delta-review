@@ -11,6 +11,7 @@ import {
   computeReviewModel,
   FileReviewStatus,
   hasAnyReviewSnapshot,
+  MergeBaseError,
   originSnapshotSha,
   parseCheckAttrOutput,
   pathsWithReviewSnapshot,
@@ -887,6 +888,7 @@ interface FakeRepo {
   // Working-tree content shas; each path is also written to disk
   workingShas: Record<string, string>;
   objectTypes: Record<string, string>;
+  mergeBaseFails?: boolean;
 }
 
 // Object ids the fake database hands out. Content-derived like git's own, so
@@ -994,6 +996,9 @@ describe("computeReviewModel", () => {
           return `${full.branch}\n`;
         }
         if (args[0] === "merge-base") {
+          if (full.mergeBaseFails === true) {
+            throw new Error("fatal: no merge base");
+          }
           return `${MERGE_BASE}\n`;
         }
         if (args[0] === "diff") {
@@ -1062,6 +1067,16 @@ describe("computeReviewModel", () => {
       },
     };
   };
+
+  it("rejects with a MergeBaseError naming the base when merge-base fails", async () => {
+    const git = await setUp({ mergeBaseFails: true });
+    const rejection = computeReviewModel(git, "feat/a");
+    await expect(rejection).rejects.toBeInstanceOf(MergeBaseError);
+    await expect(rejection).rejects.toMatchObject({
+      base: "feat/a",
+      message: 'Cannot compute merge-base with "feat/a".',
+    });
+  });
 
   it("keeps today's diff bases when no moves are declared", async () => {
     const git = await setUp({
