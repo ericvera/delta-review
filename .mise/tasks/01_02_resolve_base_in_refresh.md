@@ -16,7 +16,7 @@ Make every refresh compute the review set against the per-branch resolved base i
 - `refresh()` lives at `src/extension.ts:405`. Today it reads `baseBranch` from configuration at `:424`, resolves the branch at `:432`, and passes `baseBranch` to `computeReviewModel` at `:464` and `:502` (the auto-mark recompute). The counter tooltip at `:592` reads `Delta Review: ${model.branch} vs ${baseBranch}`. The fatal catch branch at about `:780-791` hides the counter and sets `treeView.message`.
 - Caches cleared on repo switch: `hashCache.clear(); sliceCache.clear();` in `setActiveRepo` (`src/extension.ts:898-905`). Add the detection cache there.
 - The counter status item is created at `src/extension.ts:308-312` (left, priority 50, command `deltaReview.focus`) and pushed to `context.subscriptions` right after.
-- `computeReviewModel` (`src/model.ts:578`) throws `Cannot compute merge-base with "<base>". Check the deltaReview.baseBranch setting.` at `:608`. The base no longer always comes from the setting, so drop the second sentence.
+- `computeReviewModel` (`src/model.ts:574`) throws `Cannot compute merge-base with "<base>". Check the deltaReview.baseBranch setting.` at `:606-608`. The base no longer always comes from the setting, so the hint moves to the extension, which knows the base's source. The fatal catch must keep a way out: with no merge-base the user still needs the setting hint (fallback source) and the base item to reach the picker (01_03 attaches its command).
 - `ReviewModel.mergeBase` (`src/model.ts:110`) feeds the tooltip's `Merge-base <short sha>`.
 - Mock text (`.mise/mock/status-bar.html`, `base-error.html`), with each tooltip line on its own line:
   - Explicit: `Delta Review base: <base>` / `Set for branch <branch> (all worktrees on this branch).` / `Merge-base <sha7>` / `Click to change the base.`
@@ -33,7 +33,11 @@ Make every refresh compute the review set against the per-branch resolved base i
 
 ## Implementation details
 
-- `src/diffBaseUi.ts` (pure, no vscode): `baseStatusPresentation(resolution, mergeBase: string | undefined): { text: string; tooltip: string; tint: "none" | "warning" | "error" }`. `warning` is not produced yet (01_04 adds stale), so return `none` / `error` only. Export it and unit-test every source variant.
+- `src/model.ts`: export `class MergeBaseError extends Error { constructor(readonly base: string) }` with `name = "MergeBaseError"` and message `Cannot compute merge-base with "<base>".`; throw it at `:606-608` in place of the current `Error`.
+- `src/diffBaseUi.ts` (pure, no vscode):
+  - `baseStatusPresentation(resolution, mergeBase: string | undefined, options?: { mergeBaseFailed?: boolean }): { text: string; tooltip: string; tint: "none" | "warning" | "error" }`. `warning` is not produced yet (01_04 adds stale), so return `none` / `error` only. With `mergeBaseFailed`: text `$(warning) ← <base>`, tint `error`, tooltip `No merge-base between <base> and HEAD. Click to choose a base.`
+  - `mergeBaseErrorMessage(resolution): string`: `⚠ Cannot compute merge-base with "<base>".` followed by ` Check the deltaReview.baseBranch setting or click the base in the status bar to choose one.` for source `fallback`, else ` Click the base in the status bar to choose another.`
+  - Export both and unit-test every source variant.
 - `extension.ts`:
   - Create `baseStatusItem` (left, priority 49) and push it to subscriptions. Leave its `command` unset until 01_03.
   - Hold `let baseResolution: BaseResolution | undefined` and `const baseDetectionCache: DetectionCache = {}`.
@@ -49,7 +53,8 @@ Make every refresh compute the review set against the per-branch resolved base i
     - return
   - Otherwise pass `resolution.base` to both `computeReviewModel` calls. Set the counter tooltip to `Delta Review: ${model.branch} vs ${resolution.base}`. Render and show the base item with `model.mergeBase`.
   - Map the tint to `new vscode.ThemeColor("statusBarItem.errorBackground")` / `warningBackground` / undefined.
-  - In the fatal catch and the `git === undefined` branch, hide the base item too, except for the missing-base path above.
+  - In the fatal catch: when the error is a `MergeBaseError` and `baseResolution` is current, set `treeView.message = mergeBaseErrorMessage(baseResolution)` and render the base item with `mergeBaseFailed: true` and keep it shown. Any other fatal error, and the `git === undefined` branch, hide the base item.
+  - Assign `baseResolution` before calling `computeReviewModel`, so the catch can read it.
 - Add the detection cache clear to `setActiveRepo`.
 - Extend `deltaReview.__inspect` (test hook, `src/extension.ts:~2200`) with `base: baseResolution` and `baseStatus: { text, tooltip, visible }`, so a host check can read them.
 
@@ -62,10 +67,12 @@ Make every refresh compute the review set against the per-branch resolved base i
 
 ## Verification
 
-- `src/diffBaseUi.test.ts` covers the explicit, detected fork-point, detected upstream, fallback, missing and fileError tooltips and texts.
+- `src/diffBaseUi.test.ts` covers the explicit, detected fork-point, detected upstream, fallback, missing, `mergeBaseFailed` and fileError tooltips and texts, and `mergeBaseErrorMessage` for fallback (contains `deltaReview.baseBranch`) and explicit/detected (does not).
+- `src/model.test.ts`: a base with no common history rejects with a `MergeBaseError` whose `base` is that ref.
 - Add or adjust the `src/model.test.ts` assertion on the merge-base error message (search for `Check the deltaReview.baseBranch setting`) to the new text.
 - Run `yarn test`, `yarn lint`, `yarn build`.
 - Scripted extension-host check (DEVELOPMENT.md "Scripted extension-host checks"; launch with `env -u ELECTRON_RUN_AS_NODE` and a short `--user-data-dir`; batch with other checks where possible). Use a temp repo with `main` → `feat/a` → `feat/b` checked out.
   - `__inspect().base.source === "detected"`, `base === "feat/a"`, and the status text is `$(git-compare) ← feat/a`.
   - Write `.git/delta-review/base-feat-b.json` = `{"version":1,"base":"main"}`. After the refresh, the source is explicit and the files are the diff vs main.
   - Set the base to `nope`. The tree has no rows, `baseStatus.text` contains `$(warning)`.
+  - Create an orphan branch `lonely` (`git checkout --orphan lonely && git commit --allow-empty -m x && git checkout feat/b`) and set the base to `lonely`. `baseStatus.visible` is true, its text contains `$(warning)`, and the tree message contains `Click the base in the status bar`.

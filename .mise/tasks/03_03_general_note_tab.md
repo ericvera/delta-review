@@ -17,7 +17,7 @@ Open a general note (a note with no file) in its own editor tab. The tab shows t
   - `GeneralNote { scope: "general"; id; turns; status; outdated; createdAt }` (`src/notes.ts`), and `AnyNoteThread` / `isGeneralThread` (`src/noteThreads.ts`).
   - `createNote(git, branch, { scope: "general", text, id? })`, `appendReviewerTurn`, `setResolved`, `deleteNote` (`src/notesStore.ts`).
   - `pendingRead.ts` accepts `AnyNoteThread`.
-- Task 03_02: `src/extension.ts` keeps `currentNoteThreads: AnyNoteThread[]` and `markRead(thread)` / `isUnread(thread)`. `renderNoteThreads(threads)` is the single place threads are rendered after a notes load. `notesKey` (`{ repo, branch }`) is defined only on a successful load.
+- Task 03_02: `src/extension.ts` keeps `currentNoteThreads: AnyNoteThread[]` and `markRead(thread)` / `isUnread(thread)`. `renderNoteThreads(threads)` is the single place threads are rendered after a notes load. `notesKey` (`{ repo, branch }`, `src/extension.ts:150`) is defined only on a successful load, and its `branch` is `readMarkBranch(computed.branch)` (`src/extension.ts:746`; `readMarkBranch` in `src/pendingRead.ts:20` strips a leading `heads/`, which `rev-parse --abbrev-ref HEAD` prints when a tag shares the branch name). The notes store itself is called with the raw `computed.branch` (e.g. `refreshDerived` at `src/extension.ts:~724`).
 - Thread statuses and labels: `ThreadStatus` = `open | addressed | pending | resolved`. Status label map is in `src/commentController.ts:49-55`. Row icons and colors are in `src/notesTreeProvider.ts:48-73`. Match these colors in the tab.
 - Existing delete confirmation for note rows: `deltaReview.deleteNoteRow` (`src/extension.ts:~1695-1735`). Reuse its wording.
 - Mock (`.mise/mock/general-note-tab.html`):
@@ -44,12 +44,13 @@ Open a general note (a note with no file) in its own editor tab. The tab shows t
   - CSP: `default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:`.
   - Use VS Code theme CSS variables (`--vscode-editor-background`, etc.).
   - The inline script (nonce) posts `{ type: "reply" | "resolve" | "unresolve" | "delete" | "markRead" | "add" | "cancel", text? }` and keeps textarea text in `vscode.getState/setState`.
-  - Also export `generalNoteTitle(text)` (first line, truncated at 40 with `…`) and `formatCreated(iso)`.
+  - Also export `sameNotesKey(a, b)` (value equality of `{ repo, branch }`, used by `update`), `generalNoteTitle(text)` (first line, truncated at 40 with `…`) and `formatCreated(iso)`.
 - `generalNotePanel.ts`: `createGeneralNotePanels({ markdownToHtml, isUnread, markRead, onDidChangeNotes })` returns:
-  - `open(thread, ctx: { repoRoot, branch })`: reveal if open. Otherwise `createWebviewPanel("deltaReview.generalNote", title, ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: false })` with `iconPath = new ThemeIcon("comment-discussion")`.
+  - `GeneralNoteContext = { repoRoot: string; storeBranch: string; key: { repo: string; branch: string } }`. `storeBranch` is passed to every store call; `key` has `notesKey`'s shape and value and is used for matching and for the meta line's branch.
+  - `open(thread, ctx: GeneralNoteContext)`: reveal if open. Otherwise `createWebviewPanel("deltaReview.generalNote", title, ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: false })` with `iconPath = new ThemeIcon("comment-discussion")`.
   - `openDraft(ctx)`: pre-allocates `randomUUID()` as the future note id.
-  - `update(threads, ctx)`: for panels whose `repoRoot` + `branch` match `ctx`, re-render the panel's thread when changed (compare turn count, last `at`, status, unread). Close a non-draft panel whose note id is absent.
-  - Messages run the store call on `createGit(panel.repoRoot)` and `panel.branch`, then `onDidChangeNotes()`:
+  - `update(threads, key: { repo, branch })`: for panels where `sameNotesKey(ctx.key, key)`, re-render the panel's thread when changed (compare turn count, last `at`, status, unread). Close a non-draft panel whose note id is absent.
+  - Messages run the store call on `createGit(panel.ctx.repoRoot)` and `panel.ctx.storeBranch`, then `onDidChangeNotes()`:
     - reply → `appendReviewerTurn`
     - resolve/unresolve → `setResolved`
     - delete → modal confirm, then `deleteNote`, then dispose
@@ -59,8 +60,9 @@ Open a general note (a note with no file) in its own editor tab. The tab shows t
   - Errors show `Delta Review: failed to <action> (<msg>)`.
   - `markdownToHtml(text)` = `vscode.commands.executeCommand<string>("markdown.api.render", text)`, falling back to `<p>` + `escapeHtml` + `<br>` when the command throws or returns a non-string.
 - `extension.ts`:
-  - Instantiate the panels manager. Register `deltaReview.openGeneralNote(thread: AnyNoteThread)` (general threads only, else return), using the current `git.repoRoot` and `model.branch`.
-  - Register `deltaReview.newGeneralNote()`, which opens a draft (used by 03_04's `+`).
+  - Instantiate the panels manager. Add `generalNoteContext(): GeneralNoteContext | undefined`, returning undefined unless `git` and `model` are defined, else `{ repoRoot: git.repoRoot, storeBranch: model.branch, key: { repo: git.repoRoot, branch: readMarkBranch(model.branch) } }`. Never use raw `model.branch` as the key: on a branch shadowed by a same-named tag it is `heads/<name>`, which would never equal `notesKey`, so the panel would never update or close.
+  - Register `deltaReview.openGeneralNote(thread: AnyNoteThread)` (general threads only, else return) with `generalNoteContext()` (info `Delta Review: the review is still loading — try again in a moment.` when undefined).
+  - Register `deltaReview.newGeneralNote()`, which opens a draft with `generalNoteContext()` (used by 03_04's `+`).
   - In `renderNoteThreads`, call `generalNotePanels.update(threads, notesKey)` when `notesKey` is defined.
   - `__inspect` gains `generalNotePanels: [{ noteId, mode, title }]` and `allNoteThreads: currentNoteThreads`.
 - `package.json`: commands `deltaReview.openGeneralNote` (title `Open General Note`) and `deltaReview.newGeneralNote` (title `New General Note`, category Delta Review), both hidden from the palette for now (`when: false`). 03_04 exposes creation via the pane `+`.
@@ -75,6 +77,7 @@ Open a general note (a note with no file) in its own editor tab. The tab shows t
 
 ## Verification
 
+- `sameNotesKey`: `{ repo, branch: readMarkBranch("heads/x") }` equals `{ repo, branch: "x" }`; a different repo or branch does not.
 - `src/generalNoteHtml.test.ts`:
   - escaping of note text (`<script>` stays inert text in the output)
   - the CSP meta contains the nonce and no `'unsafe-inline'` in `script-src`

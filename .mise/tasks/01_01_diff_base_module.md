@@ -19,12 +19,13 @@ Add a vscode-free module that reads, writes and clears a branch's explicit diff 
 - Git access: the `Git` interface (`src/git.ts:3-9`), where `git.run(args)` resolves stdout and rejects on non-zero exit. Temp-repo tests: see `src/model.test.ts:959` and `:1080` for creating real repos under `tmpdir()`.
 - Design decisions reaching this task (spec `## Design`, "Per-branch diff base"):
   - Contract file: `<common dir>/delta-review/base-<sanitized-branch>.json`, content `{ "version": 1, "base": "<ref>" }`. Invalid (unparsable, version not exactly `1`, `base` not a non-empty string) is treated as absent, with an error string surfaced to the caller.
-  - Detection:
-    - Candidates are `git for-each-ref --format=%(refname:short) %(objectname) refs/heads` in output order, minus the current branch.
-    - For each: `mb = merge-base <c> HEAD` (a failure skips it). Skip when `mb === HEAD sha` and the candidate's tip `!== HEAD sha`, since it is a descendant. Distance is `rev-list --count mb..HEAD`.
+  - Detection (fixed spawn count, independent of the number of local branches and of new commits):
+    - One spawn lists candidates with distances: `git for-each-ref --format=%(refname:short) %(objectname) %(ahead-behind:HEAD) refs/heads` (git >= 2.41), in output order, minus the current branch. Each line ends `<ahead> <behind>`: `ahead` = commits in the candidate not in HEAD, `behind` = commits in HEAD not in the candidate. Distance is `behind`.
+    - Skip a candidate when `behind === 0 && ahead > 0` (a descendant of the current branch), and when `behind === total`, where `total = rev-list --count HEAD` (no common history).
     - The smallest distance wins. A tie goes to the candidate named exactly the fallback, otherwise the earlier one keeps it.
     - With no candidate, use the upstream: `rev-parse --abbrev-ref @{upstream}`, used only if it does not end with `/<current branch>` and `merge-base <upstream> HEAD` succeeds.
-  - The detection result is cached by a key of HEAD sha + for-each-ref output + upstream (or empty) + fallback. The caller owns the cache object, like `hashCache` in `computeReviewModel`.
+    - Older git: when the for-each-ref call rejects with a message matching `/ahead-behind/` (unknown field), run `for-each-ref --format=%(refname:short) %(objectname) refs/heads` and per candidate `mb = merge-base <sha> HEAD` (a failure skips it) and `rev-list --count <mb>..HEAD`; skip when `mb === HEAD sha` and the tip `!== HEAD sha`. Same tie rule.
+  - Caching (caller-owned object, like `hashCache` in `computeReviewModel`): `total` and the upstream merge-base result are cached by a key of for-each-ref output + upstream (or empty) + fallback. The older-git path caches each candidate's `{ mb, distance }` by `candidate sha + HEAD sha`. A steady-state refresh on modern git costs 3 spawns (for-each-ref, `rev-parse @{upstream}`, and `rev-list --count HEAD` only on a key miss) whatever the branch count.
   - When `branch === fallback`, skip detection: source is `fallback` (unless an explicit file exists). On `main`, a forked or merged feature branch must never be picked as base.
   - `stale` is true iff all of these hold:
     - source is `explicit`, or `detected` with `detectedVia === "forkPoint"` (an upstream-detected base, e.g. `origin/main` while local `main` was skipped, is never stale)
@@ -51,8 +52,9 @@ Add a vscode-free module that reads, writes and clears a branch's explicit diff 
   - `detectBase(git, branch, fallback, cache: DetectionCache): Promise<{ forkPoint?: string; upstream?: string; upstreamEligible: boolean }>`. `upstream` is returned even when ineligible, because the picker lists it.
   - `resolveDiffBase(git, branch, fallback, cache): Promise<BaseResolution>` with `BaseResolution = { branch, base, source: "explicit" | "detected" | "fallback", detectedVia?: "forkPoint" | "upstream", fallback, missing, stale, fileError?: string, suggestions: { forkPoint?: string; upstream?: string; fallback: string } }`.
   - `isRefValid(git, ref): Promise<boolean>`, for the picker's input validation later.
-- `DetectionCache` is `{ key?: string; result?: … }`, a mutable object the caller holds.
-- Run the merge-base/rev-list calls sequentially or with modest parallelism (`Promise.all` over candidates is fine). Keep output order for tie-breaking regardless of completion order.
+- `DetectionCache` is `{ key?: string; total?: number; upstreamHasBase?: boolean; perCandidate: Map<string, { mb: string; distance: number }> }`, a mutable object the caller holds (`createDetectionCache()` export). The per-candidate map is pruned to the current candidate set each call so it never grows.
+- Export pure `parseAheadBehindLines(output, currentBranch): { name, sha, ahead, behind }[]` and unit-test it.
+- The older-git path may use `Promise.all` over candidates. Keep output order for tie-breaking regardless of completion order.
 - Detached HEAD (`branch === "HEAD"`): skip the contract file and detection, and return source fallback.
 - `branch === fallback`: read the contract file as usual (an explicit base is honored, never stale), but skip `detectBase` entirely and return source fallback with `base = fallback`.
 - Header comment: one short paragraph on why the base is per-branch and stored under the common dir. No `REQ-*` ids.
@@ -63,6 +65,8 @@ Add a vscode-free module that reads, writes and clears a branch's explicit diff 
 - `%(refname:short)` can be ambiguous (`heads/x`) when a tag shares the name. Pass the candidate's `objectname` sha to `merge-base` instead of the short name, and keep the short name for display and return value.
 - A child branch forked from the current branch that has since gained commits can win detection (graph-symmetric). Accepted and documented in 01_05. Do not add reflog heuristics.
 - Do not import `vscode`.
+- `%(ahead-behind:HEAD)` needs a commit HEAD; detached HEAD and an unborn branch never reach detection (detached is skipped; an unborn HEAD makes for-each-ref fail, which detection treats as no candidates).
+- The current branch is identified by name (the `branch` argument after stripping a leading `heads/`), not by `%(HEAD)`.
 
 ## Verification
 
@@ -84,4 +88,7 @@ Add a vscode-free module that reads, writes and clears a branch's explicit diff 
     - on the fallback branch with an explicit base merged into it, `stale: false`
     - upstream detection where the upstream (`origin/main`) is an ancestor of local `main` gives `detectedVia: "upstream"` and `stale: false`
     - a second call with an unchanged repo reuses the cache (assert by counting `git.run` calls through a wrapping Git)
+    - with 5 local branches, a new commit on HEAD followed by a second call adds no per-branch spawns: the call count is the same as with 1 branch (counting wrapper)
+    - the older-git path (a wrapping Git that rejects any for-each-ref containing `ahead-behind` with `fatal: unknown field name: ahead-behind`) returns the same detections as the modern path for the fork-point, merged-parent and descendant scenarios
+  - `parseAheadBehindLines` parses names containing `/`, drops the current branch, and keeps output order.
 - Run `yarn test`, `yarn lint`, `yarn build`.

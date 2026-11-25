@@ -36,7 +36,7 @@ When the branch's stored or detected base is fully merged into the fallback base
 - `diffBaseUi.ts`:
   - Pure helpers `staleKey(commonDir, branch)` → `${commonDir}\0${branch}`, and `shouldPromptStale(resolution, dismissed: Record<string, string>, key, prompting: ReadonlySet<string>): boolean`. The latter is true iff `resolution.stale && dismissed[key] !== resolution.base && !prompting.has(key)`.
   - `withStaleDismissed(dismissed, key, base)` returns a new record.
-  - Extend `baseStatusPresentation` with an optional `promptOpen: boolean`. When it is true and the resolution is stale, the tint is `warning`, the text is `$(warning) ← <base>`, and the tooltip gets the extra line.
+  - Extend `baseStatusPresentation`'s options (01_02 added `{ mergeBaseFailed? }`) with `promptOpen?: boolean`. When it is true and the resolution is stale, the tint is `warning`, the text is `$(warning) ← <base>`, and the tooltip gets the extra line. A stale resolution without `promptOpen` (answered or dismissed) renders exactly like a non-stale one: `$(git-compare)` text, no tint, no extra line.
 - `extension.ts`:
   - State: `dismissed = workspaceState.get("deltaReview.staleBaseDismissed", {})` and `const stalePrompting = new Set<string>()`.
   - After a successful refresh publish, if `shouldPromptStale`, add the key and re-render the item with `promptOpen`. Then, without awaiting inside refresh, show `showWarningMessage(text, switchLabel, keepLabel, "Choose…")`. Handle the choice:
@@ -61,7 +61,7 @@ When the branch's stored or detected base is fully merged into the fallback base
 - Unit tests in `src/diffBaseUi.test.ts`:
   - `shouldPromptStale` returns false when not stale, when dismissed for the same base, or when already prompting, and true when dismissed for a different base.
   - `withStaleDismissed` is immutable.
-  - The presentation with `promptOpen` has warning tint, warning text and the extra tooltip line.
+  - The presentation with `promptOpen` has warning tint, warning text and the extra tooltip line; the same stale resolution without `promptOpen` has `$(git-compare)` text, tint `none` and no extra line.
 - Run `yarn test`, `yarn lint`, `yarn build`.
 - Notifications cannot be answered headlessly. Verify manually in the dev host (eyeball):
   - Set up a repo with `main` → `feat/a` → `feat/b`, explicit base `feat/a` on `feat/b`, then `git checkout main && git merge --no-ff feat/a && git checkout feat/b`.

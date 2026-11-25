@@ -22,9 +22,10 @@ Document the per-branch diff base:
     - Invalid is treated as absent.
     - Resolution is explicit → detected → `deltaReview.baseBranch` (default `main`).
     - Detection:
-      - Walk local branches in `git for-each-ref refs/heads` order, minus the current branch.
-      - Skip a candidate when `merge-base == HEAD` and its tip `!= HEAD`.
-      - Distance is `rev-list --count <merge-base>..HEAD`. The smallest wins. A tie goes to the fallback name, otherwise the earlier candidate.
+      - One `git for-each-ref --format='%(refname:short) %(objectname) %(ahead-behind:HEAD)' refs/heads` (git >= 2.41) lists local branches in order with `ahead behind`, minus the current branch. Distance is `behind` (commits in HEAD not in the candidate).
+      - Skip a candidate when `behind == 0 && ahead > 0` (descendant), or when `behind == $(git rev-list --count HEAD)` (no common history).
+      - The smallest distance wins. A tie goes to the fallback name, otherwise the earlier candidate.
+      - Older git: per-candidate `merge-base` + `rev-list --count <mb>..HEAD`, same rules.
       - With no candidate, use `@{upstream}` when it does not end with `/<branch>`.
       - On the fallback branch itself, detection is skipped (source fallback).
     - Stale means an explicit or fork-point-detected branch base that is an ancestor of the fallback, on a branch other than the fallback. Upstream-detected bases are never stale.
@@ -68,7 +69,7 @@ Document the per-branch diff base:
   - Fix lines 29 and 74 to say "the branch's diff base".
   - Add `### Diff base` under "How it works", after "Where the state lives":
     - file, resolution and detection rules (point to `src/diffBase.ts`; do not restate the snippet)
-    - the detection cache key
+    - the detection cost (fixed spawn count via `ahead-behind`, older-git per-candidate fallback) and cache keys
     - stale and missing semantics, and the suppression key `deltaReview.staleBaseDismissed`
     - the known limitation that a child branch with newer commits can win detection
   - Add manual-script steps after step 8:
@@ -81,6 +82,7 @@ Document the per-branch diff base:
 ## Gotchas
 
 - The snippet must work in macOS bash 3.2 and zsh: no associative arrays, no `mapfile`.
+- The snippet uses the `ahead-behind` form only and states it needs git >= 2.41; it does not reproduce the older-git fallback.
 - Don't document the extension's internal workspace-state key in the skill. That is DEVELOPMENT.md only.
 - Keep the review-notes skill untouched. It needs no base.
 

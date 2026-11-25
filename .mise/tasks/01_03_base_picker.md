@@ -53,9 +53,11 @@ Let the user set or clear the current branch's diff base from a QuickPick opened
   - Register `deltaReview.useAutomaticBase`: `clearBranchBase` + refresh.
   - Set `baseStatusItem.command = "deltaReview.setBranchBase"`.
   - Set context key `deltaReview.baseMissing` (via `setContext`, like `deltaReview.viewMode` at `:161`) true in the missing path, false otherwise.
+  - Set context key `deltaReview.mergeBaseFailed` true in 01_02's `MergeBaseError` fatal path, false otherwise. The base item keeps `command = "deltaReview.setBranchBase"` there (01_02 keeps it visible), so the picker stays reachable when no merge-base exists.
 - `package.json`:
   - Commands `deltaReview.setBranchBase` (title `Set Diff Base for Branch`, icon `$(git-compare)`) and `deltaReview.useAutomaticBase` (title `Use Automatic Diff Base Detection`).
   - A `viewsWelcome` entry for view `deltaReview`, when `deltaReview.baseMissing`, contents `[Choose a base](command:deltaReview.setBranchBase) or [use automatic detection](command:deltaReview.useAutomaticBase).`
+  - A second `viewsWelcome` entry, when `deltaReview.mergeBaseFailed`, contents `[Choose a base](command:deltaReview.setBranchBase)`.
   - Add `deltaReview.setBranchBase` to the `deltaReview` view's `view/title` overflow (`"group": "base@0"`, no `navigation`), per the mock note that the picker is also reachable from the `···` menu.
 
 ## Gotchas
@@ -76,4 +78,5 @@ Let the user set or clear the current branch's diff base from a QuickPick opened
 - Run `yarn test`, `yarn lint`, `yarn build`.
 - Scripted extension-host check (batch with 01_02's if run together):
   - With an explicit missing base, `executeCommand("deltaReview.useAutomaticBase")` removes `base-<branch>.json`, and `__inspect().base.source` becomes `detected` or `fallback`.
+  - With an explicit base that resolves but shares no history with HEAD (an orphan branch), `__inspect().baseStatus.visible` is true and `baseStatus.command === "deltaReview.setBranchBase"` (add `command` to 01_02's `baseStatus` inspect shape here).
   - The QuickPick itself cannot be driven headlessly. Verify it manually in the dev host (eyeball only): sections, check mark, `Use ref '<typed>'`, invalid ref message.
