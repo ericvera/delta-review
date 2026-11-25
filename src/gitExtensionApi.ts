@@ -12,6 +12,7 @@ export interface GitRepository {
     readonly onDidChange: vscode.Event<void>;
   };
   readonly state: {
+    readonly HEAD?: { readonly name?: string; readonly commit?: string };
     readonly onDidChange: vscode.Event<void>;
   };
 }

@@ -59,6 +59,11 @@ import { createGit, Git } from "./git";
 import { getGitApi, GitRepository } from "./gitExtensionApi";
 import type { HashCacheEntry } from "./hashCache";
 import {
+  createRefreshScheduler,
+  headFingerprint,
+  isSelfWriteEventPath,
+} from "./refreshScheduler";
+import {
   computeReviewModel,
   FileReviewStatus,
   MergeBaseError,
@@ -457,6 +462,7 @@ export const activate = async (
   // Refreshes run concurrently (watcher bursts, repo switches); the generation
   // counter keeps a slow, older computation from overwriting a newer result
   let refreshGeneration = 0;
+  let publishCount = 0;
   // Every write to refs/review/<branch> — user commands and the auto-mark
   // pass below — goes through this one queue. Each mutation is a read of the
   // ref, a change, then a write; two of them overlapping lose one side's
@@ -676,6 +682,7 @@ export const activate = async (
 
       model = computed;
       treeProvider.setModel(model);
+      publishCount += 1;
       // Rebuilt from the model beside the tree, not inside renderNoteThreads:
       // provenance comes from the clusters contract, so it must survive a
       // notes file that fails to load below.
@@ -967,13 +974,15 @@ export const activate = async (
       markReviewed(activeGit, branch, paths),
     );
 
-  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  const scheduleRefresh = (): void => {
-    if (refreshTimer !== undefined) {
-      clearTimeout(refreshTimer);
-    }
-    refreshTimer = setTimeout(() => void refresh(), 400);
-  };
+  const refreshScheduler = createRefreshScheduler({
+    delayMs: 400,
+    maxWaitMs: 1500,
+    run: refresh,
+  });
+  const scheduleRefresh = (): void => refreshScheduler.schedule();
+  context.subscriptions.push(
+    new vscode.Disposable(() => refreshScheduler.cancel()),
+  );
 
   // The active repo can live outside the workspace folders (e.g. a sibling
   // worktree selected in the Source Control view), so the watcher is scoped
@@ -990,11 +999,16 @@ export const activate = async (
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(repoRoot), "**/*"),
     );
+    const onRepoEvent = (uri: vscode.Uri): void => {
+      if (!isSelfWriteEventPath(uri.fsPath)) {
+        scheduleRefresh();
+      }
+    };
     repoWatcherDisposables = [
       watcher,
-      watcher.onDidChange(scheduleRefresh),
-      watcher.onDidCreate(scheduleRefresh),
-      watcher.onDidDelete(scheduleRefresh),
+      watcher.onDidChange(onRepoEvent),
+      watcher.onDidCreate(onRepoEvent),
+      watcher.onDidDelete(onRepoEvent),
     ];
   };
   // The clusters contract lives under the git common dir — event delivery for
@@ -2497,6 +2511,7 @@ export const activate = async (
             command: baseStatusItem.command,
           },
           treeMessage: treeView.message,
+          publishCount,
         };
       }),
     );
@@ -2518,13 +2533,21 @@ export const activate = async (
           : undefined;
       void setActiveRepo(active?.rootUri.fsPath);
     };
+    const lastHead = new Map<GitRepository, string>();
     const trackRepository = (repository: GitRepository): void => {
+      lastHead.set(repository, headFingerprint(repository.state.HEAD));
       repoListeners.set(repository, [
         repository.ui.onDidChange(syncActiveRepo),
-        // HEAD/index/ref changes (branch switch, commit, fetch) live outside
-        // the worktree in linked worktrees, so the file watcher misses them
+        // HEAD changes (branch switch, commit) live outside the worktree in
+        // linked worktrees, so the file watcher misses them. Other state
+        // events are skipped: our own review-ref writes fire them too.
         repository.state.onDidChange(() => {
-          if (repository.rootUri.fsPath === git?.repoRoot) {
+          if (repository.rootUri.fsPath !== git?.repoRoot) {
+            return;
+          }
+          const fingerprint = headFingerprint(repository.state.HEAD);
+          if (fingerprint !== lastHead.get(repository)) {
+            lastHead.set(repository, fingerprint);
             scheduleRefresh();
           }
         }),
@@ -2539,6 +2562,7 @@ export const activate = async (
           disposable.dispose();
         }
         repoListeners.delete(repository);
+        lastHead.delete(repository);
         syncActiveRepo();
       }),
       new vscode.Disposable(() => {
