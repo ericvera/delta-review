@@ -22,12 +22,13 @@ yarn install-ext
 
 The **Delta Review** panel lives in the Source Control sidebar:
 
-- Files changed vs the base branch appear under **Needs Review** / **Reviewed**.
+- Files changed vs the branch's diff base appear under **Needs Review** / **Reviewed**.
+- The diff base is per branch, shared by every worktree on it: the branch's parent when it can be detected, else `deltaReview.baseBranch`. The status bar shows it (`← feat/parent`); click it, or run `Delta Review: Set Diff Base for Branch`, to pick another or return to automatic detection. When the parent is merged, Delta Review offers to switch to the fallback base.
 - Click a file to open its review diff — against the merge base, or against your last-reviewed version if you've reviewed it before.
 - Moved files show as one row at the new path saying where they came from — `← src/old`, or `← [donor-app] src/telemetry` when the file was ported in from another project — with the full origin in the row's tooltip.
 - The word on that row says whether the file changed: `unchanged` / `adapted` since you last reviewed it (at its old path too, for a rename), or — never reviewed — `verbatim` / `adapted` on the way in. The diff opens against your last-reviewed version when there is one, else the original content while it's still reachable, so a copied-and-tweaked file shows only the tweak.
 - Code carved out of a bigger file reads the same way, down to the lines it came from (`← big.ts:120-180`): the diff's left side is that region alone, so an extracted file shows as identical instead of as a wall of new code.
-- Hover a row: `+` marks reviewed; `−` clears the review snapshot for everything in its scope, so those files diff against the base branch again. Group headers, folders (in tree mode) and cluster headers cover everything inside, and `−` shows wherever the scope still holds a snapshot — including a file that changed since you reviewed it and is back under Needs Review.
+- Hover a row: `+` marks reviewed; `−` clears the review snapshot for everything in its scope, so those files diff against the diff base again. Group headers, folders (in tree mode) and cluster headers cover everything inside, and `−` shows wherever the scope still holds a snapshot — including a file that changed since you reviewed it and is back under Needs Review.
 - `−` on the **Reviewed** header clears all review state on the branch, snapshots for files no longer in the review set included.
 - The Source Control icon badge and the status bar (`Review 7/23`) show how many files are left.
 - Command palette: `Delta Review: Clear Review State`.
@@ -102,7 +103,7 @@ REVIEW NOTES view:
 
 ## Settings
 
-- `deltaReview.baseBranch` — branch the review set is computed against (default `main`).
+- `deltaReview.baseBranch` — fallback base for a branch with no explicit or auto-detected base (default `main`).
 - `deltaReview.autoReview.globs` — glob patterns for mechanical files to auto-review (e.g. `**/*.lock`, `dist/**`); default `[]`.
 - `deltaReview.autoReview.markAutomatically` — auto files mark themselves as reviewed when they change; default `false`.
 

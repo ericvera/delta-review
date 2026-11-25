@@ -26,7 +26,7 @@ Review state is **content, not a flag**. Marking a file reviewed snapshots its c
 
 - working tree content == reviewed snapshot → **Reviewed**
 - snapshot exists but differs → **Needs Review**, and the diff opens against the snapshot (the delta since last review)
-- no snapshot → **Needs Review**, diff opens against the merge base with the base branch
+- no snapshot → **Needs Review**, diff opens against the merge base with the branch's diff base
 - moved file (git rename, or a declared `repo` move that won precedence) with no snapshot of its own → inherits the snapshot at its old path (`selectReviewSnapshot`, `src/model.ts`): the diff opens against it (`last reviewed ↔ working tree`), yet the file stays **Needs Review** until marked, since status reads the own snapshot only and a mark writes the new path only. An own snapshot outranks the inherited one; an inherited one outranks every other base. Not inherited when the move is `external`; it declares `fromLines`; another whole-file move shares its `from` (extractions naming it do not count; none of the whole-file moves inherits, so unmarking one never deletes a key a sibling relies on); the old path still exists on disk under its exact-case name, in the review set or not (a case-only rename counts as deleted, on a case-insensitive filesystem too); the old path is still its own row and exists on disk (a row that is only the old path's deletion, an overwrite, does not block it); or the old-path snapshot is the deleted sentinel with no pre-deletion snapshot behind it. Marking the origin's deletion row keeps the inheritance: the destination diffs against the snapshot the origin held before (`originSnapshotSha`, `src/model.ts`) and stays **Needs Review**, while the deletion row reads **Reviewed**. Unmarking the moved file drops the old path's snapshot too.
 
 Because the state is content-based, it survives rebases, amends, and commits — nothing "resets" unless the file content actually changes.
@@ -65,13 +65,30 @@ git ls-tree refs/review-slices/<branch> # origin slices anchored for declared ex
 git ls-tree -r refs/review-predeletion/<branch> # snapshots paths held before their deletion was marked
 ```
 
+### Diff base
+
+Each branch has its own base (`src/diffBase.ts`; contract and resolution snippet in the clusters skill's **Diff base**):
+
+- File: `<common dir>/delta-review/base-<sanitized-branch>.json`, `{ "version": 1, "branch", "base" }`, written atomically by the picker (`writeBranchBase`) and deleted by **Use Automatic Diff Base Detection** (`clearBranchBase`, which leaves a file owned by another branch in place). Invalid, or `branch` other than the current branch (a sanitization collision), reads as absent. A leading `heads/` from `rev-parse --abbrev-ref HEAD` is stripped first.
+- Resolution (`resolveDiffBase`): explicit → detected (fork point, then upstream) → `deltaReview.baseBranch`. Detection rules: `detectBase`, `parseBranchReflog`, `isEligibleCandidate`, `pickDetectedBase`.
+- Cost: a fixed spawn count per refresh — one `for-each-ref` with `%(ahead-behind:HEAD)` (git >= 2.41), `rev-list --count HEAD`, one `reflog show`, one capped `--contains` `for-each-ref`, `rev-parse @{upstream}` and the upstream `merge-base`. Older git falls back to a `merge-base` plus `rev-list --count` per candidate.
+- Cache (`DetectionCache`): keyed by the branch listing output (shas and ahead/behind), the upstream and the fallback; total, reflog, `containing` and upstream eligibility are reused while the key holds. Legacy per-candidate results key on `<candidate sha> <HEAD sha>`; the stale check keys on `<base sha> <fallback sha>`. Switching repos resets it.
+- Stale: an explicit or fork-point-detected base that is a branch, an ancestor of the fallback, and off the fallback's first-parent chain (merged by a merge commit), on a branch other than the fallback. Upstream-detected bases are never stale. A stale base prompts Switch / Keep / Choose…; Keep (or dismissing) records the base in workspace state `deltaReview.staleBaseDismissed`, keyed by `<common dir>\0<branch>`, and the prompt does not return until the base changes.
+- Missing: an explicit base that does not resolve. The tree shows a message with Choose a base / use automatic detection links and the status item turns error-tinted.
+- Known limitations:
+  - Without a reflog, or when every own commit a child holds is older than the 32 newest, a child branch can win detection.
+  - A branch created at a commit this branch only fast-forwarded or reset to is not recognized as own.
+  - Same-commit candidates are told apart only by `creationRef`.
+  - Without a reflog a brand-new branch picks a farther ancestor until its first commit.
+  - A base fast-forwarded into the fallback is never flagged stale.
+
 ### Repository selection
 
 Delta Review follows the repository selected in the Source Control view — the same selection that drives the built-in CHANGES panel. Switching to another repository or git worktree retargets the review set to that checkout (the panel header shows which one is active). If the built-in git extension is disabled, it falls back to the first workspace folder's repo. Review state is per-branch and lives in the shared `.git`, so it travels with a branch across worktrees.
 
 ### File status letters
 
-Files carry `M`/`A`/`D`/`R` letters and colors like the CHANGES view — computed relative to `merge-base(baseBranch, HEAD)`, not HEAD, so committed changes still show. Untracked files are included.
+Files carry `M`/`A`/`D`/`R` letters and colors like the CHANGES view — computed relative to the merge base of the branch's diff base and HEAD, not HEAD, so committed changes still show. Untracked files are included.
 
 Moves reach the model from two sources, made indistinguishable downstream by `adjustReviewSetForMoves` (`src/model.ts`):
 
@@ -252,7 +269,7 @@ throwaway verification harnesses (session scratchpad), not shipped tests.
 
 Basics (no contract, default settings):
 
-1. In the dev host, open a repo with changes vs `main`. The panel lists them under Needs Review.
+1. In the dev host, open a repo on a branch created from `main`, with changes. The panel lists them under Needs Review.
 2. Click a file → diff is _merge base ↔ working tree_.
 3. Click its `+` → it moves to Reviewed; status bar count updates.
 4. Edit the file → it moves back to Needs Review, and its diff is now _last reviewed ↔ working tree_ (only the new edit). The row now offers `−` alongside `+`: press `−` → the snapshot is dropped and the diff is _merge base ↔ working tree_ again.
@@ -260,6 +277,11 @@ Basics (no contract, default settings):
 6. Commit / rebase — review state is unaffected (content-based).
 7. Tree/list toggle, folder `+`/`−` (a Needs Review folder offers `−` too, once a child holds a snapshot), collapse state surviving reload, and repo switching in Source Control all behave as before.
 8. Branch-wide reset: mark several files reviewed, then edit each of them → they all read Needs Review with delta diffs, and the **Reviewed** header shows `0` while still offering `−`. Press it → `git ls-tree -r refs/review/<branch>` prints nothing, every one of those files diffs _merge base ↔ working tree_ again, and `git log refs/review/<branch>` still lists the earlier sessions under the empty state.
+   8a. **Base status item**: on a branch created from `main` with no base file, the status bar reads `$(git-compare) ← main`, tooltip `Delta Review base: main (auto-detected)` / `Closest local branch this branch forked from.`. Delete every other local branch and set an upstream on another remote branch → `(auto-detected)` / `Upstream of this branch (<upstream>).`. Check out `main` itself → `Delta Review base: main (default)` / `From setting deltaReview.baseBranch.`.
+   8b. **Pick a base**: click the item and pick another local branch → `.git/delta-review/base-<sanitized-branch>.json` holds `{"version": 1, "branch": "<branch>", "base": "<picked>"}`, the view refreshes against the new merge base, and the tooltip reads `Delta Review base: <picked>` / `Set for branch <branch> (all worktrees on this branch).`.
+   8c. **Use automatic detection**: pick it from the same picker (or run `Use Automatic Diff Base Detection`) → the file is deleted and the item returns to the auto-detected base.
+   8d. **Merged parent**: stack `feat/b` on `feat/a`, pick `feat/a` as its base (8b), then `git merge --no-ff feat/a` into `main` → on `feat/b` a warning `Base feat/a is fully merged into main. Switch the diff base for feat/b to main?` offers `Switch to main` / `Keep feat/a` / `Choose…`, and the item shows `$(warning)` with a warning tint while it is open. `Keep feat/a` writes the base file and the prompt does not return on later refreshes or reloads.
+   8e. **Missing base**: hand-write a base file naming a ref that does not exist → the tree shows `Choose a base` / `use automatic detection` links, and the item reads `$(warning) ← <ref>` with an error tint and tooltip `Base <ref> not found. Click to choose a base.`.
 
 Moves:
 

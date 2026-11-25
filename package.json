@@ -668,7 +668,7 @@
         "deltaReview.baseBranch": {
           "type": "string",
           "default": "main",
-          "description": "Branch the review set is computed against (merge-base with HEAD)."
+          "description": "Fallback diff base for a branch with no explicit or auto-detected base (merge-base with HEAD)."
         },
         "deltaReview.autoReview.globs": {
           "type": "array",
