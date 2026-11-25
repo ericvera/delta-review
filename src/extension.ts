@@ -52,7 +52,7 @@ import {
 } from "./model";
 import { buildDiffTitle, buildRowDescription } from "./moveDisplay";
 import type { NoteDocument, ResponsesFile } from "./notes";
-import { clusterNotesDocumentLabel } from "./notesGrouping";
+import { documentNoteGroupLabel } from "./notesGrouping";
 import {
   noteAnchorLines,
   NoteTarget,
@@ -213,8 +213,9 @@ export const activate = async (
   const notesTreeProvider = new NotesTreeProvider(
     (key) => collapsed.has(key),
     isUnread,
-    (file) =>
-      clusterNotesDocumentLabel(
+    (document, file) =>
+      documentNoteGroupLabel(
+        document,
         file,
         clusterModel?.clusters.map((cluster) => cluster.label) ?? [],
       ),

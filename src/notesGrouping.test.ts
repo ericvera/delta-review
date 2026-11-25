@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Note } from "./notes";
 import type { NoteThread } from "./noteThreads";
 import {
-  clusterNotesDocumentLabel,
+  documentNoteGroupDescription,
+  documentNoteGroupLabel,
   groupNoteThreads,
   notesGroupCollapseKey,
 } from "./notesGrouping";
@@ -63,6 +64,30 @@ describe("groupNoteThreads", () => {
     ]);
   });
 
+  it("orders a branch group before cluster notes groups and code groups", () => {
+    const groups = groupNoteThreads([
+      thread({ id: "code", file: "aaa.ts" }),
+      thread({ id: "cluster", file: "aaa.md", document: "clusterNotes" }),
+      thread({ id: "branch", file: "zzz.md", document: "branch" }),
+    ]);
+    expect(summary(groups)).toEqual([
+      { document: "branch", file: "zzz.md", ids: ["branch"] },
+      { document: "clusterNotes", file: "aaa.md", ids: ["cluster"] },
+      { document: undefined, file: "aaa.ts", ids: ["code"] },
+    ]);
+  });
+
+  it("keeps a branch note and a cluster note with the same file apart", () => {
+    const groups = groupNoteThreads([
+      thread({ id: "cluster", file: "branch.md", document: "clusterNotes" }),
+      thread({ id: "branch", file: "branch.md", document: "branch" }),
+    ]);
+    expect(summary(groups)).toEqual([
+      { document: "branch", file: "branch.md", ids: ["branch"] },
+      { document: "clusterNotes", file: "branch.md", ids: ["cluster"] },
+    ]);
+  });
+
   it("sorts threads within a group by current start line", () => {
     const groups = groupNoteThreads([
       thread({ id: "late", currentStartLine: 20 }),
@@ -75,28 +100,59 @@ describe("groupNoteThreads", () => {
   });
 });
 
-describe("clusterNotesDocumentLabel", () => {
+describe("documentNoteGroupLabel", () => {
   it("names the matching cluster", () => {
-    expect(clusterNotesDocumentLabel("api-layer.md", ["UI", "API layer"])).toBe(
-      "API layer — notes",
-    );
+    expect(
+      documentNoteGroupLabel("clusterNotes", "api-layer.md", [
+        "UI",
+        "API layer",
+      ]),
+    ).toBe("API layer — notes");
   });
 
   it("takes the first label when two share a slug", () => {
     expect(
-      clusterNotesDocumentLabel("api-layer.md", ["API layer", "api: layer"]),
+      documentNoteGroupLabel("clusterNotes", "api-layer.md", [
+        "API layer",
+        "api: layer",
+      ]),
     ).toBe("API layer — notes");
   });
 
   it("falls back to the file name when no label matches", () => {
-    expect(clusterNotesDocumentLabel("api-layer.md", ["UI"])).toBe(
+    expect(documentNoteGroupLabel("clusterNotes", "api-layer.md", ["UI"])).toBe(
       "api-layer.md",
     );
-    expect(clusterNotesDocumentLabel("api-layer.md", [])).toBe("api-layer.md");
+    expect(documentNoteGroupLabel("clusterNotes", "api-layer.md", [])).toBe(
+      "api-layer.md",
+    );
+  });
+
+  it("labels a branch group Branch overview regardless of cluster labels", () => {
+    expect(documentNoteGroupLabel("branch", "branch.md", ["branch"])).toBe(
+      "Branch overview",
+    );
+    expect(documentNoteGroupLabel("branch", "branch.md", [])).toBe(
+      "Branch overview",
+    );
   });
 
   it("never matches a label whose slug is empty", () => {
-    expect(clusterNotesDocumentLabel(".md", [""])).toBe(".md");
+    expect(documentNoteGroupLabel("clusterNotes", ".md", [""])).toBe(".md");
+  });
+});
+
+describe("documentNoteGroupDescription", () => {
+  it("describes a branch overview group", () => {
+    expect(documentNoteGroupDescription("branch", 3)).toBe(
+      "branch overview · 3",
+    );
+  });
+
+  it("describes a cluster notes group", () => {
+    expect(documentNoteGroupDescription("clusterNotes", 2)).toBe(
+      "cluster notes · 2",
+    );
   });
 });
 
@@ -109,5 +165,11 @@ describe("notesGroupCollapseKey", () => {
     expect(
       notesGroupCollapseKey({ document: "clusterNotes", file: "api.md" }),
     ).toBe("notes:clusterNotes:api.md");
+  });
+
+  it("namespaces branch group keys", () => {
+    expect(
+      notesGroupCollapseKey({ document: "branch", file: "branch.md" }),
+    ).toBe("notes:branch:branch.md");
   });
 });
