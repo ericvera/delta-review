@@ -3,7 +3,7 @@
 ## What
 
 - The Branch overview document (`<common dir>/delta-review/branch-<sanitized branch>.md`) takes review notes in the source (text) editor, like cluster notes documents already do: `+` gutter over the whole document, multi-line selection drives the range.
-- Cluster notes documents keep taking notes in source mode; a scripted extension-host check confirms both document kinds are commentable when opened through `deltaReview.openDocument` (Open Source).
+- Cluster notes documents keep taking notes in source mode. Document detection compares real paths (symlinks resolved), so a document whose path spelling differs from the git common dir's (e.g. macOS `/var` vs `/private/var`, symlinked checkouts) is still commentable. A scripted extension-host check opens both document kinds through the tree's own path and through the other spelling, and confirms both are commentable.
 - The built-in markdown preview is unchanged: no custom webview, notes are not rendered in the preview.
 - Branch-document notes are stored in the notes file with a new `document` value `"branch"`; the notes file stays at `"version": 2` (no version bump). Existing notes files stay readable.
 - REVIEW NOTES lists branch-document notes in their own group labeled `Branch overview`.
@@ -21,16 +21,17 @@
   - `ReviewDocuments` gains `deltaReviewDir: string` (the `dir` passed to `loadReviewDocuments`) and `branchDocumentFileName: string` (`branchDocumentFileName(branch)`, set even when the file is missing).
   - `type DocumentNoteLocations = Pick<ReviewDocuments, "deltaReviewDir" | "clusterNotesDir" | "branchDocumentFileName">`.
   - `documentNotePath(locations, document, file): string` — `join(clusterNotesDir, file)` for `"clusterNotes"`, `join(deltaReviewDir, file)` for `"branch"`.
-  - `documentNoteRefFor(fsPath, locations, normalizeDir): { document: NoteDocument; file: string } | undefined` — cluster notes doc when `normalizeDir(dirname(fsPath)) === normalizeDir(clusterNotesDir)` and the name matches the cluster pattern; branch doc when the directory equals `normalizeDir(deltaReviewDir)` and the name equals `branchDocumentFileName` (only the current branch's document). `normalizeDir` is injected (the controller passes `(p) => vscode.Uri.file(p).fsPath`) so the module stays vscode-free.
+  - `canonicalDir(path: string): string` — `realpathSync.native(path)`, falling back to `path` when it throws (missing dir).
+  - `documentNoteRefFor(fsPath, locations, normalizeDir): { document: NoteDocument; file: string } | undefined` — returns `undefined` early unless the base name matches the cluster pattern or equals `branchDocumentFileName` (keeps the filesystem call off ordinary files); then cluster notes doc when `normalizeDir(dirname(fsPath)) === normalizeDir(clusterNotesDir)` and the name matches the cluster pattern; branch doc when the directory equals `normalizeDir(deltaReviewDir)` and the name equals `branchDocumentFileName` (only the current branch's document). `normalizeDir` is injected so the module stays vscode-free; the controller passes `(p) => vscode.Uri.file(canonicalDir(p)).fsPath` (realpath both sides, then drive-letter case).
   - Type-only import of `NoteDocument` from `./notes` (notes.ts already value-imports from documents.ts; a type-only import adds no runtime cycle).
 
 ### Plumbing
 
 - `src/noteTarget.ts`: `DocumentNoteTarget` gains `document: NoteDocument`; `noteTargetFor` copies `note.document` into it. The missing-document fallback (creation blob, `kind: "base"`) is unchanged for both kinds.
 - `src/notesStore.ts`: `RefreshOptions.readDocumentContent` becomes `(document: NoteDocument, fileName: string) => Promise<string | undefined>`; `refreshDerived` passes `note.document`.
-- `src/commentController.ts`: the last factory parameter `getClusterNotesDir` becomes `getReviewDocuments: () => ReviewDocuments | undefined`. `clusterNotesFileName` is replaced by `documentNoteRef(uri)` (file scheme only, delegates to `documentNoteRefFor`). It drives `provideCommentingRanges`, `addNote` (stores `document: ref.document`, `file: ref.file`, `side: "working"`), `threadTargetFor` (existence via `documentNotePath`) and `uriForTarget` (`documentNotePath` with `target.document`). New inspection accessor `commentableDocuments(): string[]` — `toString()` of every open text document whose `provideCommentingRanges` result is non-empty.
-- `src/extension.ts`: passes `() => reviewDocuments`; `readDocumentContent(document, fileName)` guards with `isDocumentNoteFileName` and reads `documentNotePath(...)`; `noteTargetUri` and `openDocumentNote` resolve through `documentNotePath`; `__inspect` adds `commentableDocuments`.
-- No realpath canonicalisation: the tree opens documents with the exact path string the controller compares against. If the scripted check shows a cluster notes doc not commentable, the implementer reports it rather than guessing a fix.
+- `src/commentController.ts`: the last factory parameter `getClusterNotesDir` becomes `getReviewDocuments: () => ReviewDocuments | undefined`. `clusterNotesFileName` is replaced by `documentNoteRef(uri)` (file scheme only, delegates to `documentNoteRefFor`). It drives `provideCommentingRanges`, `addNote` (stores `document: ref.document`, `file: ref.file`, `side: "working"`), `threadTargetFor` (existence via `documentNotePath`) and `uriForTarget` (`documentNotePath` with `target.document`). The now-unused `CLUSTER_NOTES_FILE_PATTERN` import goes. New inspection accessor `commentableDocuments(): string[]` — `toString()` of every open text document whose `provideCommentingRanges` result is non-empty.
+- `src/extension.ts`: passes `() => reviewDocuments`; `readDocumentContent(document, fileName)` guards with `isDocumentNoteFileName` and reads `documentNotePath(...)`; `noteTargetUri` and `openDocumentNote` resolve through `documentNotePath`; `__inspect` adds `commentableDocuments`, and each `treeRows` entry gains `commandUri` (`toString()` of the row command's first argument when it is a `vscode.Uri`, else `undefined`) so a harness can open documents through the tree's own path.
+- Comment threads keep attaching to the `documentNotePath` URI (the path the tree opens). A document opened under another spelling of the path gets the `+` gutter, and its notes are saved correctly, but the threads render on the tree-path document.
 
 ### Surfaces
 
@@ -41,7 +42,8 @@
 ### Docs and versions
 
 - `plugin/skills/review-notes/SKILL.md`: the `version`/`document` bullet and Document note bullet cover both values and the branch document path `<COMMON_DIR>/delta-review/<file>`.
-- `DEVELOPMENT.md`: "Notes on cluster notes documents" becomes "Notes on review documents", covering both kinds; the noteTarget paragraph mentions both.
+- `README.md`: the Clusters bullet (notes on cluster notes documents) and the REVIEW NOTES view bullets (which notes come first, where a document note opens) cover the Branch overview.
+- `DEVELOPMENT.md`: "Notes on cluster notes documents" becomes "Notes on review documents", covering both kinds and the realpath comparison; the noteTarget paragraph mentions both; the `__inspect` field list adds `commentableDocuments` and `treeRows.commandUri`.
 - `plugin/.claude-plugin/plugin.json` `0.12.0` → `0.13.0`; `package.json` `0.17.0` → `0.18.0`.
 
 ### Removed
@@ -57,7 +59,7 @@
 
 | Task file | What | Files |
 | --- | --- | --- |
-| `01_01_branch-note-contract.md` | Accept `document: "branch"` in the notes parser; add document-note path/detection helpers and new `ReviewDocuments` fields | `src/notes.ts`, `src/documents.ts` |
-| `01_02_branch-note-plumbing.md` | Make the Branch overview commentable in source mode; route document notes by kind through target, store, controller and extension; add `commentableDocuments` inspection | `src/noteTarget.ts`, `src/notesStore.ts`, `src/commentController.ts`, `src/extension.ts` |
+| `01_01_branch-note-contract.md` | Accept `document: "branch"` in the notes parser; add document-note path/detection helpers (realpath-aware), and new `ReviewDocuments` fields | `src/notes.ts`, `src/documents.ts` |
+| `01_02_branch-note-plumbing.md` | Make the Branch overview commentable in source mode; route document notes by kind through target, store, controller and extension; realpath-aware detection; add `commentableDocuments` and `treeRows.commandUri` inspection | `src/noteTarget.ts`, `src/notesStore.ts`, `src/commentController.ts`, `src/extension.ts` |
 | `01_03_branch-note-surfaces.md` | REVIEW NOTES label/description/order for branch-document notes; Branch overview row tooltip | `src/notesGrouping.ts`, `src/notesTreeProvider.ts`, `src/extension.ts`, `src/treeProvider.ts` |
-| `01_04_branch-note-docs.md` | Update the public notes contract, DEVELOPMENT.md, and bump plugin and extension versions | `plugin/skills/review-notes/SKILL.md`, `DEVELOPMENT.md`, `plugin/.claude-plugin/plugin.json`, `package.json` |
+| `01_04_branch-note-docs.md` | Update the public notes contract, DEVELOPMENT.md, README.md, and bump plugin and extension versions | `plugin/skills/review-notes/SKILL.md`, `DEVELOPMENT.md`, `README.md`, `plugin/.claude-plugin/plugin.json`, `package.json` |

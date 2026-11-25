@@ -14,7 +14,7 @@ Let the notes parser accept notes anchored to the Branch overview document (`"do
 - Delta Review is a VS Code extension. Review notes live in a versioned JSON notes file; `src/notes.ts` is the pure parse/validate layer. A note with a `document` key (version 2 only) is anchored to a markdown document under `<git common dir>/delta-review/` rather than a repo file. Today the only value is `"clusterNotes"` (`src/notes.ts:17`), validated at `src/notes.ts:155-166` with `CLUSTER_NOTES_FILE_PATTERN` from `src/documents.ts:17`.
 - The Branch overview document is `<common dir>/delta-review/branch-<sanitized branch>.md` (`branchDocumentFileName`, `src/documents.ts:22-23`); `sanitizeBranchForFilename` (`src/clusters.ts:234`) maps `[^A-Za-z0-9._-]` to `-`.
 - `loadReviewDocuments(dir, branch, labels)` (`src/documents.ts:48-71`) returns `ReviewDocuments { clusterNotesDir, branchDocument?, clusterNotes }`.
-- Design decisions: the new value does NOT bump the notes file version (stays 2; `notesFileVersion` at `src/notes.ts:368` is unchanged). Branch notes are always `side: "working"`. Only the current branch's document is commentable (detection compares against `branchDocumentFileName`), but the parser validates the file name by pattern only (it has no branch).
+- Design decisions: the new value does NOT bump the notes file version (stays 2; `notesFileVersion` at `src/notes.ts:368` is unchanged). Branch notes are always `side: "working"`. Only the current branch's document is commentable (detection compares against `branchDocumentFileName`), but the parser validates the file name by pattern only (it has no branch). Detection compares real paths: the git common dir path (from `git rev-parse --git-common-dir`, joined onto the repo root, which comes from the git extension API or the workspace folder) and the editor document's path can be different spellings of one directory (macOS `/var` vs `/private/var`, symlinked checkouts); exact `dirname` equality (`src/commentController.ts:204` today) then fails. Task 01_02 wires the normalizer into the comment controller.
 
 ## Guides
 
@@ -31,12 +31,14 @@ In `src/documents.ts`:
 - `ReviewDocuments` gains `deltaReviewDir: string` (the `dir` argument) and `branchDocumentFileName: string` (`branchDocumentFileName(branch)`, set whether or not the file exists). `loadReviewDocuments` fills both.
 - `export type DocumentNoteLocations = Pick<ReviewDocuments, "deltaReviewDir" | "clusterNotesDir" | "branchDocumentFileName">;`
 - `export const documentNotePath = (locations: DocumentNoteLocations, document: NoteDocument, file: string): string` — `join(clusterNotesDir, file)` for `"clusterNotes"`, `join(deltaReviewDir, file)` for `"branch"`.
+- `export const canonicalDir = (path: string): string` — `realpathSync.native(path)` (from `node:fs`), returning `path` unchanged when it throws (missing directory). Comment: resolves symlinks so two spellings of one directory compare equal.
 - `export const documentNoteRefFor = (fsPath: string, locations: DocumentNoteLocations, normalizeDir: (path: string) => string): { document: NoteDocument; file: string } | undefined`:
-  - `dir = normalizeDir(dirname(fsPath))`, `name = basename(fsPath)`.
+  - `name = basename(fsPath)`; return `undefined` unless `CLUSTER_NOTES_FILE_PATTERN.test(name)` or `name === locations.branchDocumentFileName` (the caller's normalizer hits the filesystem, and the comment controller calls this for every open file).
+  - `dir = normalizeDir(dirname(fsPath))`.
   - `dir === normalizeDir(locations.clusterNotesDir)` and `CLUSTER_NOTES_FILE_PATTERN.test(name)` → `{ document: "clusterNotes", file: name }`.
   - `dir === normalizeDir(locations.deltaReviewDir)` and `name === locations.branchDocumentFileName` → `{ document: "branch", file: name }`.
   - else `undefined`.
-  - Comment why `normalizeDir` is injected (the caller normalizes drive-letter case via `vscode.Uri.file`, keeping this module vscode-free).
+  - Comment why `normalizeDir` is injected (the caller composes `canonicalDir` with `vscode.Uri.file(...).fsPath` for drive-letter case, keeping this module vscode-free).
 
 In `src/notes.ts`:
 
@@ -47,6 +49,8 @@ In `src/notes.ts`:
 ## Gotchas
 
 - `branch-main.md` also matches `CLUSTER_NOTES_FILE_PATTERN`; the two kinds are told apart by `document` and directory, never by name alone.
+- `canonicalDir` must never throw: the cluster notes dir often does not exist.
+- On macOS `os.tmpdir()` is itself under a symlink (`/var` → `/private/var`); in tests build both spellings explicitly (a `symlinkSync` alias of a `mkdtempSync` dir) rather than relying on that.
 - Keep the type-only import (`import type`) to avoid a runtime import cycle.
 - Existing tests assert the old `"document" must be "clusterNotes"` message (`src/notes.test.ts:113-118`); update them to the new message.
 - Any existing test constructing a `ReviewDocuments` literal must gain the two new fields (grep `clusterNotesDir:` in `src/*.test.ts`).
@@ -55,4 +59,4 @@ In `src/notes.ts`:
 
 - Run `yarn lint`, `yarn build`, `yarn test`.
 - Write in `src/notes.test.ts` (describe "parseNotesFile document notes"): parses a version 2 `document: "branch"` note with `file: "branch-feat-x.md"`; rejects a branch note whose file is a cluster-style or traversal name (`"notes.md"`, `"../branch-x.md"`, `"branch-a/b.md"`) with the branch message; rejects a base-side branch note; unknown `document` value yields the new message; `notesFileVersion` is 2 for a file holding only a branch note.
-- Write in `src/documents.test.ts`: `BRANCH_DOCUMENT_FILE_PATTERN` accepts `branch-feat-x.md`, `branch-Release_1.2.md`, rejects `branch-.md`, `branch-a/b.md`, `branch-x.txt`; `isDocumentNoteFileName` per kind; `documentNotePath` per kind; `documentNoteRefFor` returns the cluster ref, the branch ref, `undefined` for another branch's document, `undefined` for a cluster-pattern file directly in the delta-review dir, and uses `normalizeDir` (e.g. a lowercasing normalizer matches differently-cased dirs); `loadReviewDocuments` returns `deltaReviewDir` and `branchDocumentFileName` (also when the branch document is missing).
+- Write in `src/documents.test.ts`: `BRANCH_DOCUMENT_FILE_PATTERN` accepts `branch-feat-x.md`, `branch-Release_1.2.md`, rejects `branch-.md`, `branch-a/b.md`, `branch-x.txt`; `isDocumentNoteFileName` per kind; `documentNotePath` per kind; `documentNoteRefFor` returns the cluster ref, the branch ref, `undefined` for another branch's document, `undefined` for a cluster-pattern file directly in the delta-review dir, and uses `normalizeDir` (e.g. a lowercasing normalizer matches differently-cased dirs); `loadReviewDocuments` returns `deltaReviewDir` and `branchDocumentFileName` (also when the branch document is missing); `canonicalDir` returns the real path for a symlinked dir and the input unchanged for a missing path; `documentNoteRefFor` with `canonicalDir` as the normalizer matches a document opened through a symlinked alias of the delta-review dir (both kinds), and matches when the locations use the alias and the document path uses the real dir. The symlink tests create a temp dir with `mkdtempSync`, `symlinkSync(realDir, aliasPath, "dir")`, and clean up in `afterEach`.
