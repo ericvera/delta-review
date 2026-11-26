@@ -11,8 +11,9 @@ description: >-
   or update Delta Review clusters, or at the end of a coding task when the
   user wants the change broken down for review, or when the user or a
   calling skill supplies its own rules for grouping, file order, review
-  levels, notes or notes documents (`/delta:cluster <guidance>`). Requires a
-  git repository with a feature branch.
+  levels, notes or notes documents (`/delta:cluster <guidance>`), or to set
+  or check the branch's Delta Review diff base (e.g. after creating a stacked
+  branch). Requires a git repository with a feature branch.
 ---
 
 # Cluster

@@ -11,6 +11,7 @@ import {
   detectBase,
   isEligibleCandidate,
   isRefValid,
+  listLocalBranches,
   parseAheadBehindLines,
   parseBaseFile,
   parseBranchReflog,
@@ -494,6 +495,12 @@ describe("heads/ prefix", () => {
     await run(git, "switch", "-q", "-c", "feat/b", "refs/heads/main");
     await commit(git, "b1");
     expect(await detect(git, "feat/b")).toBe("main");
+  });
+
+  it("lists tag-shadowed branches by their bare names", async () => {
+    await run(git, "branch", "feat/a");
+    await run(git, "tag", "feat/a");
+    expect((await listLocalBranches(git)).sort()).toEqual(["feat/a", "main"]);
   });
 
   it("excludes a tag-shadowed current branch", async () => {

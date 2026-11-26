@@ -83,6 +83,65 @@ describe("escapeHtml", () => {
   });
 });
 
+// Runs the tab's script against stand-in elements for every tag in the page
+// that carries attributes, then clicks each one and returns the actions posted.
+const clickEveryElement = (html: string): string[] => {
+  const script = /<script nonce="[^"]*">([\s\S]*)<\/script>/.exec(html)?.[1];
+  expect(script).toBeDefined();
+  const elements = [
+    ...html.matchAll(/<[a-z]+((?:\s+[a-z-]+="[^"]*")+)\s*\/?>/g),
+  ].map((match) => {
+    const attributes = Object.fromEntries(
+      [...match[1]!.matchAll(/([a-z-]+)="([^"]*)"/g)].map((a) => [
+        a[1]!,
+        a[2]!,
+      ]),
+    );
+    const dataset: Record<string, string> = {};
+    for (const [name, value] of Object.entries(attributes)) {
+      if (name.startsWith("data-")) {
+        dataset[name.slice(5)] = value;
+      }
+    }
+    const listeners: (() => void)[] = [];
+    return {
+      attributes,
+      dataset,
+      listeners,
+      addEventListener: (_: string, fn: () => void) => listeners.push(fn),
+    };
+  });
+  const posted: string[] = [];
+  const document = {
+    getElementById: () => null,
+    querySelectorAll: (selector: string) => {
+      const required = [...selector.matchAll(/\[([a-z-]+)\]/g)].map(
+        (m) => m[1]!,
+      );
+      return elements.filter((el) =>
+        required.every((name) => name in el.attributes),
+      );
+    },
+  };
+  const acquireVsCodeApi = () => ({
+    getState: () => undefined,
+    setState: () => undefined,
+    postMessage: (message: { type: string }) => posted.push(message.type),
+  });
+  const window = { addEventListener: () => undefined };
+  new Function("document", "acquireVsCodeApi", "window", script!)(
+    document,
+    acquireVsCodeApi,
+    window,
+  );
+  for (const el of elements) {
+    for (const listener of el.listeners) {
+      listener();
+    }
+  }
+  return posted;
+};
+
 describe("renderGeneralNoteHtml", () => {
   it("keeps a script in the note text inert", () => {
     const html = renderGeneralNoteHtml(
@@ -90,6 +149,20 @@ describe("renderGeneralNoteHtml", () => {
     );
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)");
+  });
+
+  it("does not wire up action elements a note body injects", () => {
+    const html = renderGeneralNoteHtml(
+      input({
+        bodiesHtml: [
+          '<p>x</p><button data-action="delete" data-control="guess">Delete</button>',
+          "<p>second</p>",
+        ],
+      }),
+    );
+    expect(clickEveryElement(html).sort()).toEqual(
+      ["resolve", "delete"].sort(),
+    );
   });
 
   it("escapes the branch", () => {

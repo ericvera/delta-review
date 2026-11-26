@@ -122,12 +122,16 @@ const statusColor = (status: ThreadStatus, unread: boolean): string => {
   }
 };
 
+// Rendered note bodies pass raw HTML through, so a body could carry its own
+// `data-action` element. Only elements stamped with this render's nonce are
+// wired up, which a note body cannot know in advance.
 const button = (
+  nonce: string,
   action: GeneralNoteMessageType,
   label: string,
   kind: "primary" | "secondary" | "link",
 ): string =>
-  `<button type="button" class="${kind}" data-action="${action}">${escapeHtml(label)}</button>`;
+  `<button type="button" class="${kind}" data-action="${action}" data-control="${escapeAttribute(nonce)}">${escapeHtml(label)}</button>`;
 
 const styles = `
 body { background: var(--vscode-editor-background); color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); padding: 12px 20px; }
@@ -163,13 +167,15 @@ button.link { background: none; color: var(--vscode-descriptionForeground); padd
 button.link:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 `;
 
-const script = `
+const script = (nonce: string): string => `
 const vscode = acquireVsCodeApi();
 const box = document.getElementById("text");
 const saved = vscode.getState();
 if (box && saved && typeof saved.text === "string") { box.value = saved.text; }
 if (box) { box.addEventListener("input", () => vscode.setState({ text: box.value })); }
-for (const el of document.querySelectorAll("[data-action]")) {
+const control = ${JSON.stringify(nonce)};
+for (const el of document.querySelectorAll("[data-action][data-control]")) {
+  if (el.dataset.control !== control) { continue; }
   el.addEventListener("click", () => {
     const type = el.dataset.action;
     if (type === "reply" || type === "add") {
@@ -205,7 +211,7 @@ const page = (
 </head>
 <body>
 ${content}
-<script nonce="${escapeAttribute(input.nonce)}">${script}</script>
+<script nonce="${escapeAttribute(input.nonce)}">${script(input.nonce)}</script>
 </body>
 </html>`;
 };
@@ -216,7 +222,7 @@ const draftContent = (input: GeneralNoteHtmlInput): string => `
 <div class="thread">
 <div class="reply">
 <textarea id="text" placeholder="What should the agent look at?"></textarea>
-<div class="buttons">${button("cancel", "Cancel", "secondary")}${button("add", "Add Note", "primary")}</div>
+<div class="buttons">${button(input.nonce, "cancel", "Cancel", "secondary")}${button(input.nonce, "add", "Add Note", "primary")}</div>
 </div>
 </div>`;
 
@@ -237,11 +243,12 @@ const noteContent = (
     })
     .join("\n");
   const footer =
-    (input.unread ? button("markRead", "Mark Read", "secondary") : "") +
-    button("reply", "Reply", "primary");
+    (input.unread
+      ? button(input.nonce, "markRead", "Mark Read", "secondary")
+      : "") + button(input.nonce, "reply", "Reply", "primary");
   return `
 <h1><span class="title">${escapeHtml(firstLine(thread.turns[0]?.text ?? ""))}</span><span class="pill">${escapeHtml(pill)}</span>
-<span class="actions">${resolved ? button("unresolve", "↺ Unresolve", "link") : button("resolve", "✓ Resolve", "link")}${button("delete", "🗑 Delete", "link")}</span></h1>
+<span class="actions">${resolved ? button(input.nonce, "unresolve", "↺ Unresolve", "link") : button(input.nonce, "resolve", "✓ Resolve", "link")}${button(input.nonce, "delete", "🗑 Delete", "link")}</span></h1>
 <div class="meta">General note · branch ${escapeHtml(input.branch)} · created ${escapeHtml(formatCreated(thread.note.createdAt))}</div>
 <div class="thread${input.unread ? " unread" : ""}">
 ${turns}
