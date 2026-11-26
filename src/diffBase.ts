@@ -518,6 +518,21 @@ export const detectBase = async (
   return { forkPoint, upstream, upstreamEligible };
 };
 
+// `lstrip=2` rather than `short`: a branch shadowed by a same-named tag would
+// print as `heads/<name>` and stop matching the branch it names.
+export const listLocalBranches = async (git: Git): Promise<string[]> => {
+  try {
+    const output = await git.run([
+      "for-each-ref",
+      "--format=%(refname:lstrip=2)",
+      "refs/heads",
+    ]);
+    return output.split("\n").filter((line) => line.length > 0);
+  } catch {
+    return [];
+  }
+};
+
 export const isRefValid = async (git: Git, ref: string): Promise<boolean> =>
   ref.length > 0 &&
   !ref.startsWith("-") &&

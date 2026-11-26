@@ -99,7 +99,7 @@ Agent loop:
 REVIEW NOTES view:
 
 - A sibling section in the Source Control sidebar lists every note, grouped by file with status icons. General notes come first, under `General notes`; within a file group, file notes (marked `file`) precede line notes. Branch overview notes follow, under `Branch overview`, then cluster notes document notes, under `<cluster label> — notes`.
-- Click a note to open its diff with the cursor on the noted line and the thread expanded. A review-document note (Branch overview or cluster notes) opens that document (or its snapshot, if the document is gone) at the note instead.
+- Click a note to open its diff with the cursor on the noted line and the thread expanded. A File note opens the diff with its whole-file thread expanded; a General note opens its conversation tab. A review-document note (Branch overview or cluster notes) opens that document (or its snapshot, if the document is gone) at the note instead.
 - The **Clear Resolved** title button clears resolved notes, general notes included (they are archived to `.git/delta-review/archive-<branch>.json` for tooling); the badge counts every note not yet resolved, pending ones included.
 - Notes are per-branch, live inside `.git`, and are never pushed — like all Delta Review state.
 

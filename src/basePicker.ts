@@ -3,6 +3,7 @@ import {
   type BaseResolution,
   clearBranchBase,
   isRefValid,
+  listLocalBranches,
   writeBranchBase,
 } from "./diffBase";
 import { basePickerEntries, type PickerEntry } from "./diffBaseUi";
@@ -48,19 +49,6 @@ const toItem = (entry: PickerEntry): PickerItem => {
         description: "clears the explicit base",
         action: { kind: "automatic" },
       };
-  }
-};
-
-const listLocalBranches = async (git: Git): Promise<string[]> => {
-  try {
-    const output = await git.run([
-      "for-each-ref",
-      "--format=%(refname:short)",
-      "refs/heads",
-    ]);
-    return output.split("\n").filter((line) => line.length > 0);
-  } catch {
-    return [];
   }
 };
 
