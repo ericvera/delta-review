@@ -34,3 +34,7 @@ I am finding that there are some directories that I keep marking reviewed, but n
 - Issue: files matched by `autoReview.globs` (e.g. `.mise/**`) still inflate the badge, status bar `Review x/y` and group counts.
 - Approach: exclude auto-triaged files from those three counts through a pure, tested helper, and update DEVELOPMENT.md; no other UI change.
 - Skips: spec and critic (one module, no API or contract change).
+
+## Amendments
+
+- 2026-11-27 Remove the `deltaReview.autoReview.markAutomatically` setting and the auto-mark behavior it gates (contribution in package.json, the auto-mark code path, docs, tests); first confirm nothing else depends on auto files being marked reviewed (Mark All, notes, Branch overview, bulk actions) and report any dependency instead of removing it — auto files no longer affect counts, so auto-marking is redundant — tasks: next planned id
