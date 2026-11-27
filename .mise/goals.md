@@ -12,3 +12,9 @@ I am finding that there are some directories that I keep marking reviewed, but n
 - Progress: extension has no task/ETA source; reads only git and its own contract files under git common dir (`DEVELOPMENT.md:136`). Existing progress surface: status bar item (`extension.ts:389-393`, text `:576`). Mise state lives in `.mise/` (`goals.md`, `tasks/`, `tasks/done/`); extension never reads it.
 - "aydy" matches nothing in tracked files.
 - Contradiction: goals imply no way to exclude directories; `autoReview.globs` exists — the gap is that excluded files still count in badge, status bar, group counts.
+
+## Open questions
+
+1. How exclusions are declared: reuse `autoReview.globs`, a new setting, or agent-declared in the clusters contract.
+2. How excluded files show in the tree and whether they count anywhere.
+3. Where progress/ETA lives (this extension, mise, or "aydy" — unidentified), and in what form.
