@@ -13,8 +13,12 @@ I am finding that there are some directories that I keep marking reviewed, but n
 - "aydy" matches nothing in tracked files.
 - Contradiction: goals imply no way to exclude directories; `autoReview.globs` exists — the gap is that excluded files still count in badge, status bar, group counts.
 
+## Decisions
+
+- Exclusion is declared by the existing `deltaReview.autoReview.globs` setting (plus linguist-generated `.gitattributes`); no new setting or contract key.
+- Auto-triaged files stop counting toward the tree badge, the status bar `Review x/y`, and group counts. No other display change: the Auto subgroup stays as-is.
+- AYDY is a separate tool (its own repo under ~/Code) that signals when agents are done and sets status on VS Code window tabs.
+
 ## Open questions
 
-1. How exclusions are declared: reuse `autoReview.globs`, a new setting, or agent-declared in the clusters contract.
-2. How excluded files show in the tree and whether they count anywhere.
-3. Where progress/ETA lives (this extension, mise, or "aydy" — unidentified), and in what form.
+1. Whether long-run progress is in this run's scope, given AYDY is a separate repo.
