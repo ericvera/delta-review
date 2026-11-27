@@ -429,7 +429,9 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeEle
       );
       // Count as dim description text — the closest a tree view gets to the
       // CHANGES count pill
-      item.description = String(this.filesWithStatus(element.status).length);
+      item.description = String(
+        this.filesWithStatus(element.status, "normal").length,
+      );
       item.id = `group:${element.status}`;
       item.contextValue =
         element.status === FileReviewStatus.NeedsReview

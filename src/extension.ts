@@ -135,6 +135,7 @@ import {
   withReviewStatus,
 } from "./optimisticModel";
 import { agentLineNoteEntriesFor, provenanceEntriesFor } from "./provenance";
+import { badgeFor, reviewCounts, statusBarText } from "./reviewCounts";
 import {
   clearAllReviewSnapshots,
   deletePreDeletionRef,
@@ -562,18 +563,9 @@ export const activate = async (
         ? undefined
         : resolveClusterModel(clusterContract, next.files);
     treeProvider.setModel(next);
-    const reviewedCount = next.files.filter(
-      (file) => file.status === FileReviewStatus.Reviewed,
-    ).length;
-    const needsReviewCount = next.files.length - reviewedCount;
-    treeView.badge =
-      needsReviewCount > 0
-        ? {
-            value: needsReviewCount,
-            tooltip: `${needsReviewCount} file${needsReviewCount === 1 ? "" : "s"} to review`,
-          }
-        : undefined;
-    statusBarItem.text = `$(checklist) Review ${reviewedCount}/${next.files.length}`;
+    const counts = reviewCounts(next.files);
+    treeView.badge = badgeFor(counts);
+    statusBarItem.text = statusBarText(counts);
     statusBarItem.show();
   };
 
@@ -2904,6 +2896,8 @@ export const activate = async (
             ]),
           ),
           notesBadge: notesTreeView.badge,
+          fileBadge: treeView.badge,
+          statusBarText: statusBarItem.text,
           clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
           treeRows: collectTreeRows(),
           notesRows: collectNotesRows(),
