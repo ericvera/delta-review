@@ -19,6 +19,18 @@ I am finding that there are some directories that I keep marking reviewed, but n
 - Auto-triaged files stop counting toward the tree badge, the status bar `Review x/y`, and group counts. No other display change: the Auto subgroup stays as-is.
 - AYDY is a separate tool (its own repo under ~/Code) that signals when agents are done and sets status on VS Code window tabs.
 
-## Open questions
+- Long-run progress / ETA is dropped from this run (out of scope).
 
-1. Whether long-run progress is in this run's scope, given AYDY is a separate repo.
+## Assumptions
+
+- "Group counts" means the per-group file counts in the tree (`filesWithStatus`); the Auto subgroup row keeps its own count of auto files.
+- Mark All, folder bulk actions and `autoReview.markAutomatically` keep their current behavior.
+- When every non-auto file is reviewed and only auto files remain, the badge is cleared and the status bar shows full progress.
+- The counting logic moves into a pure, VS Code-free helper with a colocated Vitest test; `DEVELOPMENT.md:130` is updated to the new rule.
+- No mock: a count change is not a tree-structure, view, panel or command change under the config's Mock conditions.
+
+## Proposal
+
+- Issue: files matched by `autoReview.globs` (e.g. `.mise/**`) still inflate the badge, status bar `Review x/y` and group counts.
+- Approach: exclude auto-triaged files from those three counts through a pure, tested helper, and update DEVELOPMENT.md; no other UI change.
+- Skips: spec and critic (one module, no API or contract change).
