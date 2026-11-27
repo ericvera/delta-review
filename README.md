@@ -37,7 +37,6 @@ The **Delta Review** panel lives in the Source Control sidebar:
 ### Auto-review
 
 - Files matching `deltaReview.autoReview.globs` (or marked `linguist-generated` in `.gitattributes`) collect in a collapsed **Auto** subgroup with a `+`/`−` on the header to mark or unmark them all at once.
-- Turn on `deltaReview.autoReview.markAutomatically` and they mark themselves as they change — edits are re-marked automatically while the setting is on, still inspectable under Reviewed → Auto. Turn it off and the next edit resurfaces as a delta like any file (marks use the same snapshot mechanism).
 
 ### Cluster with Claude Code
 
@@ -107,7 +106,6 @@ REVIEW NOTES view:
 
 - `deltaReview.baseBranch` — fallback base for a branch with no explicit or auto-detected base (default `main`).
 - `deltaReview.autoReview.globs` — glob patterns for mechanical files to auto-review (e.g. `**/*.lock`, `dist/**`); default `[]`.
-- `deltaReview.autoReview.markAutomatically` — auto files mark themselves as reviewed when they change; default `false`.
 
 ## Development
 

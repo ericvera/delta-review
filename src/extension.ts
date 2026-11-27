@@ -135,6 +135,7 @@ import {
   withReviewStatus,
 } from "./optimisticModel";
 import { agentLineNoteEntriesFor, provenanceEntriesFor } from "./provenance";
+import { badgeFor, reviewCounts, statusBarText } from "./reviewCounts";
 import {
   clearAllReviewSnapshots,
   deletePreDeletionRef,
@@ -531,12 +532,12 @@ export const activate = async (
   // counter keeps a slow, older computation from overwriting a newer result
   let refreshGeneration = 0;
   let publishCount = 0;
-  // Every write to refs/review/<branch> — user commands and the auto-mark
-  // pass below — goes through this one queue. Each mutation is a read of the
-  // ref, a change, then a write; two of them overlapping lose one side's
+  // Every write to refs/review/<branch> — user commands and refresh-time
+  // slice anchoring — goes through this one queue. Each mutation is a read of
+  // the ref, a change, then a write; two of them overlapping lose one side's
   // paths. Only the mutation is queued: refresh() itself must never run
-  // inside it, since the auto-mark pass enqueues from within refresh() and
-  // would deadlock behind a slot the caller is still holding.
+  // inside it, since slice anchoring enqueues from within refresh() and would
+  // deadlock behind a slot the caller is still holding.
   const reviewStateQueue = createSerialQueue();
   // Working-tree content shas kept across refreshes so a refresh only hashes
   // the files that actually moved. Entries are validated by size and mtime, so
@@ -562,18 +563,9 @@ export const activate = async (
         ? undefined
         : resolveClusterModel(clusterContract, next.files);
     treeProvider.setModel(next);
-    const reviewedCount = next.files.filter(
-      (file) => file.status === FileReviewStatus.Reviewed,
-    ).length;
-    const needsReviewCount = next.files.length - reviewedCount;
-    treeView.badge =
-      needsReviewCount > 0
-        ? {
-            value: needsReviewCount,
-            tooltip: `${needsReviewCount} file${needsReviewCount === 1 ? "" : "s"} to review`,
-          }
-        : undefined;
-    statusBarItem.text = `$(checklist) Review ${reviewedCount}/${next.files.length}`;
+    const counts = reviewCounts(next.files);
+    treeView.badge = badgeFor(counts);
+    statusBarItem.text = statusBarText(counts);
     statusBarItem.show();
   };
 
@@ -679,7 +671,7 @@ export const activate = async (
       // cache only once anchored, so a refresh superseded midway leaves no
       // unanchored sha behind for a later one to reuse
       const refreshSliceCache = new Map(sliceCache);
-      let computed = await computeReviewModel(git, baseBranch, {
+      const computed = await computeReviewModel(git, baseBranch, {
         autoReviewGlobs,
         branch,
         moves,
@@ -692,51 +684,10 @@ export const activate = async (
       if (generation !== refreshGeneration) {
         return;
       }
-      // Auto-marking goes through the normal snapshot path (markReviewed), so
-      // a later edit to an auto-marked file resurfaces as a needs-review delta.
-      // It runs before setModel so the tree never flashes "needs review" for
-      // files about to be auto-marked. The ref write may trigger another
-      // refresh via the repo watcher; that one finds nothing left to mark.
-      if (configuration.get<boolean>("autoReview.markAutomatically") === true) {
-        const autoPaths = computed.files
-          .filter(
-            (file) =>
-              file.triage === "auto" &&
-              file.status === FileReviewStatus.NeedsReview,
-          )
-          .map((file) => file.path);
-        if (autoPaths.length > 0) {
-          const gitForAutoMark = git;
-          const autoBranch = computed.branch;
-          await reviewStateQueue.run(() =>
-            markReviewed(gitForAutoMark, autoBranch, autoPaths),
-          );
-          if (generation !== refreshGeneration) {
-            return;
-          }
-          // Same cache instance as the computation above: the auto-mark pass
-          // changes the ref, not the working tree, so this recomputation
-          // re-hashes nothing
-          computed = await computeReviewModel(git, baseBranch, {
-            autoReviewGlobs,
-            branch,
-            moves,
-            notes,
-            lineNotes,
-            levels,
-            hashCache,
-            sliceCache: refreshSliceCache,
-          });
-          if (generation !== refreshGeneration) {
-            return;
-          }
-        }
-      }
       // The slices this model diffs against exist only as loose objects until
       // something points at them, so they are anchored before the model that
-      // names them is published — after the auto-mark recomputation, whose
-      // slice set is the one that counts. Every refresh still current at its
-      // queue slot anchors: an unchanged set costs a temp index and no commit,
+      // names them is published. Every refresh still current at its queue
+      // slot anchors: an unchanged set costs a temp index and no commit,
       // and a ref deleted outside the extension comes back here.
       const gitForAnchor = git;
       const anchorBranch = computed.branch;
@@ -2904,6 +2855,8 @@ export const activate = async (
             ]),
           ),
           notesBadge: notesTreeView.badge,
+          fileBadge: treeView.badge,
+          statusBarText: statusBarItem.text,
           clusterChangesTabs: Object.fromEntries(clusterChangesTabs),
           treeRows: collectTreeRows(),
           notesRows: collectNotesRows(),
