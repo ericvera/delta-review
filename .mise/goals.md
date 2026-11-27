@@ -37,4 +37,4 @@ I am finding that there are some directories that I keep marking reviewed, but n
 
 ## Amendments
 
-- 2026-11-27 Remove the `deltaReview.autoReview.markAutomatically` setting and the auto-mark behavior it gates (contribution in package.json, the auto-mark code path, docs, tests); first confirm nothing else depends on auto files being marked reviewed (Mark All, notes, Branch overview, bulk actions) and report any dependency instead of removing it — auto files no longer affect counts, so auto-marking is redundant — tasks: next planned id
+- 2026-11-27 Remove the `deltaReview.autoReview.markAutomatically` setting and the auto-mark behavior it gates (contribution in package.json, the auto-mark code path, docs, tests); first confirm nothing else depends on auto files being marked reviewed (Mark All, notes, Branch overview, bulk actions) and report any dependency instead of removing it — auto files no longer affect counts, so auto-marking is redundant — tasks: 02_01
